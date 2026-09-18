@@ -1,4 +1,4 @@
-const CACHE="ronn-assets-v10-1-2";
+const CACHE="ronn-assets-r11";
 const ASSETS=["/static/ronn_app_icon.png","/manifest.webmanifest"];
 self.addEventListener("install",event=>{
   event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).catch(()=>{}));
@@ -10,7 +10,6 @@ self.addEventListener("activate",event=>{
 self.addEventListener("fetch",event=>{
   const req=event.request, url=new URL(req.url);
   if(req.method!=="GET")return;
-  // Never cache the app shell or JavaScript. New deploys must take effect immediately.
   if(url.pathname==="/" || url.pathname.endsWith(".js") || url.pathname.endsWith(".css") || url.pathname.startsWith("/api/")){
     event.respondWith(fetch(req,{cache:"no-store"}));
     return;
