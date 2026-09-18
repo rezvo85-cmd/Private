@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/ronn_app_icon.png">
   <title>RONN</title>
-  <link rel="stylesheet" href="/static/style.css?v=RONN-R10-1-WEB-AUTH">
+  <link rel="stylesheet" href="/static/style.css?v=RONN-R10-1-2">
 </head>
 <body>
 <div class="webAuthGate hidden" id="webAuthGate" aria-live="polite">
@@ -268,6 +268,35 @@
   <div class="modalCard"><span class="eyebrow">CONFIRM ACTION</span><h2>Clear this conversation?</h2><p>This removes the messages from this local chat. It does not delete other conversations or project memory.</p><div><button class="ghost" id="cancelClearBtn">Cancel</button><button class="dangerButton" id="confirmClearBtn">Clear conversation</button></div></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="/static/app.js?v=RONN-R10-1-WEB-AUTH"></script>
+<script src="/static/app.js?v=RONN-R10-1-2"></script>
+<script>
+/* RONN_CRITICAL_UI_RESCUE: independent bindings for essential controls.
+   This intentionally does not depend on the optional diagnostics/project UI. */
+(function(){
+  function byId(id){return document.getElementById(id)}
+  function rescue(){
+    if(window.__RONN_UI_READY)return;
+    var input=byId("input"), send=byId("sendBtn"), plus=byId("plusMenu");
+    function fallbackView(name){
+      document.querySelectorAll(".view").forEach(function(v){v.classList.remove("active")});
+      var target=byId(name+"View"); if(target)target.classList.add("active");
+      var family=(name==="memory"||name==="projects")?"projects":(name==="diagnostics"||name==="brain")?"brain":name;
+      document.querySelectorAll(".navBtn").forEach(function(b){b.classList.toggle("active",b.dataset.view===family)});
+    }
+    document.querySelectorAll(".navBtn").forEach(function(b){b.addEventListener("click",function(){if(typeof window.showView==="function")window.showView(b.dataset.view);else fallbackView(b.dataset.view)})});
+    function doSend(){
+      if(typeof window.sendMessage==="function")window.sendMessage(false);
+      else {
+        var t=byId("toast"); if(t){t.textContent="RONN is refreshing its interface. Reload once.";t.classList.add("show")}
+      }
+    }
+    if(send)send.addEventListener("click",doSend);
+    if(input)input.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();doSend()}});
+    var attach=byId("attachBtn"); if(attach)attach.addEventListener("click",function(e){e.stopPropagation();if(plus)plus.classList.toggle("hidden")});
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(rescue,500)});
+  else setTimeout(rescue,500);
+})();
+</script>
 </body>
 </html>
