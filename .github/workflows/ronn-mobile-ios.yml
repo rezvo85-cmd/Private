@@ -19,8 +19,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: RONN_CORE_RENDER_DEPLOY_V1/mobile/package-lock.json
       - run: npm install
       - run: npx expo-doctor
       - run: npx expo export --platform web --output-dir dist
@@ -35,8 +33,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: RONN_CORE_RENDER_DEPLOY_V1/mobile/package-lock.json
       - run: npm install
       - name: Generate native iOS project
         run: npx expo prebuild --platform ios --clean --no-install
