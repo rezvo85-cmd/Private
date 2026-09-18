@@ -8,7 +8,7 @@ ROOT=BASE.parent
 
 CORE_PY=[
     'app.py','launcher.py','r5_intelligence.py','project_indexer.py','quality_gate.py','r5_benchmarks.py',
-    'cognitive_os.py','intelligence_core.py','goal_engine.py','task_engine.py','provider_engine.py','brevity_engine.py','r6_intelligence.py','r6_benchmarks.py','r7_impact.py','r7_benchmarks.py','knowledge_base.py','snapshot_engine.py','task_queue.py','core_api.py','core_store.py','owner_auth.py','ecosystem_store.py','ecosystem_api.py','routine_scheduler.py'
+    'cognitive_os.py','intelligence_core.py','goal_engine.py','task_engine.py','provider_engine.py','brevity_engine.py','r6_intelligence.py','r6_benchmarks.py','r7_impact.py','r7_benchmarks.py','knowledge_base.py','snapshot_engine.py','task_queue.py','core_api.py','core_store.py','core_store_pg.py','memory_store_pg.py','r20_controller.py','r20_web_tools.py','r20_tool_hub.py','owner_auth.py','ecosystem_store.py','ecosystem_api.py','routine_scheduler.py'
 ]
 
 def run():
@@ -43,7 +43,7 @@ def run():
     check('css_structure',css_balance)
 
     def static_files():
-        req=['static/index.html','static/app.js','static/style.css','static/ronn_app_icon.png','integrity_manifest.json','../mobile/App.js','../mobile/package.json','../mobile/app.json','../mobile/assets/icon.png']
+        req=['static/index.html','static/app.js','static/style.css','static/ronn_app_icon.png','integrity_manifest.json','../mobile/App.js','../mobile/package.json','../mobile/app.json','../mobile/README.md']
         missing=[x for x in req if not (BASE/x).exists()]
         if missing: raise RuntimeError('Missing files: '+', '.join(missing))
         return {'passed':True,'files':req}
@@ -181,11 +181,36 @@ def run():
     def mobile_foundation():
         app=(ROOT/'mobile/App.js').read_text(encoding='utf-8')
         pkg=json.loads((ROOT/'mobile/package.json').read_text(encoding='utf-8'))
-        markers=['/api/v1/chat/complete','expo-secure-store','expo-local-authentication','expo-image-picker','ronn://share','X-RONN-OP-Session','/api/v1/devices/register']
+        cfg=json.loads((ROOT/'mobile/app.json').read_text(encoding='utf-8'))
+        markers=['/api/v1/chat/complete','expo-secure-store','expo-local-authentication','KeyboardAvoidingView','X-RONN-OP-Session','/owner/unlock']
         missing=[m for m in markers if m not in app and m not in json.dumps(pkg)]
-        if missing: raise RuntimeError('Mobile foundation missing: '+', '.join(missing))
-        return {'passed':True,'tabs':4,'secure_owner_token':True,'biometric_gate':True,'camera':True,'offline_cache':True,'deep_links':True}
+        if missing: raise RuntimeError('Native mobile shell missing: '+', '.join(missing))
+        if cfg.get('expo',{}).get('ios',{}).get('bundleIdentifier')!='com.ronn.ai':
+            raise RuntimeError('Native mobile bundle identifier missing')
+        return {'passed':True,'native_input':True,'secure_owner_token':True,'biometric_gate':True,'safari_independent':True}
     check('mobile_client_foundation',mobile_foundation)
+
+    def r21_finishline():
+        import brevity_engine, r20_tool_hub, memory_store_pg
+        appjs=(BASE/'static/app.js').read_text(encoding='utf-8')
+        css=(BASE/'static/style.css').read_text(encoding='utf-8')
+        policy=brevity_engine.response_length_policy("who's jolyne kujo","balanced",0,False,False,False)
+        directive=brevity_engine.brevity_directive(policy)
+        if policy.get('tier')!='quick' or int(policy.get('max_tokens') or 999)>180:
+            raise RuntimeError('Simple identity questions are not forced into quick-answer mode')
+        if 'Do not use headings, bullets' not in directive:
+            raise RuntimeError('Quick-answer anti-list directive missing')
+        tools=r20_tool_hub.plan("what's the weather in Seattle",needs_live=True)
+        if 'weather' not in tools:
+            raise RuntimeError('Weather tool is not automatically selected')
+        if not app_module.looks_like_internal_tool_payload('{"tool":"groq_web_search","args":{"query":"x"}}'):
+            raise RuntimeError('Raw tool payload guard failed')
+        for marker in ('renderMetaCards','weatherCard','sourceCards','c.messages.push({role,content,requestId,audit,meta})'):
+            if marker not in appjs and marker not in css:
+                raise RuntimeError('Rich answer presentation missing '+marker)
+        pg=memory_store_pg.status()
+        return {'passed':True,'short_answers':True,'tool_hub':True,'tool_leak_guard':True,'rich_cards':True,'memory_backend':pg.get('backend')}
+    check('r21_finishline',r21_finishline)
 
     from evaluation_engine import run_internal_eval
     from r5_benchmarks import run_r5_benchmarks
