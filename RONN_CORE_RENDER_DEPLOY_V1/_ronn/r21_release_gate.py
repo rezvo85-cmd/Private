@@ -41,7 +41,8 @@ def run():
         mobile=(ROOT/"mobile/App.js").read_text(encoding="utf-8")
         pkg=json.loads((ROOT/"mobile/package.json").read_text(encoding="utf-8"))
         cfg=json.loads((ROOT/"mobile/app.json").read_text(encoding="utf-8"))
-        ok=all(x in mobile for x in ("KeyboardAvoidingView","TextInput","FlatList","/api/v1/chat/complete","X-RONN-OP-Session")) and            "expo-secure-store" in json.dumps(pkg) and cfg.get("expo",{}).get("ios",{}).get("bundleIdentifier")=="com.ronn.ai"
+        api_ok=('const API="https://ronn-core.onrender.com/api/v1"' in mobile and 'API+"/chat/complete"' in mobile)
+        ok=all(x in mobile for x in ("KeyboardAvoidingView","TextInput","FlatList","X-RONN-OP-Session")) and api_ok and "expo-secure-store" in json.dumps(pkg) and cfg.get("expo",{}).get("ios",{}).get("bundleIdentifier")=="com.ronn.ai"
         add("native_mobile_shell",ok,"native input/scroll/auth shell")
     except Exception as exc:
         add("native_mobile_shell",False,str(exc)[:240])
