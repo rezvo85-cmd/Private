@@ -58,6 +58,7 @@ from r19_context import conversation_digest as r19_conversation_digest, evidence
 from r19_training_data import add as r19_training_add, stage as r19_training_stage, promote as r19_training_promote, discard as r19_training_discard, pending_example as r19_training_pending, export as r19_training_export, stats as r19_training_stats
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
 from r20_controller import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
+from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -1197,6 +1198,10 @@ class ThinkFilter:
 def request_payload(model, route, messages, max_tokens, stream=True):
     payload = {"model":model,"messages":messages,"stream":stream,"max_tokens":max_tokens}
 
+    if model in {"groq/compound","groq/compound-mini"}:
+        payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
+        return payload
+
     if model in OR_ENSEMBLE_MODELS:
         payload["temperature"] = 0.45 if model != OR_CRITIC_MODEL else 0.3
         return payload
@@ -1355,6 +1360,9 @@ def minimal_cloud_request(model, messages, max_tokens, stream=True):
         "max_tokens": max_tokens,
         "temperature": 0.5,
     }
+    if model in {"groq/compound","groq/compound-mini"}:
+        payload.pop("temperature", None)
+        payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
     base_url, api_key, provider = provider_for_model(model)
     started=time.time()
     try:
@@ -1781,9 +1789,35 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         _tool_block="RONN REAL TOOL EVIDENCE (actual results from this run; distinguish failures from success):\n"+json.dumps(_real_tool_evidence,ensure_ascii=False)[:50000]
         body.project_context=((body.project_context or "")+"\n\n"+_tool_block).strip()
 
+    _web_research = {}
+    if _r20.get("needs_live") and not body.images:
+        try:
+            yield (json.dumps({"stage":"Searching web"})+"\n").encode()
+            task_checkpoint(request_id, "Web research", "started", "RONN is searching and reading current web sources.")
+            _web_research = r20_web_research(body.message, str(_r20.get("depth") or "smart"))
+            if _web_research.get("evidence"):
+                body.project_context = ((body.project_context or "") + "\n\n" + _web_research["evidence"]).strip()
+                task_checkpoint(
+                    request_id, "Web research", "complete",
+                    f"SearXNG returned {_web_research.get('source_count',0)} sources; Crawl4AI read {_web_research.get('read_count',0)} pages."
+                )
+            else:
+                task_checkpoint(request_id, "Web research", "blocked", "External RONN search services returned no evidence; Compound fallback remains available.")
+        except Exception as _web_exc:
+            _web_research = {"ok":False,"errors":[_web_exc.__class__.__name__],"source_count":0,"read_count":0}
+            try:
+                task_checkpoint(request_id, "Web research", "blocked", "RONN search/reader unavailable; using Compound built-in web tools.")
+            except Exception:
+                pass
+
     messages = build_messages(owner, body, profile, _r20)
     if _r20.get("needs_live"):
-        messages[0]["content"] += "\nFor current or research-dependent claims, use available live tools when useful and ground the answer in retrieved information."
+        messages[0]["content"] += (
+            "\nFor current or research-dependent claims, use retrieved web evidence and available live tools. "
+            "If the supplied evidence is insufficient, search/visit additional sources with the live provider. "
+            "Never expose tool-call JSON, tool names, internal arguments, or hidden reasoning to the user. "
+            "Answer normally and include short source links when they materially support current claims."
+        )
     _length_policy = _r6_preflight.get("brevity", {})
     _base_budget = {"fast":700,"smart":1200,"deep":1800,"apex":2400}.get(str(_r20.get("depth") or "smart"),1200)
     max_tokens = min(_base_budget, int(_length_policy.get("max_tokens") or _base_budget))
@@ -1803,12 +1837,13 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "intent":infer_intent(body.message),
         "cognition":cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile),
         "stages":task_stages(cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile)),
-        "tools_enabled": route in {"live","research","max","tools"},
+        "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
+        "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0)},
         "request_id":request_id,
         "cognitive_os":_os_state,
         "strategy":_strategy,
         "reliability":reliability_flags(body.message, body.files),
-        "evidence_mode":"live" if route in {"live","research","max","tools"} else "model",
+        "evidence_mode":"live" if _r20.get("needs_live") or route in {"live","research","max","tools","r20-current","r20-research"} else "model",
         "response_length":_length_policy,
         "verification_level":"high" if _r20.get("verify") else "standard",
         "preflight":_preflight,
@@ -3047,6 +3082,7 @@ def r19_capabilities_api(request: Request):
       "training":r19_training_stats(owner),
       "model_router":r19_router_report(),
       "central_controller":r20_status(),
+      "web_research_tools":r20_web_status(),
     }
 
 @app.get("/api/r15/cloud")
