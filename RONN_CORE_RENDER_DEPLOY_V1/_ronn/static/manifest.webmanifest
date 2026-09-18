@@ -8,6 +8,17 @@
   "background_color": "#171717",
   "theme_color": "#212121",
   "icons": [
-    {"src":"/static/ronn_app_icon.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+    {
+      "src": "/static/ronn_app_icon.png?v=RONN-R19-LOGO2",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/ronn_logo.svg?v=RONN-R19-LOGO2",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ]
 }

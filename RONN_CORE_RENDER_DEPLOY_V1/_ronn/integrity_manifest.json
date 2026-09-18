@@ -64,7 +64,7 @@
     "_ronn/snapshot_engine.py": "5a7181926dd062146ad1f7b4d08ac31ca2c46e6dc73631a39c78c13b29dce579",
     "_ronn/static/app.js": "325ae662329b0c4219a9872f5d9e8e1097412e90ad3d8c89ebeaf55342cd7813",
     "_ronn/static/index.html": "1ff1c96f5c9911cea9410cb497eb662a882b0bf5d854dde93c735507bf1c24f3",
-    "_ronn/static/ronn_app_icon.png": "697e3d74581df30bfc97d4a85e925a1762eb6112ca8b52325db8fa6d38634f46",
+    "_ronn/static/ronn_app_icon.png": "1115e7eae139398a26c235bb5c6a8000a6c86c316f0e5b07936c2fa3a860eb91",
     "_ronn/static/style.css": "cb334b56b8aeec274f5ffc4441ecec4b16c1a40dd8bf06bd80f56d24f44b8704",
     "_ronn/task_engine.py": "3adeeedc78cae82e3d5ac376d5d91186dd250a99eb94473ab280f8b16e277499",
     "_ronn/task_queue.py": "575e02512bc01073e6ebdd5a060e940a18798ce727d5bc6450de51a7f13ebf9b",
@@ -74,6 +74,9 @@
     "mobile/app.json": "a204ceb5bf34eda4382b36d542442bd93eea54e8b37a99d705dd880bb143f5ae",
     "mobile/assets/icon.png": "697e3d74581df30bfc97d4a85e925a1762eb6112ca8b52325db8fa6d38634f46",
     "mobile/babel.config.js": "a41079bc7b18610485efc7579b5e9337afafe39b83dbefd39034c80ccf394e8d",
-    "mobile/package.json": "7d224094e7b73932778f816aaf0b3e906921e9b52e060cfbeba028ca97838c73"
+    "mobile/package.json": "7d224094e7b73932778f816aaf0b3e906921e9b52e060cfbeba028ca97838c73",
+    "_ronn/static/ronn_logo.svg": "5f393fe13d02584cac6fddc8cb136e5528105c05aa4f7a1f5ddd8ff99312e734",
+    "_ronn/static/manifest.webmanifest": "5de2155412a0f13b0324aa4c122276390a1f3112c498b8f49511287532b7e864",
+    "_ronn/static/service-worker.js": "b904b7c6c0f2f3410dbe7a5b504849b4e158a5da1f0c8d789c810146b4b7c07e"
   }
 }
