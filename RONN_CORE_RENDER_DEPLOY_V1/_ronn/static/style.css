@@ -454,3 +454,408 @@ html,body{width:100%;max-width:100%;overflow:hidden}
   .brandRow{height:56px}.newChat{margin-top:7px}.cinematicNav .navBtn{min-height:33px}
   .panelView{padding-top:18px}.panelHeader{margin-bottom:15px}
 }
+
+
+/* =========================================================
+   RONN R11 MOBILE APP MODE
+   Phone-first layout: no manual browser zoom required.
+   ========================================================= */
+*,*:before,*:after{box-sizing:border-box}
+html{
+  width:100%;
+  height:100%;
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+}
+body{
+  width:100%;
+  height:100%;
+  margin:0;
+  overflow:hidden;
+  overscroll-behavior:none;
+  touch-action:manipulation;
+}
+input,textarea,select,button{max-width:100%}
+
+@media(max-width:780px){
+  :root{--sidebar:0px}
+
+  html,body,.appShell,.main{
+    width:100%;
+    max-width:100%;
+    height:100dvh;
+    min-height:100dvh;
+    overflow:hidden!important;
+  }
+
+  .appShell{
+    display:block!important;
+    position:relative;
+  }
+
+  .main{
+    display:grid!important;
+    grid-template-rows:calc(52px + env(safe-area-inset-top)) minmax(0,1fr)!important;
+    position:relative;
+  }
+
+  .cinematicTopbar{
+    height:calc(52px + env(safe-area-inset-top))!important;
+    min-height:0!important;
+    padding:env(safe-area-inset-top) 10px 0!important;
+    display:grid!important;
+    grid-template-columns:40px minmax(0,1fr) 40px!important;
+    align-items:center!important;
+    gap:6px!important;
+    border-bottom:1px solid rgba(255,255,255,.055)!important;
+    background:rgba(5,6,10,.94)!important;
+    -webkit-backdrop-filter:blur(20px);
+    backdrop-filter:blur(20px);
+  }
+
+  .mobileMenuBtn{
+    display:grid!important;
+    place-items:center!important;
+    width:36px!important;
+    height:36px!important;
+    margin:0!important;
+    padding:0!important;
+    border:0!important;
+    border-radius:10px!important;
+    background:transparent!important;
+    font-size:21px!important;
+    color:#f1f2f5!important;
+  }
+
+  .cinematicTagline{
+    min-width:0!important;
+    width:100%!important;
+    text-align:center!important;
+    font-size:0!important;
+    letter-spacing:0!important;
+    color:#f4f4f7!important;
+    overflow:hidden;
+  }
+  .cinematicTagline:after{
+    content:"RONN";
+    font-size:15px;
+    line-height:1;
+    font-weight:650;
+    letter-spacing:.02em;
+  }
+
+  .cinematicTopButtons{
+    width:40px!important;
+    justify-content:flex-end!important;
+    margin:0!important;
+    gap:0!important;
+  }
+  .cinematicTopButtons>*{display:none!important}
+  .cinematicTopButtons .profileOrb{
+    display:grid!important;
+    width:34px!important;
+    height:34px!important;
+    border-radius:50%!important;
+    font-size:10px!important;
+  }
+
+  #chatView.active{
+    position:relative!important;
+    display:block!important;
+    width:100%!important;
+    min-width:0!important;
+    min-height:0!important;
+    height:100%!important;
+    overflow:hidden!important;
+  }
+
+  .chatViewport{
+    position:absolute!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    min-width:0!important;
+    min-height:0!important;
+    overflow:hidden!important;
+  }
+
+  .messages{
+    width:100%!important;
+    height:100%!important;
+    min-width:0!important;
+    max-width:none!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none!important;
+    padding:20px 14px calc(108px + env(safe-area-inset-bottom))!important;
+  }
+  .messages::-webkit-scrollbar{display:none!important}
+
+  .message{
+    width:100%!important;
+    max-width:760px!important;
+    margin:0 auto 22px!important;
+    gap:8px!important;
+  }
+  .message.assistant{align-items:flex-start!important}
+  .message.user{justify-content:flex-end!important}
+
+  .aiMark{display:none!important}
+  .aiBubble{
+    width:100%!important;
+    max-width:100%!important;
+    padding:0!important;
+    border:0!important;
+    border-radius:0!important;
+    background:transparent!important;
+    box-shadow:none!important;
+    -webkit-backdrop-filter:none!important;
+    backdrop-filter:none!important;
+  }
+  .answer{
+    width:100%!important;
+    max-width:100%!important;
+    font-size:15px!important;
+    line-height:1.62!important;
+    color:#f0f1f4!important;
+    overflow-wrap:anywhere;
+  }
+  .answer p{margin:0 0 12px!important}
+
+  .userBubble{
+    width:auto!important;
+    max-width:86%!important;
+    padding:10px 14px!important;
+    border-radius:19px!important;
+    font-size:15px!important;
+    line-height:1.45!important;
+    overflow-wrap:anywhere;
+  }
+
+  .msgTools{
+    margin-top:8px!important;
+    opacity:.45!important;
+    overflow-x:auto;
+    white-space:nowrap;
+    scrollbar-width:none;
+  }
+  .msgTools::-webkit-scrollbar{display:none}
+
+  .welcome{
+    width:100%!important;
+    max-width:560px!important;
+    margin:8vh auto 0!important;
+    padding:0 4px!important;
+  }
+  .welcomeOrb{width:48px!important;height:48px!important;margin-bottom:17px!important}
+  .welcome h1{
+    font-size:31px!important;
+    line-height:1.08!important;
+    letter-spacing:-.04em!important;
+  }
+  .welcome>p{font-size:14px!important;line-height:1.55!important}
+  .capGrid{grid-template-columns:1fr!important;gap:8px!important;margin-top:18px!important}
+  .capGrid button{padding:12px 13px!important;border-radius:14px!important}
+  .capGrid b{font-size:13px!important}.capGrid span{font-size:11px!important}
+
+  .composerDock{
+    position:absolute!important;
+    left:0!important;
+    right:0!important;
+    bottom:0!important;
+    width:100%!important;
+    z-index:40!important;
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom))!important;
+    background:linear-gradient(180deg,transparent 0,rgba(4,5,8,.92) 26%,#040508 55%)!important;
+    pointer-events:none!important;
+  }
+  .composerDock>*{pointer-events:auto!important}
+  .composerWrap,.attachments{
+    width:100%!important;
+    max-width:760px!important;
+    margin-left:auto!important;
+    margin-right:auto!important;
+  }
+
+  .composer{
+    width:100%!important;
+    max-width:none!important;
+    min-height:54px!important;
+    padding:6px 7px!important;
+    display:grid!important;
+    grid-template-columns:40px minmax(0,1fr) 40px!important;
+    gap:5px!important;
+    align-items:end!important;
+    border-radius:25px!important;
+    border:1px solid rgba(255,255,255,.11)!important;
+    background:#17181d!important;
+    box-shadow:0 8px 28px rgba(0,0,0,.36)!important;
+  }
+
+  .composer textarea{
+    width:100%!important;
+    min-width:0!important;
+    min-height:40px!important;
+    max-height:132px!important;
+    padding:10px 5px 7px!important;
+    margin:0!important;
+    font-size:16px!important;
+    line-height:1.42!important;
+    color:#f4f4f6!important;
+    -webkit-appearance:none;
+  }
+
+  .attach,.send,.stop{
+    width:38px!important;
+    height:38px!important;
+    min-width:38px!important;
+    border-radius:50%!important;
+    align-self:end!important;
+  }
+  .attach{font-size:23px!important}
+  .send{font-size:17px!important}
+
+  .composerMeta,.hint,.cinematicPresets{display:none!important}
+  .attachments{padding:0 3px 6px!important}
+
+  .plusMenu{
+    position:absolute!important;
+    left:0!important;
+    right:auto!important;
+    bottom:62px!important;
+    width:min(310px,calc(100vw - 20px))!important;
+    max-height:min(58vh,430px)!important;
+    overflow-y:auto!important;
+    border-radius:20px!important;
+  }
+
+  .activityDock{
+    position:absolute!important;
+    left:12px!important;
+    right:12px!important;
+    bottom:84px!important;
+    width:auto!important;
+    max-width:none!important;
+  }
+  .jumpLatest{bottom:84px!important}
+
+  /* Full, usable ChatGPT-style drawer. */
+  .sidebar{
+    display:flex!important;
+    position:fixed!important;
+    top:0!important;
+    bottom:0!important;
+    left:0!important;
+    width:min(86vw,320px)!important;
+    max-width:320px!important;
+    height:100dvh!important;
+    padding-top:env(safe-area-inset-top)!important;
+    transform:translate3d(-102%,0,0)!important;
+    transition:transform .22s ease!important;
+    z-index:1000!important;
+    overflow:hidden!important;
+    border-right:1px solid rgba(255,255,255,.07)!important;
+    background:#090a0e!important;
+  }
+  body.mobileNavOpen .sidebar{transform:translate3d(0,0,0)!important}
+
+  .sidebarCollapse{display:none!important}
+  .brandRow{height:58px!important;min-height:58px!important;padding:9px 13px!important}
+  .brandMark{width:35px!important;height:35px!important}
+  .brandCopy b{font-size:13px!important}
+  .brandCopy small{font-size:7px!important}
+  .newChat{margin:10px 11px 8px!important;min-height:43px!important}
+  .sideSearch{margin:0 11px 8px!important}
+  .sideSearch input{font-size:16px!important}
+  .sideSectionTitle{padding:7px 13px 5px!important}
+  .chatList{
+    flex:1 1 auto!important;
+    min-height:0!important;
+    overflow-y:auto!important;
+    padding:0 8px!important;
+  }
+  .chatRow{min-height:40px!important;padding:8px 9px!important}
+  .chatRow span{font-size:12px!important}
+  .sidebarBottom{
+    flex:0 0 auto!important;
+    margin-top:auto!important;
+    padding:8px 9px calc(10px + env(safe-area-inset-bottom))!important;
+    background:#090a0e!important;
+  }
+  .cinematicNav .navBtn{
+    min-height:44px!important;
+    margin:2px 0!important;
+    padding:9px 11px!important;
+    border-radius:12px!important;
+  }
+  .cinematicNav .navBtn i{font-size:16px!important}
+  .cinematicNav .navBtn span{font-size:13px!important}
+  .serverLine{margin-top:5px!important}
+
+  .sidebarScrim{
+    display:block!important;
+    position:fixed!important;
+    inset:0!important;
+    z-index:950!important;
+    opacity:0!important;
+    pointer-events:none!important;
+    border:0!important;
+    background:rgba(0,0,0,.55)!important;
+    -webkit-backdrop-filter:blur(2px);
+    backdrop-filter:blur(2px);
+    transition:opacity .2s ease!important;
+  }
+  body.mobileNavOpen .sidebarScrim{opacity:1!important;pointer-events:auto!important}
+
+  /* Settings / Tools / Library become phone pages, not squeezed desktop panels. */
+  .panelView{
+    width:100%!important;
+    height:100%!important;
+    max-width:100%!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    -webkit-overflow-scrolling:touch;
+    padding:18px 14px calc(28px + env(safe-area-inset-bottom))!important;
+  }
+  .panelHeader{
+    width:100%!important;
+    display:block!important;
+    margin:0 0 18px!important;
+  }
+  .panelHeader h1{font-size:28px!important;line-height:1.1!important}
+  .panelHeader p{font-size:13px!important;line-height:1.5!important}
+  .panelHeader .primarySmall{margin-top:12px!important}
+  .sectionTabs{
+    position:sticky!important;
+    top:0!important;
+    z-index:6!important;
+    width:100%!important;
+    overflow-x:auto!important;
+    margin:0 0 17px!important;
+    padding:5px 0 9px!important;
+    background:#040508!important;
+    scrollbar-width:none;
+  }
+  .sectionTabs::-webkit-scrollbar{display:none}
+  .settingsGrid,.compactSettings,.brainGrid,.agentOpsGrid,.diagGrid,.projectGrid{
+    grid-template-columns:1fr!important;
+  }
+  .settingCard,.brainGrid article,.diagCard,.projectCard,.memoryItem,.agentOpsCard{
+    width:100%!important;
+    min-width:0!important;
+  }
+  .ownerAccessCard,.ecosystemStatusCard{
+    width:100%!important;
+    margin-left:0!important;
+    margin-right:0!important;
+  }
+}
+
+/* Very narrow iPhones */
+@media(max-width:390px){
+  .messages{padding-left:11px!important;padding-right:11px!important}
+  .composerDock{padding-left:7px!important;padding-right:7px!important}
+  .userBubble{max-width:90%!important}
+  .welcome h1{font-size:28px!important}
+}
