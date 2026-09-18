@@ -81,18 +81,27 @@ export default function App(){
       }
       if(!r.ok)throw new Error(d.detail||"RONN request failed.");
       if(d.conversation_id)setConversationId(d.conversation_id);
-      setMessages(m=>[...m,{id:"a"+Date.now(),role:"assistant",content:d.answer||"No answer returned."}]);
+      setMessages(m=>[...m,{id:"a"+Date.now(),role:"assistant",content:d.answer||"No answer returned.",meta:d.meta||{}}]);
     }catch(e){setError(e.message||"RONN could not answer.")}
     finally{setBusy(false)}
   }
 
-  const renderItem=({item})=>(
-    <View style={[styles.msg,item.role==="user"?styles.userRow:styles.aiRow]}>
+  const renderItem=({item})=>{
+    const hub=item?.meta?.tool_hub||{};
+    const weather=hub?.presentation?.type==="weather"?hub.presentation:null;
+    const sources=Array.isArray(hub?.sources)?hub.sources.slice(0,4):[];
+    return <View style={[styles.msg,item.role==="user"?styles.userRow:styles.aiRow]}>
       <View style={item.role==="user"?styles.userBubble:styles.aiBubble}>
         <Text style={styles.msgText}>{item.content}</Text>
+        {!!weather&&<View style={styles.weatherCard}>
+          <View style={styles.weatherTop}><View style={styles.weatherPlaceWrap}><Text style={styles.cardLabel}>WEATHER</Text><Text style={styles.weatherPlace}>{weather.location}</Text></View>
+          <Text style={styles.weatherTemp}>{Math.round(Number(weather.temperature_f||0))}°F</Text></View>
+          <Text style={styles.weatherDetail}>{weather.condition} · Feels like {Math.round(Number(weather.feels_like_f||0))}° · Wind {Math.round(Number(weather.wind_mph||0))} mph</Text>
+        </View>}
+        {!!sources.length&&<View style={styles.sources}><Text style={styles.cardLabel}>SOURCES</Text>{sources.map((s,i)=><Text key={String(i)} style={styles.sourceText} numberOfLines={1}>{s.title||s.url}</Text>)}</View>}
       </View>
     </View>
-  );
+  };
 
   if(!session){
     return <SafeAreaView style={styles.root}>
@@ -155,5 +164,10 @@ const styles=StyleSheet.create({
   unlockWrap:{flex:1,justifyContent:"center",padding:28},logo:{color:"#fff",fontSize:18,fontWeight:"700",letterSpacing:1,marginBottom:40},unlockTitle:{color:"#fff",fontSize:28,fontWeight:"600",marginBottom:18},
   unlockInput:{height:52,borderRadius:16,borderWidth:1,borderColor:"#444",backgroundColor:"#2b2b2b",color:"#fff",paddingHorizontal:15,fontSize:16},
   unlockBtn:{height:50,borderRadius:16,backgroundColor:"#f2f2f2",alignItems:"center",justifyContent:"center",marginTop:12},unlockBtnText:{color:"#171717",fontSize:15,fontWeight:"700"},
-  error:{color:"#ff9b9b",fontSize:12,marginTop:10}
+  error:{color:"#ff9b9b",fontSize:12,marginTop:10},
+  weatherCard:{marginTop:12,backgroundColor:"#292929",borderWidth:1,borderColor:"#3e3e3e",borderRadius:17,padding:13},
+  weatherTop:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"},weatherPlaceWrap:{flex:1,paddingRight:10},
+  cardLabel:{color:"#999",fontSize:9,fontWeight:"700",letterSpacing:1.1},weatherPlace:{color:"#f4f4f4",fontSize:14,fontWeight:"600",marginTop:3},
+  weatherTemp:{color:"#fff",fontSize:27,fontWeight:"700"},weatherDetail:{color:"#bbb",fontSize:12,lineHeight:18,marginTop:6},
+  sources:{marginTop:10,gap:5},sourceText:{color:"#cfcfcf",fontSize:11,backgroundColor:"#292929",borderRadius:9,paddingHorizontal:9,paddingVertical:7}
 });
