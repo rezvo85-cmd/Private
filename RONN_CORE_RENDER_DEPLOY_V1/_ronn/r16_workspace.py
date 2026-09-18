@@ -74,7 +74,8 @@ def _limits():
     except Exception:
         pass
 
-PY_BLOCK={"os","subprocess","socket","requests","httpx","urllib","ctypes","multiprocessing","shutil","pathlib"}
+PY_SAFE_IMPORTS={"math","statistics","json","re","collections","itertools","functools","decimal","fractions"}
+PY_BLOCKED_NAMES={"open","exec","eval","compile","__import__","input","globals","locals","vars","getattr","setattr","delattr","breakpoint","help","dir"}
 JS_BAD=("child_process","process.env","require('fs')",'require("fs")',"fetch(","XMLHttpRequest","WebSocket(")
 
 def _validate_python(text):
@@ -82,8 +83,13 @@ def _validate_python(text):
     for n in ast.walk(tree):
         if isinstance(n,(ast.Import,ast.ImportFrom)):
             names=[x.name.split(".")[0] for x in n.names] if isinstance(n,ast.Import) else [(n.module or "").split(".")[0]]
-            if any(x in PY_BLOCK for x in names):raise ValueError("This local runner blocks system/network modules.")
-        if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id in {"open","exec","eval","compile","__import__","input"}:
+            if any(x not in PY_SAFE_IMPORTS for x in names):
+                raise ValueError("The local runner only permits safe standard-library imports.")
+        if isinstance(n,ast.Name) and (n.id.startswith("__") or n.id in PY_BLOCKED_NAMES):
+            raise ValueError(f"Blocked name in local runner: {n.id}")
+        if isinstance(n,ast.Attribute) and n.attr.startswith("_"):
+            raise ValueError("Private/dunder attributes are blocked in the local runner.")
+        if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id in PY_BLOCKED_NAMES:
             raise ValueError(f"Blocked call in local runner: {n.func.id}")
 
 def _validate_js(text):
@@ -103,7 +109,9 @@ def run(owner,workspace,entry,language="auto",execute=True):
         _validate_js(text)
         node=shutil.which("node")
         if not node:return {"ok":False,"verified":False,"error":"Node.js is not installed in this runtime.","language":"javascript"}
-        cmd=[node,"--check",str(p)] if not execute else [node,str(p)]
+        # Local JS is syntax-verified only. Full JS execution belongs in the isolated runner service.
+        cmd=[node,"--check",str(p)]
+        execute=False
     else:
         raise ValueError("Only Python and JavaScript are executable in the local safe runner.")
     started=time.time()
@@ -133,5 +141,5 @@ def rollback(owner,action_id,workspace,name):
 
 def status():
     return {"workspace_root":str(ROOT),"python":bool(shutil.which("python") or shutil.which("python3")),
-            "node":bool(shutil.which("node")),"mode":"controlled-local-execution","network_allowed":False,
+            "node":bool(shutil.which("node")),"mode":"controlled-local-execution","network_allowed":False,"javascript_local_mode":"syntax-check-only",
             "full_container_runner_configured":bool((os.getenv("RONN_RUNNER_URL") or "").strip())}
