@@ -57,6 +57,7 @@ from r19_router import choose as r19_router_choose, record as r19_router_record,
 from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
 from r19_training_data import add as r19_training_add, stage as r19_training_stage, promote as r19_training_promote, discard as r19_training_discard, pending_example as r19_training_pending, export as r19_training_export, stats as r19_training_stats
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
+from r20_controller import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -76,7 +77,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R19-AGENT-OS")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-2026-R20-CONTROLLER")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -1019,36 +1020,23 @@ def select_model(message: str, images, files, mode: str):
 
 # ---------------- message construction ----------------
 
-def build_messages(owner: str, body: ChatBody, profile: str):
+def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | None = None):
     memories = relevant_memories(owner, body.message)
     system = BASE_SYSTEM + PROFILE_PROMPTS.get(profile, PROFILE_PROMPTS["chat"])
     system += STYLE_PROMPTS.get(body.style, STYLE_PROMPTS["balanced"])
 
-    difficulty = task_difficulty(body.message)
+    difficulty = int((controller or {}).get("difficulty") or task_difficulty(body.message))
     inferred_intent = infer_intent(body.message)
-    cognition = cognitive_profile(body.message, difficulty, inferred_intent, profile)
     skill_context, active_skills = build_skill_context(body.message, profile)
-    system += "\n\n" + intelligence_directive(body.message, difficulty, inferred_intent)
+    if controller:
+        system += "\n\n" + r20_directive(controller)
     system += "\n\n" + reliability_directive(body.message, profile, body.files)
-    system += "\n\n" + cognition_directive(cognition)
     meta_os = metacognition_state(
         body.message, profile, difficulty,
         has_files=bool(body.files), has_project=bool(body.project_context)
     )
-    system += "\n\n" + os_directive(meta_os)
-    _preflight = preflight_report(body.message, profile, difficulty, bool(body.files), bool(body.project_context))
-    system += "\n\nRONN R5 LEGACY PREFLIGHT (structured task controls, not hidden reasoning):\n" + json.dumps(_preflight, ensure_ascii=False)[:9000]
-    _r5 = preflight_v5(body.message, profile, difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
-    system += "\n\n" + intelligence_directive_v5(_r5)
     _r6 = r6_preflight(body.message, profile, difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
-    system += "\n\n" + r6_directive(_r6)
     system += "\n\n" + brevity_directive(_r6["brevity"])
-    _r7 = r7_preflight(body.message, profile, difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
-    system += "\n\n" + r7_directive(_r7)
-    _r11 = r11_preflight(body.message, history=body.history, profile=profile, difficulty=difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
-    system += "\n\n" + r11_directive(_r11)
-    _r12 = r12_preflight(body.message, history=body.history, profile=profile, difficulty=difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
-    system += "\n\n" + r12_directive(_r12)
     _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
     system += "\n\n" + r14_tool_directive(_r14_tools)
     _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files)
@@ -1215,7 +1203,7 @@ def request_payload(model, route, messages, max_tokens, stream=True):
 
     if model.startswith("openai/gpt-oss"):
         payload["temperature"] = 0.55
-        payload["reasoning_effort"] = "low" if route == "fast" else ("high" if route in {"deep","review","ultra","tools"} else "medium")
+        payload["reasoning_effort"] = "low" if route == "fast" else ("high" if route in {"deep","review","ultra","tools","r20-deep","r20-reasoning","r20-code","r20-apex"} else "medium")
         payload["include_reasoning"] = False
     elif model == VISION_MODEL and route == "vision":
         payload["temperature"] = 0.6
@@ -1309,7 +1297,7 @@ def model_fallback_order(preferred_model: str, route: str):
     """
     order = [preferred_model]
     if openrouter_key_loaded():
-        for m in r13_fallback_models("coding" if route in {"creator","ensemble-code"} else "chat"):
+        for m in r13_fallback_models("coding" if route in {"creator","ensemble-code","r20-code"} else "chat"):
             if m not in order:
                 order.append(m)
     if preferred_model == NVIDIA_MODEL:
@@ -1318,7 +1306,7 @@ def model_fallback_order(preferred_model: str, route: str):
         if nvidia_key_loaded() and route == "creator":
             order += [NVIDIA_MODEL]
         order += [SMART_MODEL, FAST_MODEL]
-    elif route in {"live","research","max","tools"}:
+    elif route in {"live","research","max","tools","r20-current","r20-research"}:
         # Preserve Groq's tool-enabled route first; NVIDIA is a reasoning fallback.
         if nvidia_key_loaded():
             order += [NVIDIA_MODEL]
@@ -1619,7 +1607,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
             finish_run(request_id, (time.time()-(started_at or time.time())), len(full), "complete", model=model, route=route)
         except Exception:
             pass
-    evidence_mode = "live" if route in {"live","research","max","tools"} else "model"
+    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research"} else "model"
     audit = answer_audit(original_message, full, profile=profile, runtime_verified=False, evidence_mode=evidence_mode)
     audit["static_code"] = static_code_checks(full)
     audit["r5_quality_gate"] = quality_report(original_message, full, evidence_mode=evidence_mode, runtime_verified=False)
@@ -1702,7 +1690,26 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         yield (json.dumps({"error":f"RONN has no configured AI provider key. Active config: {ENV_FILE}. Close RONN, run START_RONN.bat, and RONN will recover an older key or open this exact file for setup."})+"\n").encode()
         return
 
-    model, route, profile = select_model(body.message, body.images, body.files, body.mode)
+    _file_names=[str(getattr(x,"name","file")) for x in (body.files or [])]
+    _r20=r20_plan(
+        body.message,
+        history=body.history,
+        file_names=_file_names,
+        has_images=bool(body.images),
+        has_project=bool(body.project_context),
+        agent_mode=bool(body.agent_mode),
+        explicit_mode=body.mode,
+    )
+    profile=str(_r20.get("profile") or task_profile(body.message,body.files))
+    model,route=r20_resolve_route(
+        _r20,
+        providers={"groq":groq_key_loaded(),"nvidia":nvidia_key_loaded(),"openrouter":openrouter_key_loaded()},
+        models={
+            "fast":FAST_MODEL,"smart":SMART_MODEL,"creator":CREATOR_MODEL,"vision":VISION_MODEL,
+            "live":LIVE_MODEL,"research":RESEARCH_MODEL,"nvidia":NVIDIA_MODEL,
+            "or_nemotron":OR_NEMOTRON_MODEL,"or_deepseek":OR_DEEPSEEK_MODEL,"or_qwen":OR_QWEN_MODEL,
+        },
+    )
     model = r19_adapt_model(profile, model)
     request_id = new_task_id()
     started_at = time.time()
@@ -1716,31 +1723,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
     _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files)
     _r14_agent = r14_agent_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message)) if body.agent_mode else {"version":"R14","steps":[],"tool_plan":_r14_tools}
-    _auto_tier = route_override(_r5_preflight, body.mode)
-    if body.mode == "auto":
-        # R11 reliability routing gets first say for current facts and harder work.
-        if ("research" in _r12_preflight.get("active_domains",[]) or _r11_preflight.get("route",{}).get("live_required") or _r7_preflight.get("agent_plan",{}).get("freshness",{}).get("live_required")) and groq_key_loaded():
-            model, route, profile = RESEARCH_MODEL, "research", "research"
-        elif _r11_tier == "apex":
-            if openrouter_key_loaded():
-                model, route = OR_NEMOTRON_MODEL, "ensemble-apex"
-            else:
-                model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
-        elif _r11_tier == "deep" and route not in {"research","live","vision","ensemble-vision"}:
-            if openrouter_key_loaded():
-                model, route = r13_choose_primary(profile, max(_difficulty,4), bool(body.images), False)
-            else:
-                model, route = (NVIDIA_MODEL, "nvidia-deep") if nvidia_key_loaded() else (SMART_MODEL, "deep")
-        elif _r11_tier == "smart" and route == "fast":
-            model, route = (r13_choose_primary(profile, max(_difficulty,2), False, False) if openrouter_key_loaded() else (SMART_MODEL, "knowledge"))
-        # Preserve earlier adaptive route signals as a secondary layer.
-        elif _auto_tier == "tools":
-            model, route = (RESEARCH_MODEL, "research") if groq_key_loaded() else (model, route)
-        elif _auto_tier == "apex":
-            model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
-        elif _auto_tier == "deep" and route in {"fast","knowledge","deep"}:
-            model, route = (NVIDIA_MODEL, "nvidia-deep") if nvidia_key_loaded() else (SMART_MODEL, "deep")
-    model = r19_adapt_model(profile, model)
+    _auto_tier = route_override(_r5_preflight, body.mode)  # legacy diagnostic signal only; R20 owns routing
     _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
     _project_id = ensure_project((body.project_context[:180] if body.project_context else "default"))
@@ -1798,11 +1781,11 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         _tool_block="RONN REAL TOOL EVIDENCE (actual results from this run; distinguish failures from success):\n"+json.dumps(_real_tool_evidence,ensure_ascii=False)[:50000]
         body.project_context=((body.project_context or "")+"\n\n"+_tool_block).strip()
 
-    messages = build_messages(owner, body, profile)
-    if route in {"live","research","max"}:
+    messages = build_messages(owner, body, profile, _r20)
+    if _r20.get("needs_live"):
         messages[0]["content"] += "\nFor current or research-dependent claims, use available live tools when useful and ground the answer in retrieved information."
     _length_policy = _r6_preflight.get("brevity", {})
-    _base_budget = 700 if route in {"fast","live"} else (2200 if route in {"ultra","apex","nvidia-apex","apex-final","nvidia-apex-final"} else 1600)
+    _base_budget = {"fast":700,"smart":1200,"deep":1800,"apex":2400}.get(str(_r20.get("depth") or "smart"),1200)
     max_tokens = min(_base_budget, int(_length_policy.get("max_tokens") or _base_budget))
     # Research/list questions need enough room for the requested list even when each entry should stay concise.
     if _length_policy.get("list_count"):
@@ -1815,7 +1798,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "profile":profile,
         "review":bool(body.review),
         "skills":skill_names,
-        "difficulty":_r5_preflight.get("reasoning_policy",{}).get("effective_difficulty",_difficulty),
+        "difficulty":int(_r20.get("difficulty") or _difficulty),
+        "controller":_r20,
         "intent":infer_intent(body.message),
         "cognition":cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile),
         "stages":task_stages(cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile)),
@@ -1826,7 +1810,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "reliability":reliability_flags(body.message, body.files),
         "evidence_mode":"live" if route in {"live","research","max","tools"} else "model",
         "response_length":_length_policy,
-        "verification_level":"high" if _r5_preflight.get("reasoning_policy",{}).get("verification_required") or reliability_flags(body.message, body.files)["needs_verification"] else "standard",
+        "verification_level":"high" if _r20.get("verify") else "standard",
         "preflight":_preflight,
         "task_plan":_preflight["plan"],
         "r5_preflight":_r5_preflight,
@@ -1844,7 +1828,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r14_agent_plan":_r14_agent,
         "r14_user_model":r14_user_profile(owner),
         "r14_knowledge_graph":r14_graph_stats(owner),
-        "adaptive_tier":_r11_tier if _r11_tier != "fast" else _auto_tier,
+        "adaptive_tier":str(_r20.get("depth") or "smart"),
         "agent_mode":bool(body.agent_mode),
         "decision_summary":explanation_trace(body.message,_r7_preflight.get("agent_plan",{}),route,model),
         "capabilities":capability_manifest()
@@ -1852,7 +1836,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
 
     stream_messages = messages
     try:
-        if route in {"apex","nvidia-apex","ensemble-apex"} and not body.images and not looks_live(body.message):
+        if _r20.get("use_council") and not body.images and not _r20.get("needs_live"):
             task_checkpoint(request_id, "Parallel hypotheses", "started", "")
             yield (json.dumps({"stage":"Parallel hypotheses"})+"\n").encode()
             final_messages = apex_council_messages(messages, profile)
@@ -1885,7 +1869,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             else:
                 r = cloud_request(NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL, "nvidia-deep" if nvidia_key_loaded() else "deep", messages, 1200, stream=True)
         else:
-            do_review = (body.review or any(x.get("tool")=="critic" for x in _r14_tools.get("tools",[])) or _r12_preflight.get("quality_floor") == "high" or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator","ensemble-general","ensemble-reasoning","ensemble-code","ensemble-apex"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
+            do_review = bool(body.review or _r20.get("second_pass")) and not _r20.get("needs_live") and not body.images
             if do_review:
                 task_checkpoint(request_id, "Drafting", "started", "")
                 yield (json.dumps({"stage":"Drafting"})+"\n").encode()
@@ -2797,6 +2781,7 @@ def diagnostics(request: Request):
         "r19_context": (BASE / "r19_context.py").exists(),
         "r19_training_data": (BASE / "r19_training_data.py").exists(),
         "r19_training_runtime": (BASE / "r19_training_runtime.py").exists(),
+        "r20_controller": (BASE / "r20_controller.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -3061,6 +3046,7 @@ def r19_capabilities_api(request: Request):
       "safe_tools":r19_tool_status(owner),
       "training":r19_training_stats(owner),
       "model_router":r19_router_report(),
+      "central_controller":r20_status(),
     }
 
 @app.get("/api/r15/cloud")
