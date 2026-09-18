@@ -232,7 +232,8 @@ if($("vaultSaveBtn"))$("vaultSaveBtn").onclick=saveVaultItem;
 if($("ownerDeviceList"))$("ownerDeviceList").addEventListener("click",async e=>{const id=e.target.dataset.revokeDevice;if(!id)return;const r=await fetch(CORE_API+`/devices/${encodeURIComponent(id)}`,{method:"DELETE",headers:apiHeaders()});if(r.ok){showToast("Device revoked.");refreshOwnerDevices();refreshOwnerStats()}});
 if($("vaultList"))$("vaultList").addEventListener("click",async e=>{const id=e.target.dataset.vaultDelete;if(!id)return;const r=await fetch(CORE_API+`/vault/${encodeURIComponent(id)}`,{method:"DELETE",headers:apiHeaders()});if(r.ok){showToast("Vault item deleted.");refreshVault()}});
 if($("featureFlagList"))$("featureFlagList").addEventListener("change",async e=>{const flag=e.target.dataset.flag;if(!flag)return;const r=await fetch(CORE_API+`/feature-flags/${encodeURIComponent(flag)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({enabled:!!e.target.checked})});if(!r.ok){e.target.checked=!e.target.checked;showToast("Feature flag change failed.")}else showToast("Feature flag updated.")});
-registerDesktopDevice();refreshEcosystemStatus();\nensureWebAuth();
+registerDesktopDevice();refreshEcosystemStatus();
+ensureWebAuth();
 
 if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){currentChatId=chats[0].id;localStorage.setItem(CURRENT_KEY,currentChatId)}
 renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);input.focus();
