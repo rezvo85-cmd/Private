@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import secrets
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -14,7 +15,7 @@ from core_store import (
 )
 
 API_VERSION = "v1"
-CORE_VERSION = "1.1.0"
+CORE_VERSION = "1.1.1"
 router = APIRouter(prefix="/api/v1", tags=["RONN Core API v1"])
 _RUNTIME: dict[str, Any] = {}
 
@@ -47,16 +48,38 @@ def _sync(owner, resource_type, resource_id, op, payload):
         except Exception: pass
 
 
-def _auth(authorization: str | None = Header(default=None)):
+def _auth(request: Request, authorization: str | None = Header(default=None)):
+    """Authorize trusted service clients OR a browser owner session.
+
+    The backend RONN_CORE_TOKEN is never exposed to browser JavaScript.
+    Web/PWA clients authenticate through the HttpOnly OP session cookie issued
+    by /api/v1/owner/unlock. Desktop/service clients may still use Bearer auth.
+    """
     token = (os.getenv("RONN_CORE_TOKEN") or "").strip()
     if not token:
         return True
+
     supplied = ""
     if authorization and authorization.lower().startswith("bearer "):
         supplied = authorization[7:].strip()
-    if supplied != token:
-        raise HTTPException(401, "Invalid RONN Core token.")
-    return True
+    if supplied and secrets.compare_digest(supplied, token):
+        return True
+
+    # Same-origin web/PWA owner sessions are intentionally accepted instead
+    # of placing the backend token into localStorage, HTML, or JavaScript.
+    try:
+        from ecosystem_store import verify_owner_session
+        op_token = (
+            request.headers.get("x-ronn-op-session")
+            or request.cookies.get("ronn_op")
+            or ""
+        ).strip()
+        if op_token and verify_owner_session(op_token, _owner(request)):
+            return True
+    except Exception:
+        pass
+
+    raise HTTPException(401, "RONN is locked. Unlock Owner access to continue.")
 
 
 class CoreFile(BaseModel):
