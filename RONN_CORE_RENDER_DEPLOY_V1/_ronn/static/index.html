@@ -4,10 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#08070b">
-  <title>RONN // R9 Core</title>
-  <link rel="stylesheet" href="/static/style.css?v=RONN-R9-CORE">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="RONN">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/ronn_app_icon.png">
+  <title>RONN</title>
+  <link rel="stylesheet" href="/static/style.css?v=RONN-R10-1-WEB-AUTH">
 </head>
 <body>
+<div class="webAuthGate hidden" id="webAuthGate" aria-live="polite">
+  <div class="webAuthCard">
+    <div class="webAuthOrb"><img src="/static/ronn_app_icon.png" alt="RONN"></div>
+    <span class="eyebrow">RONN OWNER ACCESS</span>
+    <h1>Unlock RONN</h1>
+    <p>Your Core token stays on the server. Enter your OP access code to create a secure browser session.</p>
+    <input id="webAuthSecret" type="password" autocomplete="current-password" placeholder="OP access code">
+    <button id="webAuthUnlock">Unlock RONN</button>
+    <small id="webAuthMessage">Secure session · no Core token stored in this browser</small>
+  </div>
+</div>
 <div class="appShell">
   <aside class="sidebar">
     <div class="brandRow">
@@ -252,6 +268,6 @@
   <div class="modalCard"><span class="eyebrow">CONFIRM ACTION</span><h2>Clear this conversation?</h2><p>This removes the messages from this local chat. It does not delete other conversations or project memory.</p><div><button class="ghost" id="cancelClearBtn">Cancel</button><button class="dangerButton" id="confirmClearBtn">Clear conversation</button></div></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="/static/app.js?v=RONN-R10-ECOSYSTEM"></script>
+<script src="/static/app.js?v=RONN-R10-1-WEB-AUTH"></script>
 </body>
 </html>
