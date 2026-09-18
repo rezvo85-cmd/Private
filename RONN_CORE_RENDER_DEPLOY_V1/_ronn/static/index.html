@@ -234,7 +234,7 @@
       <div class="panelHeader"><div><span class="eyebrow">SETTINGS</span><h1>RONN controls</h1><p>Core intelligence, privacy, sync, and owner access without crowding the main chat.</p></div></div>
       <div class="settingsGrid compactSettings">
         <div class="settingCard"><b>Adaptive intelligence</b><p>RONN chooses speed, depth, specialists, live research, and verification based on the task.</p></div>
-        <div class="settingCard"><b>Core API v1.1</b><p>Desktop, mobile, and future web clients use the same versioned RONN brain contract.</p></div>
+        <div class="settingCard"><b>R11 Reliability Core</b><p>600 active task, context, freshness, verification, debugging, research, coding, and reasoning signals now influence each request.</p></div>
         <div class="settingCard"><b>Cloud-ready sync</b><p>Projects, conversations, tasks, settings, handoffs, and device events have a shared sync stream.</p></div>
         <div class="settingCard"><b>Privacy boundaries</b><p>Provider keys remain backend-only. OP secrets are never saved as readable text.</p></div>
       </div>
@@ -279,6 +279,10 @@
   function rescue(){
     if(window.__RONN_UI_READY)return;
     var input=byId("input"), send=byId("sendBtn"), plus=byId("plusMenu");
+    var menu=byId("mobileMenuBtn"),scrim=byId("sidebarScrim");
+    function mobile(open){document.body.classList.toggle("mobileNavOpen",!!open)}
+    if(menu)menu.addEventListener("click",function(){mobile(!document.body.classList.contains("mobileNavOpen"))});
+    if(scrim)scrim.addEventListener("click",function(){mobile(false)});
     function fallbackView(name){
       document.querySelectorAll(".view").forEach(function(v){v.classList.remove("active")});
       var target=byId(name+"View"); if(target)target.classList.add("active");
