@@ -121,7 +121,7 @@ function setStage(x){stageBadge.textContent=x;stageBadge.dataset.stage=String(x|
 function setNeuralMeta(meta){const n=$("neuralBadge");if(!n||!meta)return;const d=meta.difficulty??0;let label=d>=5?"APEX":d>=3?"Deep":d>=1?"Adaptive":"Fast";if(meta.verification_level==="high")label+=" · verify";if(meta.route?.startsWith("nvidia"))label="NVIDIA · "+label;else if(["live","research","max","tools"].includes(meta.route))label="Live tools";n.textContent=label;n.classList.toggle("hot",d>=4||meta.verification_level==="high")}
 function routeLabel(x){return ({instant:"Instant",fast:"Fast",deep:"Deep",creator:"Creator",max:"Research",ultra:"ULTRA",apex:"APEX",knowledge:"Knowledge",live:"Live web",research:"Research",vision:"Vision",review:"Reviewed",backup:"Fallback","nvidia-apex":"APEX NVIDIA","nvidia-apex-final":"APEX synthesis","apex-final":"APEX synthesis","nvidia-ultra-final":"ULTRA synthesis","ultra-final":"ULTRA synthesis","local-tool":"Local tool",memory:"Memory"})[x]||x||"Auto"}
 function profileLabel(x){return ({coding:"Software",creative:"Creative",research:"Research",analysis:"Analysis",knowledge:"Knowledge",mathscience:"Math & science",writing:"Writing",chat:"General",memory:"Memory"})[x]||x||"General"}
-function autoSize(){input.style.height="auto";const cap=window.innerWidth<=780?120:180;input.style.height=Math.min(input.scrollHeight,cap)+"px"}
+function autoSize(){input.style.height="auto";const cap=window.innerWidth<=780?144:180;input.style.height=Math.min(input.scrollHeight,cap)+"px";if(window.innerWidth<=780&&document.activeElement===input){syncMobileViewport();requestAnimationFrame(()=>scrollToLatest(true))}}
 
 async function currentScreenFrame(){
   if(!screenStream||!screenVideo||screenVideo.readyState<2)return null;
@@ -306,7 +306,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-IOS4",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-COMPOSER5",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
