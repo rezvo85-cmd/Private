@@ -408,6 +408,13 @@ except Exception as _cloud_restore_exc:
 
 init_db()
 
+try:
+    R21_RELEASE_STATUS = r21_release_gate()
+    print("RONN_R21_RELEASE_GATE " + json.dumps(R21_RELEASE_STATUS, ensure_ascii=False))
+except Exception as _r21_gate_exc:
+    R21_RELEASE_STATUS = {"ok":False,"error":str(_r21_gate_exc)[:240]}
+    print("RONN_R21_RELEASE_GATE " + json.dumps(R21_RELEASE_STATUS, ensure_ascii=False))
+
 def owner_id(request: Request):
     # R10 separates account identity from device/client identity so desktop and mobile can sync.
     # In this personal build clients explicitly use the same non-secret account id (ronn_primary).
@@ -2972,7 +2979,7 @@ def diagnostics(request: Request):
         "r13_eval":r13_checks,
         "r14_eval":r14_checks,
         "r15_eval":r15_checks,
-        "r21_release_gate":r21_release_gate(),
+        "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner_id(request)),
