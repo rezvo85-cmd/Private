@@ -1,0 +1,66 @@
+name: RONN iPhone Device
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "RONN_CORE_RENDER_DEPLOY_V1/mobile/**"
+      - ".github/workflows/ronn-mobile-iphone.yml"
+  workflow_dispatch:
+
+jobs:
+  iphone-unsigned:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - run: npx expo-doctor
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+      - name: Install CocoaPods
+        run: cd ios && pod install
+      - name: Build unsigned RONN for physical iPhone
+        run: |
+          cd ios
+          WORKSPACE="$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "No Xcode workspace generated"
+            exit 1
+          fi
+          if ! xcodebuild -list -workspace "$WORKSPACE" | grep -qE '^[[:space:]]*RONN[[:space:]]*$'; then
+            echo "RONN app scheme not found"
+            xcodebuild -list -workspace "$WORKSPACE"
+            exit 1
+          fi
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme RONN \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+      - name: Package unsigned IPA
+        run: |
+          APP="$(find ios/build-device/Build/Products -type d -name 'RONN.app' -path '*Release-iphoneos*' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "RONN.app for iphoneos was not produced"
+            find ios/build-device/Build/Products -maxdepth 5 -type d -name '*.app' -print || true
+            exit 1
+          fi
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP" Payload/RONN.app
+          zip -qry RONN-iPhone-Unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RONN-iPhone-Unsigned
+          path: RONN_CORE_RENDER_DEPLOY_V1/mobile/RONN-iPhone-Unsigned.ipa
+          if-no-files-found: error
