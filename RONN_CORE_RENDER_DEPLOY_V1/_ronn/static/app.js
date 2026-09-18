@@ -175,7 +175,7 @@ async function testProvider(provider){showToast(`Testing ${provider} connection 
 async function showRepairPlan(){try{const d=await (await fetch(CORE_API+"/repair-plan",{headers:apiHeaders()})).json();const first=(d.actions||[])[0];showToast(first?.detail||"No repair action required.");runDiagnostics()}catch(e){showToast("Self-repair analysis failed: "+e.message)}}
 
 
-const SIDEBAR_KEY="ronnSidebarCompact";
+const SIDEBAR_KEY="ronnSidebarCompactR11";
 if(safeGet(SIDEBAR_KEY)==="1")document.body.classList.add("sidebarCompact");
 $("sidebarCollapse").onclick=()=>{document.body.classList.toggle("sidebarCompact");safeSet(SIDEBAR_KEY,document.body.classList.contains("sidebarCompact")?"1":"0");$("sidebarCollapse").textContent=document.body.classList.contains("sidebarCompact")?"›":"‹"};
 
