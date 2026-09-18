@@ -286,11 +286,11 @@ function stopVoiceMode(){
 if($("voiceBtn")){
   if(SpeechRecognition){
     recognizer=new SpeechRecognition();recognizer.lang=navigator.language||"en-US";recognizer.interimResults=false;recognizer.continuous=true;
-    recognizer.onstart=()=>{if(voiceMode){$("voiceBtn").classList.add("listening");$("voiceBtn").textContent="● Voice"}};
-    recognizer.onend=()=>{if(voiceMode&&!voiceSpeaking)setTimeout(()=>{try{recognizer.start()}catch{}},250);else if(!voiceMode){$("voiceBtn").classList.remove("listening");$("voiceBtn").textContent="◉ Voice"}};
+    recognizer.onstart=()=>{if(voiceMode){$("voiceBtn").classList.add("listening");$("voiceBtn").textContent="●"}};
+    recognizer.onend=()=>{if(voiceMode&&!voiceSpeaking)setTimeout(()=>{try{recognizer.start()}catch{}},250);else if(!voiceMode){$("voiceBtn").classList.remove("listening");$("voiceBtn").textContent="◉"}};
     recognizer.onresult=e=>{let final="";for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=(e.results[i][0]?.transcript||"")+" "}final=final.trim();if(final&&!busy){input.value=final;autoSize();sendMessage(false)}};
     recognizer.onerror=e=>{if(!["no-speech","aborted"].includes(e.error||""))showToast(`Voice: ${e.error||"not available"}`)};
-    $("voiceBtn").onclick=()=>{if(voiceMode){stopVoiceMode();showToast("Live voice off.")}else{voiceMode=true;$("voiceBtn").textContent="● Voice";try{recognizer.start()}catch{}showToast("Live voice on.")}};
+    $("voiceBtn").onclick=()=>{if(voiceMode){stopVoiceMode();showToast("Live voice off.")}else{voiceMode=true;$("voiceBtn").textContent="●";try{recognizer.start()}catch{}showToast("Live voice on.")}};
   }else{$("voiceBtn").disabled=true;$("voiceBtn").title="Live voice is not supported by this browser"}
 }
 if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
