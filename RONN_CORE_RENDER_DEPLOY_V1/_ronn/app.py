@@ -1605,6 +1605,15 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
 
     save_message(owner, "user", original_message or "[attachment]")
     save_message(owner, "assistant", full)
+    if request_id and safe_memory_text(original_message or "") and safe_memory_text(full):
+        try:
+            r19_training_stage(request_id, owner, original_message or "[attachment]", full, profile or "general", model)
+        except Exception:
+            pass
+    try:
+        r15_cloud_event(owner, "answer_complete", json.dumps({"request_id":request_id,"profile":profile,"route":route,"model":model}, ensure_ascii=False))
+    except Exception:
+        pass
     if request_id:
         try:
             finish_run(request_id, (time.time()-(started_at or time.time())), len(full), "complete", model=model, route=route)
@@ -2571,8 +2580,35 @@ def provider_health_api():
 def feedback_api(body: FeedbackBody, request: Request):
     if body.rating not in (-1,1):
         raise HTTPException(400,"Rating must be -1 or 1.")
+    owner=owner_id(request)
     run=add_feedback(body.request_id,body.rating,body.note)
-    return {"ok":True,"run":run,"observed_model_scores":observed_model_scores()}
+    learned={"router":False,"training_example":None,"failure_lesson":None}
+    if run:
+        try:
+            r19_router_record(run.get("profile") or "general",run.get("model") or "",body.rating>0,float(run.get("latency") or 0),1.0)
+            learned["router"]=True
+        except Exception:
+            pass
+    if body.rating>0:
+        try:
+            learned["training_example"]=r19_training_promote(body.request_id)
+        except Exception:
+            pass
+    else:
+        try:
+            r19_training_discard(body.request_id)
+        except Exception:
+            pass
+        if body.note.strip():
+            try:
+                learned["failure_lesson"]=r19_record_failure(owner,body.note,run.get("profile") if run else "general")
+            except Exception:
+                pass
+    try:
+        r15_cloud_event(owner,"feedback",json.dumps({"request_id":body.request_id,"rating":body.rating,"profile":run.get("profile") if run else ""},ensure_ascii=False))
+    except Exception:
+        pass
+    return {"ok":True,"run":run,"learned":learned,"observed_model_scores":observed_model_scores(),"r19_router":r19_router_report(run.get("profile") if run else None)}
 
 @app.post("/api/document/extract")
 def document_extract_api(body: DocumentExtractBody):
