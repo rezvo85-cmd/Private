@@ -1,0 +1,67 @@
+"""RONN R17 long-running task engine with durable checkpoints."""
+from __future__ import annotations
+import json, sqlite3, threading, time, uuid
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+BASE=Path(__file__).resolve().parent
+DB=BASE/"data"/"r17_jobs.db"
+DB.parent.mkdir(exist_ok=True)
+POOL=ThreadPoolExecutor(max_workers=3,thread_name_prefix="ronn-job")
+_LOCK=threading.Lock()
+
+def _db():
+    c=sqlite3.connect(DB,check_same_thread=False); c.row_factory=sqlite3.Row
+    c.execute("""CREATE TABLE IF NOT EXISTS jobs(
+      id TEXT PRIMARY KEY, owner TEXT, kind TEXT, payload TEXT, status TEXT,
+      progress INTEGER, result TEXT, error TEXT, created_at INTEGER, updated_at INTEGER)""")
+    c.commit(); return c
+
+def _pack(x):
+    try:return json.dumps(x,ensure_ascii=False)[:200000]
+    except Exception:return json.dumps({"text":str(x)[:100000]})
+
+def create(owner,kind,payload,runner):
+    jid="job_"+uuid.uuid4().hex[:18]; now=int(time.time())
+    with _db() as c:
+        c.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
+          (jid,str(owner)[:120],str(kind)[:80],_pack(payload),"queued",0,"","",now,now)); c.commit()
+    def work():
+        update(jid,status="running",progress=5)
+        try:
+            result=runner(payload,lambda p:update(jid,progress=max(5,min(int(p),95))))
+            update(jid,status="completed",progress=100,result=result)
+        except Exception as exc:
+            update(jid,status="failed",progress=100,error=str(exc)[:1200])
+    POOL.submit(work)
+    return get(jid)
+
+def update(jid,status=None,progress=None,result=None,error=None):
+    fields=[]; args=[]
+    if status is not None:fields.append("status=?");args.append(str(status))
+    if progress is not None:fields.append("progress=?");args.append(max(0,min(int(progress),100)))
+    if result is not None:fields.append("result=?");args.append(_pack(result))
+    if error is not None:fields.append("error=?");args.append(str(error)[:5000])
+    fields.append("updated_at=?");args.append(int(time.time()));args.append(str(jid))
+    with _db() as c:
+        c.execute("UPDATE jobs SET "+",".join(fields)+" WHERE id=?",args);c.commit()
+    return get(jid)
+
+def get(jid):
+    with _db() as c:r=c.execute("SELECT * FROM jobs WHERE id=?",(str(jid),)).fetchone()
+    if not r:return None
+    d=dict(r)
+    for k in ("payload","result"):
+        try:d[k]=json.loads(d[k]) if d[k] else None
+        except Exception:pass
+    return d
+
+def list_jobs(owner,limit=40):
+    with _db() as c:rows=c.execute("SELECT id FROM jobs WHERE owner=? ORDER BY created_at DESC LIMIT ?",(str(owner),max(1,min(int(limit),100)))).fetchall()
+    return [get(r["id"]) for r in rows]
+
+def stats(owner=None):
+    with _db() as c:
+        if owner:rows=c.execute("SELECT status,COUNT(*) n FROM jobs WHERE owner=? GROUP BY status",(str(owner),)).fetchall()
+        else:rows=c.execute("SELECT status,COUNT(*) n FROM jobs GROUP BY status").fetchall()
+    return {r["status"]:int(r["n"]) for r in rows}
