@@ -97,11 +97,11 @@ def response_length_policy(message: str, style='balanced', difficulty=0, has_fil
         tier='normal'
 
     budgets={
-        'quick': {'max_tokens':280,'target_sentences':3,'target_words':110,'sentence_word_target':20},
+        'quick': {'max_tokens':180,'target_sentences':2,'target_words':70,'sentence_word_target':18},
         'normal': {'max_tokens':800,'target_sentences':10,'target_words':450,'sentence_word_target':24},
         'deep': {'max_tokens':1500,'target_sentences':24,'target_words':1100,'sentence_word_target':28},
     }
-    out={'tier':tier,'simple_question':simple,'explicit_short':explicit_short,'explicit_detail':explicit_detail,'list_count':list_count}
+    out={'tier':tier,'simple_question':simple,'explicit_short':explicit_short,'explicit_detail':explicit_detail,'list_count':list_count,'message':text}
     out.update(budgets[tier])
     if list_count:
         out['target_sentences']=max(out['target_sentences'], list_count)
@@ -113,8 +113,9 @@ def brevity_directive(policy: dict) -> str:
     tier=policy.get('tier','normal'); n=policy.get('list_count')
     if tier=='quick':
         instruction=(
-            "Answer immediately. Usually use 1-3 short sentences. Keep sentences compact. "
-            "No intro, no restating the question, no generic conclusion, and no extra background unless essential."
+            "Answer immediately in 1-2 short sentences. Do not use headings, bullets, numbered lists, or a breakdown "
+            "unless the user explicitly asks for a list or more detail. No intro, no restating the question, "
+            "no generic conclusion, and no extra background unless essential."
         )
     elif tier=='deep':
         instruction=(
@@ -126,8 +127,10 @@ def brevity_directive(policy: dict) -> str:
         )
     if n:
         instruction += f" The user requested {n} items; provide that count when feasible, with concise entries."
+    if re.match(r"^(who(?:'s| is)|whos|what(?:'s| is))\b", _clean(str(policy.get('message') or '')).lower()):
+        instruction += " For a who-is/what-is identity question, give the plain identity plus one useful sentence and stop."
     return (
-        "RONN R6 ADAPTIVE BREVITY POLICY:\n"
+        "RONN ADAPTIVE BREVITY POLICY:\n"
         f"- Response tier: {tier}\n"
         f"- Target maximum visible answer size: about {policy.get('target_words')} words unless correctness requires more.\n"
         f"- Prefer sentences around {policy.get('sentence_word_target')} words or fewer when natural.\n"
