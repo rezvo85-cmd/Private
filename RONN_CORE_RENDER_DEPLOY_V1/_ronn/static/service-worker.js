@@ -1,5 +1,5 @@
-const CACHE="ronn-assets-r20-viewport6";
-const ASSETS=["/static/ronn_home_icon_v2.png","/static/ronn_logo.svg?v=RONN-R19-LOGO2","/static/style.css?v=RONN-R19-CLEAN1","/static/mobile_fit.css?v=RONN-R20-VIEWPORT6","/static/app.js?v=RONN-R20-VIEWPORT6","/manifest.webmanifest?v=RONN-R19-MOBILE2"];
+const CACHE="ronn-assets-r21-final1";
+const ASSETS=["/static/ronn_home_icon_v2.png","/static/ronn_logo.svg?v=RONN-R19-LOGO2","/static/style.css?v=RONN-R21-FINAL1","/static/mobile_fit.css?v=RONN-R21-FINAL1","/static/app.js?v=RONN-R21-FINAL1","/manifest.webmanifest?v=RONN-R21-FINAL1"];
 self.addEventListener("install",event=>{
   event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).catch(()=>{}));
   self.skipWaiting();
