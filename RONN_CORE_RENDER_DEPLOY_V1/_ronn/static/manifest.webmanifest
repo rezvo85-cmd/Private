@@ -1,0 +1,13 @@
+{
+  "name": "RONN",
+  "short_name": "RONN",
+  "description": "RONN Cognitive OS",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#030408",
+  "theme_color": "#08070b",
+  "icons": [
+    {"src":"/static/ronn_app_icon.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
