@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/ronn_app_icon.png">
   <title>RONN</title>
-  <link rel="stylesheet" href="/static/style.css?v=RONN-R10-1-2">
+  <link rel="stylesheet" href="/static/style.css?v=RONN-R11-UI">
 </head>
 <body>
 <div class="webAuthGate hidden" id="webAuthGate" aria-live="polite">
@@ -28,7 +28,7 @@
   <aside class="sidebar">
     <div class="brandRow">
       <div class="brandMark"><img src="/static/ronn_app_icon.png" alt="RONN"></div>
-      <div class="brandCopy"><b>RONN</b><small>COGNITIVE OS // R10 ECOSYSTEM</small></div>
+      <div class="brandCopy"><b>RONN</b><small>COGNITIVE OS // R11 RELIABILITY</small></div>
       <button class="iconBtn sidebarCollapse" id="sidebarCollapse" title="Collapse sidebar">‹</button>
     </div>
 
@@ -49,9 +49,11 @@
       </div>
     </div>
   </aside>
+  <button class="sidebarScrim" id="sidebarScrim" type="button" aria-label="Close navigation"></button>
 
   <main class="main">
     <header class="topbar cinematicTopbar">
+      <button class="mobileMenuBtn" id="mobileMenuBtn" type="button" aria-label="Open navigation" title="Menu">☰</button>
       <div class="cinematicTagline">IDEAS. CLARITY. PROGRESS.</div>
       <div class="runtimeMeta" aria-hidden="true">
         <span class="routeBadge" id="routeBadge">Auto</span>
@@ -268,7 +270,7 @@
   <div class="modalCard"><span class="eyebrow">CONFIRM ACTION</span><h2>Clear this conversation?</h2><p>This removes the messages from this local chat. It does not delete other conversations or project memory.</p><div><button class="ghost" id="cancelClearBtn">Cancel</button><button class="dangerButton" id="confirmClearBtn">Clear conversation</button></div></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="/static/app.js?v=RONN-R10-1-2"></script>
+<script src="/static/app.js?v=RONN-R11-UI"></script>
 <script>
 /* RONN_CRITICAL_UI_RESCUE: independent bindings for essential controls.
    This intentionally does not depend on the optional diagnostics/project UI. */
