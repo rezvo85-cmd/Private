@@ -91,8 +91,8 @@ def read(url: str, max_chars: int = 18000):
 
 def research(query: str, depth: str = "smart"):
     depth = depth if depth in {"fast", "smart", "deep", "apex"} else "smart"
-    search_limit = {"fast": 6, "smart": 8, "deep": 10, "apex": 12}[depth]
-    read_limit = {"fast": 1, "smart": 2, "deep": 3, "apex": 4}[depth]
+    search_limit = {"fast": 7, "smart": 10, "deep": 12, "apex": 15}[depth]
+    read_limit = {"fast": 2, "smart": 3, "deep": 5, "apex": 6}[depth]
     char_limit = {"fast": 7000, "smart": 10000, "deep": 14000, "apex": 17000}[depth]
 
     all_results = []
