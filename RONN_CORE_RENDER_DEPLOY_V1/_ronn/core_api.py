@@ -15,7 +15,7 @@ from core_store import (
 )
 
 API_VERSION = "v1"
-CORE_VERSION = "1.1.1"
+CORE_VERSION = "1.3.0"
 router = APIRouter(prefix="/api/v1", tags=["RONN Core API v1"])
 _RUNTIME: dict[str, Any] = {}
 
