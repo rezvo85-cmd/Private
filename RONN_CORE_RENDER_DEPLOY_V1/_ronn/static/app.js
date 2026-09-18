@@ -7,7 +7,7 @@ const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stop
 const attachmentsEl = $("attachments"), fileInput = $("fileInput"), jumpLatest = $("jumpLatest");
 const routeBadge = $("routeBadge"), stageBadge = $("stageBadge"), profileBadge = $("profileBadge");
 
-const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R19-AGENT-OS";
+const BUILD_EXPECTED = "RONN-COGNITIVE-OS-2026-R20-CONTROLLER";
 const CORE_API = "/api/v1";
 const CLIENT_KEY = "ronnClient";
 const LEGACY_CLIENT_KEY = "novaUltraClient";
@@ -225,6 +225,8 @@ async function refreshR19Capabilities(){
     rows.push({name:"Computer Control",state:computer.verified?"on":"wait",note:computer.verified?"Remote computer verified":"Needs isolated computer runtime"});
     const training=d.connected_when_configured?.custom_model_training||{};
     rows.push({name:"RONN Custom Model Training",state:training.training_available?"on":"wait",note:training.training_available?"Training runtime connected":"Dataset builder active · trainer not connected"});
+    const controller=d.central_controller||{};
+    rows.unshift({name:"R20 Central Controller",state:controller.central_controller?"on":"wait",note:controller.agent_refinement_enabled?"Agents SDK active · one-controller routing":"One-controller routing · deterministic fallback"});
     rows.push({name:"Live Voice",state:("SpeechRecognition" in window||"webkitSpeechRecognition" in window)?"on":"wait",note:"Browser-dependent"});
     rows.push({name:"Screen Context",state:navigator.mediaDevices?.getDisplayMedia?"on":"wait",note:"Browser screen-share"});
     box.innerHTML=rows.map(x=>`<div class="r19CapRow ${x.state}"><i></i><div><b>${escapeHTML(x.name)}</b><small>${escapeHTML(x.note)}</small></div></div>`).join("");
