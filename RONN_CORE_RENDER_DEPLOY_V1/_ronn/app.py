@@ -59,6 +59,7 @@ from r19_training_data import add as r19_training_add, stage as r19_training_sta
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
 from r20_controller import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
+from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -1832,31 +1833,41 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         _tool_block="RONN REAL TOOL EVIDENCE (actual results from this run; distinguish failures from success):\n"+json.dumps(_real_tool_evidence,ensure_ascii=False)[:50000]
         body.project_context=((body.project_context or "")+"\n\n"+_tool_block).strip()
 
+    _tool_run = {
+        "planned": [], "executed": [], "evidence": "", "presentation": None,
+        "sources": [], "web_research": {}, "errors": []
+    }
     _web_research = {}
-    if _r20.get("needs_live") and not body.images:
-        try:
-            yield (json.dumps({"stage":"Searching web"})+"\n").encode()
-            task_checkpoint(request_id, "Web research", "started", "RONN is searching and reading current web sources.")
-            _web_research = r20_web_research(body.message, str(_r20.get("depth") or "smart"))
-            if _web_research.get("evidence"):
-                body.project_context = ((body.project_context or "") + "\n\n" + _web_research["evidence"]).strip()
-                task_checkpoint(
-                    request_id, "Web research", "complete",
-                    f"SearXNG returned {_web_research.get('source_count',0)} sources; Crawl4AI read {_web_research.get('read_count',0)} pages."
-                )
-            else:
-                task_checkpoint(request_id, "Web research", "blocked", "External RONN search services returned no evidence; Compound fallback remains available.")
-        except Exception as _web_exc:
-            _web_research = {"ok":False,"errors":[_web_exc.__class__.__name__],"source_count":0,"read_count":0}
+    try:
+        _tool_run = r20_tool_execute(
+            body.message,
+            depth=str(_r20.get("depth") or "smart"),
+            needs_live=bool(_r20.get("needs_live")),
+            has_files=bool(body.files),
+            has_images=bool(body.images),
+        )
+        _web_research = _tool_run.get("web_research") or {}
+        if _tool_run.get("evidence"):
+            yield (json.dumps({"stage":"Using tools"})+"\n").encode()
+            body.project_context = ((body.project_context or "") + "\n\n" + _tool_run["evidence"]).strip()
+            task_checkpoint(
+                request_id, "Tool hub", "complete",
+                "Executed: " + ", ".join(_tool_run.get("executed") or ["evidence tool"])
+            )
+        elif _r20.get("needs_live"):
+            task_checkpoint(request_id, "Tool hub", "blocked", "Tool hub returned no live evidence; Compound fallback remains available.")
+    except Exception as _tool_exc:
+        _tool_run["errors"] = [_tool_exc.__class__.__name__]
+        if _r20.get("needs_live"):
             try:
-                task_checkpoint(request_id, "Web research", "blocked", "RONN search/reader unavailable; using Compound built-in web tools.")
+                task_checkpoint(request_id, "Tool hub", "blocked", "RONN tool hub unavailable; using Compound built-in live tools.")
             except Exception:
                 pass
 
     # R20 execution boundary: tools gather evidence; an answer model writes the answer.
     # This prevents a model from printing a pseudo tool call such as {"tool":"groq_web_search",...}.
     if _r20.get("needs_live"):
-        if _web_research.get("evidence"):
+        if _tool_run.get("evidence"):
             if groq_key_loaded():
                 model, route = SMART_MODEL, "web-synthesis"
             elif openrouter_key_loaded():
@@ -1899,6 +1910,13 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "stages":task_stages(cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile)),
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
         "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0)},
+        "tool_hub":{
+            "planned":_tool_run.get("planned") or [],
+            "executed":_tool_run.get("executed") or [],
+            "presentation":_tool_run.get("presentation"),
+            "sources":(_tool_run.get("sources") or [])[:8],
+            "errors":(_tool_run.get("errors") or [])[:4],
+        },
         "request_id":request_id,
         "cognitive_os":_os_state,
         "strategy":_strategy,
@@ -3143,6 +3161,7 @@ def r19_capabilities_api(request: Request):
       "model_router":r19_router_report(),
       "central_controller":r20_status(),
       "web_research_tools":r20_web_status(),
+      "tool_hub":r20_tool_status(),
     }
 
 @app.get("/api/r15/cloud")
