@@ -1,4 +1,4 @@
-/* RONN mobile viewport stabilization */
+/* RONN mobile viewport + final phone layout */
 html{
   width:100%;
   max-width:100%;
@@ -13,20 +13,130 @@ body,.appShell,.main{
 button,a,[role="button"],.navBtn,.chatRow,.capGrid button{
   touch-action:manipulation;
 }
+
 @media(max-width:780px){
   html,body{
     height:100%;
     min-height:100%;
     overflow:hidden;
   }
+
   .appShell,.main{
-    height:100dvh;
-    min-height:0;
-    overflow:hidden;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    height:100dvh!important;
+    min-height:0!important;
+    overflow:hidden!important;
   }
-  input,textarea,select{
-    font-size:16px!important;
+
+  /* Stable ChatGPT-style phone header. */
+  .ronn19 .topbar.cinematicTopbar{
+    position:relative!important;
+    display:grid!important;
+    grid-template-columns:40px minmax(0,1fr) 40px!important;
+    align-items:center!important;
+    width:100%!important;
+    max-width:100%!important;
+    height:52px!important;
+    min-height:52px!important;
+    padding:0 10px!important;
+    gap:4px!important;
+    background:#212121!important;
+    border:0!important;
+    overflow:hidden!important;
   }
+
+  .ronn19 .mobileMenuBtn{
+    display:grid!important;
+    grid-column:1!important;
+    place-items:center!important;
+    width:36px!important;
+    height:36px!important;
+    min-width:36px!important;
+    margin:0!important;
+    padding:0!important;
+    border:0!important;
+    background:transparent!important;
+    color:#ececec!important;
+    font-size:20px!important;
+    line-height:1!important;
+  }
+
+  .ronn19 .cinematicTagline{
+    grid-column:2!important;
+    position:static!important;
+    left:auto!important;
+    transform:none!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    width:auto!important;
+    min-width:0!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    white-space:nowrap!important;
+    font-size:0!important;
+    letter-spacing:0!important;
+  }
+  .ronn19 .cinematicTagline:before,
+  .ronn19 .cinematicTagline:after{
+    content:none!important;
+    display:none!important;
+  }
+  .ronn19 .cinematicTagline img{
+    display:none!important;
+  }
+  .ronn19 .cinematicTagline b{
+    display:block!important;
+    font-size:15px!important;
+    line-height:1!important;
+    font-weight:600!important;
+    letter-spacing:0!important;
+    color:#f2f2f2!important;
+  }
+
+  .ronn19 .runtimeMeta{
+    display:none!important;
+  }
+
+  .ronn19 .cinematicTopButtons{
+    grid-column:3!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-end!important;
+    width:40px!important;
+    min-width:40px!important;
+    margin:0!important;
+    padding:0!important;
+    gap:0!important;
+  }
+  .ronn19 .cinematicTopButtons>*{
+    display:none!important;
+  }
+  .ronn19 .cinematicTopButtons .profileOrb{
+    display:grid!important;
+    place-items:center!important;
+    width:30px!important;
+    height:30px!important;
+    min-width:30px!important;
+    min-height:30px!important;
+    margin:0!important;
+    padding:0!important;
+    border:0!important;
+    border-radius:50%!important;
+    overflow:hidden!important;
+    background:transparent!important;
+  }
+  .ronn19 .profileOrb img{
+    display:block!important;
+    width:30px!important;
+    height:30px!important;
+  }
+
+  /* Prevent iPhone focus zoom without disabling pinch-to-zoom. */
+  input,textarea,select,
   .sideSearch input,
   .field input,
   .field textarea,
@@ -40,81 +150,136 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{
   .webAuthCard input{
     font-size:16px!important;
   }
-  .composer textarea{
-    line-height:1.42!important;
-    transform:none!important;
-    zoom:1!important;
-  }
-  .composerDock,.composerWrap,.composer,.messages,.panelView{
+
+  /* Normal-size one-line composer. */
+  .ronn19 .composerDock{
+    left:0!important;
+    right:0!important;
+    bottom:0!important;
+    width:100%!important;
     max-width:100%!important;
+    padding:16px 9px calc(9px + env(safe-area-inset-bottom))!important;
   }
-  .panelView,.messages{
-    overscroll-behavior:contain;
-    -webkit-overflow-scrolling:touch;
+  .ronn19 .composerWrap,
+  .ronn19 .attachments{
+    width:100%!important;
+    max-width:760px!important;
+    margin-left:auto!important;
+    margin-right:auto!important;
   }
-}
-
-
-/* RONN mobile chat layout: normal controls, slightly larger content display */
-@media(max-width:780px){
-  .composer{
+  .ronn19 .composer{
     display:flex!important;
     grid-template-columns:none!important;
     flex-wrap:nowrap!important;
     align-items:flex-end!important;
-    gap:5px!important;
     width:100%!important;
-    min-height:54px!important;
+    max-width:100%!important;
+    min-height:52px!important;
     padding:6px 7px!important;
+    gap:5px!important;
     overflow:hidden!important;
+    border-radius:26px!important;
   }
-
-  .composer textarea{
+  .ronn19 .composer textarea{
     flex:1 1 auto!important;
     width:auto!important;
     min-width:0!important;
     min-height:40px!important;
     max-height:132px!important;
+    margin:0!important;
     padding:10px 4px 7px!important;
-    font-size:16px!important;
     line-height:1.42!important;
+    transform:none!important;
+    zoom:1!important;
   }
-
-  .composer .attach,
-  .composer .composerTool,
-  .composer .send,
-  .composer .stop{
+  .ronn19 .composer .attach,
+  .ronn19 .composer .composerTool,
+  .ronn19 .composer .send,
+  .ronn19 .composer .stop{
     flex:0 0 36px!important;
     width:36px!important;
     height:36px!important;
     min-width:36px!important;
     min-height:36px!important;
     margin:0!important;
+    padding:0!important;
     align-self:flex-end!important;
     border-radius:50%!important;
   }
+  .ronn19 .composer .attach{font-size:22px!important}
+  .ronn19 .composer .composerTool{font-size:15px!important}
+  .ronn19 .composer .send,
+  .ronn19 .composer .stop{order:20!important;font-size:17px!important}
 
-  .composer .attach{font-size:22px!important}
-  .composer .composerTool{font-size:15px!important}
-  .composer .send{font-size:17px!important;order:20!important}
-  .composer .stop{order:20!important}
+  /* Slightly larger reading display, regular controls. */
+  .ronn19 .messages{
+    max-width:100%!important;
+    padding:14px 14px 128px!important;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  .ronn19 .answer{
+    font-size:15px!important;
+    line-height:1.58!important;
+  }
+  .ronn19 .userBubble{
+    max-width:88%!important;
+    font-size:15px!important;
+  }
 
-  /* Slightly larger reading/display scale; controls remain normal size. */
-  .ronn19 .answer{font-size:16px!important;line-height:1.62!important}
-  .ronn19 .userBubble{font-size:16px!important}
-  .ronn19 .welcome h1{font-size:29px!important}
-  .ronn19 .welcome p{font-size:15px!important}
-  .ronn19 .panelHeader h1{font-size:29px!important}
-  .ronn19 .panelHeader p{font-size:14px!important}
-  .ronn19 .cinematicTagline b{font-size:15px!important}
+  .ronn19 .welcome{
+    width:100%!important;
+    max-width:620px!important;
+    min-height:0!important;
+    margin:0 auto!important;
+    padding:7vh 8px 100px!important;
+  }
+  .ronn19 .welcomeOrb{
+    width:44px!important;
+    height:44px!important;
+    margin:0 0 16px!important;
+  }
+  .ronn19 .welcomeOrb:before{
+    width:44px!important;
+    height:44px!important;
+  }
+  .ronn19 .welcome h1{
+    font-size:30px!important;
+    line-height:1.1!important;
+    margin:0 0 9px!important;
+  }
+  .ronn19 .welcome p{
+    max-width:500px!important;
+    margin:0 0 22px!important;
+    font-size:14px!important;
+    line-height:1.5!important;
+  }
+  .ronn19 .capGrid{
+    grid-template-columns:1fr!important;
+    gap:8px!important;
+    max-width:100%!important;
+  }
+  .ronn19 .capGrid button{
+    min-height:66px!important;
+    padding:12px 14px!important;
+    border-radius:15px!important;
+  }
+  .ronn19 .capGrid b{font-size:13px!important}
+  .ronn19 .capGrid span{font-size:11px!important}
+
+  .ronn19 .panelView{
+    max-width:100%!important;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
 }
 
 @media(max-width:390px){
-  .composer{gap:4px!important}
-  .composer .attach,
-  .composer .composerTool,
-  .composer .send,
-  .composer .stop{
+  .ronn19 .composer{gap:4px!important}
+  .ronn19 .composer .attach,
+  .ronn19 .composer .composerTool,
+  .ronn19 .composer .send,
+  .ronn19 .composer .stop{
     flex-basis:34px!important;
     width:34px!important;
     height:34px!important;
