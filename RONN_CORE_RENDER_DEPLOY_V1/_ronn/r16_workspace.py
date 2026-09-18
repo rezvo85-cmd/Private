@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast, json, os, re, shutil, subprocess, time, uuid
 from pathlib import Path
 from r15_trust import checkpoint, mark_rolled_back, rollback_payload
+from r16_runner import status as runner_status, execute as runner_execute
 
 BASE=Path(__file__).resolve().parent
 ROOT=BASE/"data"/"workspaces"
@@ -102,6 +103,17 @@ def run(owner,workspace,entry,language="auto",execute=True):
     text=p.read_text("utf-8",errors="replace")
     ext=p.suffix.lower()
     lang=("python" if ext==".py" else "javascript" if ext in {".js",".mjs",".cjs"} else language).lower()
+    remote=runner_status()
+    if execute and remote.get("verified"):
+        base=root(owner,workspace)
+        files=[]
+        for fp in base.rglob("*"):
+            if fp.is_file() and fp.stat().st_size<=MAX_FILE:
+                files.append({"name":fp.relative_to(base).as_posix(),"content":fp.read_text("utf-8",errors="replace")})
+            if len(files)>=60:break
+        result=runner_execute(files,str(Path(entry).as_posix()),lang,30)
+        result["runtime"]="isolated-full-runner"
+        return result
     if lang=="python":
         _validate_python(text)
         cmd=[shutil.which("python") or shutil.which("python3") or "python","-m","py_compile",str(p)] if not execute else [shutil.which("python") or shutil.which("python3") or "python",str(p)]
@@ -142,4 +154,4 @@ def rollback(owner,action_id,workspace,name):
 def status():
     return {"workspace_root":str(ROOT),"python":bool(shutil.which("python") or shutil.which("python3")),
             "node":bool(shutil.which("node")),"mode":"controlled-local-execution","network_allowed":False,"javascript_local_mode":"syntax-check-only",
-            "full_container_runner_configured":bool((os.getenv("RONN_RUNNER_URL") or "").strip())}
+            "full_runner":runner_status()}
