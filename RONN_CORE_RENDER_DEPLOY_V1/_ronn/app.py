@@ -1367,6 +1367,8 @@ def minimal_cloud_request(model, messages, max_tokens, stream=True):
     started=time.time()
     try:
         _headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
+        if provider == "groq" and model in {"groq/compound","groq/compound-mini"}:
+            _headers["Groq-Model-Version"]="latest"
         if provider == "openrouter":
             _headers["X-Title"]="RONN"
         r=requests.post(
@@ -1618,12 +1620,14 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                 pass
             recovered, used_model = nonstream_with_fallback(model, route, retry_messages, 1000)
             recovered=(recovered or "").strip()
-            if recovered:
+            if recovered and (not _guard_live or not looks_like_internal_tool_payload(recovered)):
                 full=recovered
                 if used_model != model:
                     model=used_model; route="backup"
                     yield json.dumps({"meta":{"route":"backup","model":model,"profile":profile,"reason":"empty_stream_recovery"}}) + "\n"
                 yield json.dumps({"token":full}) + "\n"
+            elif recovered and _guard_live:
+                full=""
         except Exception as exc:
             if request_id:
                 try:
@@ -1653,7 +1657,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
             finish_run(request_id, (time.time()-(started_at or time.time())), len(full), "complete", model=model, route=route)
         except Exception:
             pass
-    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} else "model"
+    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-recovered"} else "model"
     audit = answer_audit(original_message, full, profile=profile, runtime_verified=False, evidence_mode=evidence_mode)
     audit["static_code"] = static_code_checks(full)
     audit["r5_quality_gate"] = quality_report(original_message, full, evidence_mode=evidence_mode, runtime_verified=False)
