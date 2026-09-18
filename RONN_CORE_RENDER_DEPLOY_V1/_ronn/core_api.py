@@ -293,12 +293,16 @@ def chat_complete(body: CoreChatBody, request: Request, _: bool = Depends(_auth)
     payload["mode"] = body.mode if body.mode != "auto" else settings.get("reasoning_mode", "auto")
     add_message(owner, cid, "user", body.message, {"project_id":actual_project_id})
     _sync(owner,"conversation",cid,"message",{"role":"user","content":body.message,"project_id":actual_project_id})
-    answer_parts=[]; final_meta={}
+    answer_parts=[]; final_meta={}; response_meta={}
     for raw in _need("stream_chat")(owner,payload):
         try:
             obj=json.loads((raw if isinstance(raw,str) else raw.decode("utf-8")).strip())
+            if obj.get("meta") and isinstance(obj.get("meta"),dict):
+                response_meta.update(obj["meta"])
             if obj.get("token"): answer_parts.append(str(obj["token"]))
-            if obj.get("done"): final_meta={k:obj.get(k) for k in ("route","model","request_id","audit") if k in obj}
+            if obj.get("done"):
+                final_meta={k:obj.get(k) for k in ("route","model","request_id","audit") if k in obj}
+                final_meta["meta"]=response_meta
         except Exception: pass
     answer="".join(answer_parts).strip()
     if answer:
@@ -329,16 +333,19 @@ def chat_sse(body: CoreChatBody, request: Request, _: bool = Depends(_auth)):
     _sync(owner,"conversation",cid,"message",{"role":"user","content":body.message,"project_id":project_id})
     def events():
         yield "event: meta\ndata: "+json.dumps({"conversation_id":cid,"project_id":project_id,"core_version":CORE_VERSION})+"\n\n"
-        parts=[]; final_meta={}
+        parts=[]; final_meta={}; response_meta={}
         for raw in _need("stream_chat")(owner,payload):
             try:
                 obj=json.loads((raw if isinstance(raw,str) else raw.decode("utf-8")).strip())
             except Exception:
                 continue
+            if obj.get("meta") and isinstance(obj.get("meta"),dict):
+                response_meta.update(obj["meta"])
             if obj.get("token"):
                 parts.append(str(obj["token"])); yield "event: token\ndata: "+json.dumps({"token":obj["token"]})+"\n\n"
             if obj.get("done"):
                 final_meta={k:obj.get(k) for k in ("route","model","request_id","audit") if k in obj}
+                final_meta["meta"]=response_meta
         answer="".join(parts).strip()
         if answer:
             add_message(owner,cid,"assistant",answer,final_meta)
