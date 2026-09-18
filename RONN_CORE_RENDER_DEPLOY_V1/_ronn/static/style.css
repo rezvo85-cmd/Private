@@ -859,3 +859,207 @@ input,textarea,select,button{max-width:100%}
   .userBubble{max-width:90%!important}
   .welcome h1{font-size:28px!important}
 }
+
+
+/* ===== RONN R19 CHAT-FIRST REDESIGN ===== */
+.ronn19{
+  --bg:#212121;--bg2:#212121;--panel:#171717;--panel2:#252525;--panel3:#2f2f2f;
+  --line:#353535;--line2:#454545;--text:#f4f4f4;--muted:#a6a6a6;--dim:#747474;
+  --red:#e12643;--red2:#ff3d57;--red3:#9e1730;--redSoft:rgba(225,38,67,.12);
+  --redGlow:rgba(225,38,67,.18);--sidebar:260px;
+  background:#212121;
+}
+.ronn19:before{display:none}
+.ronn19 .appShell{grid-template-columns:var(--sidebar) minmax(0,1fr);background:#212121}
+.ronn19 .sidebar{
+  border-right:0;background:#171717;box-shadow:none;padding:8px;
+}
+.ronn19 .brandRow{
+  height:48px;padding:5px 7px;border:0;gap:9px;
+}
+.ronn19 .brandMark{
+  width:31px;height:31px;border:0;border-radius:10px;background:transparent;box-shadow:none;
+}
+.ronn19 .brandMark:after{display:none}
+.ronn19 .brandMark img{width:31px;height:31px;display:block}
+.ronn19 .brandCopy b{font-size:14px;letter-spacing:.02em}
+.ronn19 .brandCopy small{display:none}
+.ronn19 .sidebarCollapse{display:none}
+.ronn19 .newChat{
+  margin:7px 0 8px;border:0;background:transparent;border-radius:9px;padding:10px 9px;
+  color:#ececec;grid-template-columns:22px 1fr;
+}
+.ronn19 .newChat:hover{background:#252525;box-shadow:none}
+.ronn19 .newChat>span{color:#ddd}.ronn19 .newChat kbd{display:none}
+.ronn19 .sideSearch{
+  margin:0 0 9px;border:0;background:#232323;border-radius:9px;padding:0 10px;
+}
+.ronn19 .sideSearch input{font-size:12px;height:37px;color:#eee}
+.ronn19 .sideSectionTitle{padding:11px 9px 6px;font-size:10px;letter-spacing:.04em;color:#8a8a8a}
+.ronn19 .chatList{padding:0}
+.ronn19 .chatRow{
+  border:0;border-radius:8px;padding:9px;color:#c4c4c4;margin:1px 0;
+}
+.ronn19 .chatRow:hover,.ronn19 .chatRow.active{background:#252525;color:#fff}
+.ronn19 .chatRow.active{box-shadow:inset 2px 0 #d72a45}
+.ronn19 .chatRow span{font-size:12px}
+.ronn19 .sidebarBottom{border-top:1px solid #2b2b2b;padding:8px 0 0}
+.ronn19 .navBtn{border:0;border-radius:8px;padding:9px;color:#b0b0b0}
+.ronn19 .navBtn:hover,.ronn19 .navBtn.active{background:#252525;color:#fff}
+.ronn19 .navBtn.active{box-shadow:none}
+.ronn19 .navBtn i{color:#d4475d}.ronn19 .navBtn span{font-size:12px}
+.ronn19 .serverLine{opacity:.55}
+
+.ronn19 .main{background:#212121;overflow:hidden}
+.ronn19 .topbar{
+  height:56px;min-height:56px;border:0;background:rgba(33,33,33,.96);box-shadow:none;
+  padding:0 16px;
+}
+.ronn19 .cinematicTagline{
+  display:flex;align-items:center;gap:8px;color:#f3f3f3;font-size:14px;letter-spacing:0;
+}
+.ronn19 .cinematicTagline img{width:25px;height:25px;border-radius:8px}
+.ronn19 .cinematicTagline b{font-weight:600}
+.ronn19 .runtimeMeta,.ronn19 .projectBadge,.ronn19 .providerBadge,.ronn19 .compactAction{display:none!important}
+.ronn19 .cinematicTopButtons{margin-left:auto}
+.ronn19 .profileOrb{
+  width:32px;height:32px;border-radius:50%;border:0;background:transparent;padding:0;overflow:hidden;
+}
+.ronn19 .profileOrb img{width:100%;height:100%;display:block}
+.ronn19 .mobileMenuBtn{border:0;background:transparent;color:#ddd;font-size:19px}
+
+.ronn19 #chatView{background:#212121}
+.ronn19 .chatViewport{background:#212121}
+.ronn19 .messages{
+  width:100%;max-width:none;margin:0;padding:24px 18px 190px;scrollbar-width:thin;
+}
+.ronn19 .message{
+  width:min(100%,780px);margin:0 auto;padding:13px 0;gap:13px;
+}
+.ronn19 .message.assistant{align-items:flex-start}
+.ronn19 .message.user{justify-content:flex-end}
+.ronn19 .aiMark{
+  width:28px;height:28px;min-width:28px;border-radius:9px;border:0;background:transparent;box-shadow:none;
+  font-size:0;overflow:hidden;margin-top:1px;
+}
+.ronn19 .aiMark img{display:block;width:28px;height:28px}
+.ronn19 .bubble{font-size:15px;line-height:1.62}
+.ronn19 .aiBubble{
+  max-width:calc(100% - 42px);background:transparent;border:0;box-shadow:none;padding:0;color:#ededed;
+}
+.ronn19 .userBubble{
+  max-width:78%;background:#2f2f2f;border:1px solid #383838;border-radius:20px;padding:10px 15px;
+  color:#f2f2f2;box-shadow:none;
+}
+.ronn19 .answer p{margin:0 0 12px}
+.ronn19 .answer h1,.ronn19 .answer h2,.ronn19 .answer h3{letter-spacing:0;margin:18px 0 8px}
+.ronn19 .answer pre{background:#111;border:1px solid #333;border-radius:12px}
+.ronn19 .answer code{background:#2b2b2b}
+.ronn19 .msgTools{opacity:0;transition:opacity .12s;margin-top:7px}
+.ronn19 .message:hover .msgTools{opacity:1}
+.ronn19 .msgTools button{border:0;background:transparent;color:#858585;padding:4px 7px}
+.ronn19 .msgTools button:hover{color:#e94c64;background:#292929}
+.ronn19 .auditChip{background:transparent!important;border:0!important;padding-left:0!important}
+
+.ronn19 .welcome{
+  width:min(100%,760px);min-height:60vh;margin:0 auto;padding:11vh 12px 120px;text-align:left;
+}
+.ronn19 .welcomeOrb{
+  width:48px;height:48px;border:0;background:transparent;box-shadow:none;margin:0 0 22px;
+}
+.ronn19 .welcomeOrb span{display:none}
+.ronn19 .welcomeOrb:before{
+  content:"";display:block;width:48px;height:48px;background:url('/static/ronn_logo.svg') center/contain no-repeat;
+}
+.ronn19 .welcome>.eyebrow{display:none}
+.ronn19 .welcome h1{font-size:30px;line-height:1.15;margin:0 0 9px;font-weight:600;letter-spacing:-.03em}
+.ronn19 .welcome p{font-size:14px;color:#a8a8a8;margin:0 0 27px;max-width:520px}
+.ronn19 .capGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;max-width:680px}
+.ronn19 .capGrid button{
+  min-height:76px;text-align:left;border:1px solid #3a3a3a;background:#272727;border-radius:14px;padding:13px 14px;
+  color:#ededed;box-shadow:none;
+}
+.ronn19 .capGrid button:hover{background:#2d2d2d;border-color:#515151}
+.ronn19 .capGrid b{font-size:13px}.ronn19 .capGrid span{font-size:11px;color:#939393}
+
+.ronn19 .composerDock{
+  position:absolute;left:0;right:0;bottom:0;width:auto;padding:28px 18px 13px;
+  background:linear-gradient(180deg,rgba(33,33,33,0),#212121 28%,#212121 100%);
+  border:0;z-index:5;
+}
+.ronn19 .presetRow,.ronn19 .composerMeta{display:none!important}
+.ronn19 .attachments{width:min(100%,780px);margin:0 auto 7px}
+.ronn19 .composerWrap{width:min(100%,780px);margin:0 auto;position:relative}
+.ronn19 .composer{
+  min-height:54px;border:1px solid #454545;background:#2f2f2f;border-radius:28px;padding:6px 7px 6px 9px;
+  box-shadow:0 2px 14px rgba(0,0,0,.18);align-items:flex-end;
+}
+.ronn19 .composer:focus-within{border-color:#585858;box-shadow:0 0 0 1px rgba(225,38,67,.10)}
+.ronn19 .composer textarea{
+  min-height:41px;max-height:180px;padding:10px 4px 8px;background:transparent;color:#f4f4f4;font-size:16px;line-height:1.45;
+}
+.ronn19 .composer textarea::placeholder{color:#8b8b8b}
+.ronn19 .attach{
+  width:40px;height:40px;border-radius:50%;border:0;background:transparent;color:#c5c5c5;font-size:24px;
+}
+.ronn19 .attach:hover{background:#3a3a3a}
+.ronn19 .send,.ronn19 .stop{
+  width:40px;height:40px;border-radius:50%;border:0;background:#e12a46;color:#fff;box-shadow:none;
+}
+.ronn19 .send:hover{background:#f13a55}
+.ronn19 .stop{background:#494949}
+.ronn19 .plusMenu{bottom:62px;border:1px solid #3b3b3b;background:#252525;border-radius:14px;box-shadow:0 14px 45px rgba(0,0,0,.36)}
+.ronn19 .plusMenu button:hover{background:#303030}
+.ronn19 .hint{width:min(100%,780px);margin:7px auto 0;text-align:center;color:#767676;font-size:10px}
+.ronn19 .activityDock{
+  width:min(calc(100% - 36px),780px);left:50%;transform:translateX(-50%);bottom:104px;
+  border:1px solid #3c3c3c;background:#292929;border-radius:12px;box-shadow:none;
+}
+.ronn19 .activityPulse{background:#e12a46}
+
+.ronn19 .panelView{background:#212121;padding:28px min(5vw,58px);overflow:auto}
+.ronn19 .panelHeader,.ronn19 .brainHero,.ronn19 .ownerAccessCard,.ronn19 .ecosystemStatusCard,
+.ronn19 .settingCard,.ronn19 .diagCard,.ronn19 .agentOpsCard,.ronn19 .taskHistoryPanel{
+  background:#272727!important;border-color:#383838!important;box-shadow:none!important;
+}
+.ronn19 .primarySmall{background:#d92743;border:0}
+.ronn19 .ghost{background:#292929;border-color:#414141}
+.ronn19 .sectionTabs button.active{color:#fff;border-color:#d92743}
+.ronn19 input,.ronn19 textarea,.ronn19 select{border-color:#414141;background:#292929;color:#eee}
+
+.ronn19 .webAuthGate{background:#151515}
+.ronn19 .webAuthCard{background:#242424;border:1px solid #3a3a3a;box-shadow:0 24px 80px rgba(0,0,0,.55)}
+.ronn19 .webAuthOrb{background:transparent;border:0;box-shadow:none}
+.ronn19 .webAuthOrb img{width:54px;height:54px}
+.ronn19 #webAuthUnlock{background:#db2945;border:0}
+
+@media(max-width:780px){
+  .ronn19{--sidebar:284px}
+  .ronn19 .appShell{display:block}
+  .ronn19 .sidebar{
+    position:fixed;inset:0 auto 0 0;width:min(86vw,300px);transform:translateX(-102%);transition:transform .18s ease;
+    z-index:30;padding-top:max(8px,env(safe-area-inset-top));
+  }
+  .ronn19.mobileNavOpen .sidebar{transform:translateX(0)}
+  .ronn19 .sidebarScrim{z-index:29;background:rgba(0,0,0,.52)}
+  .ronn19 .topbar{height:50px;min-height:50px;padding:0 10px}
+  .ronn19 .cinematicTagline{position:absolute;left:50%;transform:translateX(-50%)}
+  .ronn19 .cinematicTagline img{width:23px;height:23px}
+  .ronn19 .cinematicTagline b{font-size:14px}
+  .ronn19 .profileOrb{width:29px;height:29px}
+  .ronn19 .messages{padding:14px 12px 170px}
+  .ronn19 .message{padding:10px 0;gap:9px}
+  .ronn19 .aiMark{width:25px;height:25px;min-width:25px}
+  .ronn19 .aiMark img{width:25px;height:25px}
+  .ronn19 .aiBubble{max-width:calc(100% - 34px)}
+  .ronn19 .userBubble{max-width:88%;font-size:15px}
+  .ronn19 .welcome{padding:10vh 8px 130px}
+  .ronn19 .welcome h1{font-size:27px}
+  .ronn19 .capGrid{grid-template-columns:1fr}
+  .ronn19 .capGrid button:nth-child(n+3){display:none}
+  .ronn19 .composerDock{padding:24px 9px max(9px,env(safe-area-inset-bottom))}
+  .ronn19 .composer{border-radius:25px}
+  .ronn19 .hint{display:none}
+  .ronn19 .activityDock{bottom:92px;width:calc(100% - 20px)}
+  .ronn19 .panelView{padding:18px 13px 90px}
+}
