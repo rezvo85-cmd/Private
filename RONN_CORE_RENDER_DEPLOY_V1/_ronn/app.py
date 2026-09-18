@@ -35,6 +35,7 @@ from r13_ensemble import NEMOTRON_MODEL as OR_NEMOTRON_MODEL, DEEPSEEK_MODEL as 
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
+from r13_benchmarks import run_r13_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
@@ -2419,12 +2420,14 @@ def evaluation_api():
 @app.get("/api/provider-check")
 def provider_check(provider: str = "groq"):
     provider = (provider or "groq").strip().lower()
-    if provider not in {"groq", "nvidia"}:
-        raise HTTPException(400, "Provider must be groq or nvidia.")
+    if provider not in {"groq", "nvidia", "openrouter"}:
+        raise HTTPException(400, "Provider must be groq, nvidia, or openrouter.")
     if provider == "groq":
         configured = groq_key_loaded(); base = API_BASE; key = API_KEY
-    else:
+    elif provider == "nvidia":
         configured = nvidia_key_loaded(); base = NVIDIA_API_BASE; key = NVIDIA_API_KEY
+    else:
+        configured = openrouter_key_loaded(); base = OPENROUTER_API_BASE; key = OPENROUTER_API_KEY
     if not configured:
         return {"provider":provider,"configured":False,"reachable":False,"verified":False,"completion_verified":False,"message":"No valid API key is configured."}
     try:
@@ -2444,14 +2447,20 @@ def provider_check(provider: str = "groq"):
             candidates=[m for m in preferred if (not ids or m in ids)]
             if ids:
                 candidates += [m for m in _general_chat_model_ids(ids) if m not in candidates]
-        else:
+        elif provider=="nvidia":
             candidates=[NVIDIA_MODEL] if (not ids or NVIDIA_MODEL in ids) else []
+        else:
+            preferred=[OR_NEMOTRON_MODEL,OR_DEEPSEEK_MODEL,OR_QWEN_MODEL,OR_CRITIC_MODEL]
+            candidates=[m for m in preferred if (not ids or m in ids)]
         if not candidates:
             return {"provider":provider,"configured":True,"reachable":True,"verified":False,"completion_verified":False,"available_model_count":len(ids),"message":"Provider is reachable, but none of RONN's configured chat models appear in the current model catalog.","health":recent_health(provider=provider)}
         model=candidates[0]
         payload={"model":model,"messages":[{"role":"user","content":"Reply with exactly: RONN_OK"}],"stream":False,"max_tokens":32,"temperature":0.1}
         started=time.time()
-        cr=requests.post(base + "/chat/completions",headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"},json=payload,timeout=25)
+        _test_headers={"Authorization":f"Bearer {key}","Content-Type":"application/json"}
+        if provider=="openrouter":
+            _test_headers["X-Title"]="RONN"
+        cr=requests.post(base + "/chat/completions",headers=_test_headers,json=payload,timeout=25)
         text=""
         if cr.ok:
             try: text=parse_nonstream(cr)
@@ -2486,6 +2495,7 @@ def diagnostics(request: Request):
         "r12_improvements": (BASE / "r12_improvements.py").exists(),
         "r12_benchmarks": (BASE / "r12_benchmarks.py").exists(),
         "r13_ensemble": (BASE / "r13_ensemble.py").exists(),
+        "r13_benchmarks": (BASE / "r13_benchmarks.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -2498,9 +2508,10 @@ def diagnostics(request: Request):
     r7_checks = run_r7_benchmarks()
     r11_checks = run_r11_benchmarks()
     r12_checks = run_r12_benchmarks()
+    r13_checks = run_r13_benchmarks()
     provider = provider_config_status()
     warnings = []
-    if not provider["groq"]["configured"] and not provider["nvidia"]["configured"]:
+    if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
         warnings.append("No AI provider key is configured.")
     if checks.get("score", 0) < 100:
         warnings.append("One or more legacy local regression checks failed.")
@@ -2514,6 +2525,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R11 reliability checks failed.")
     if r12_checks.get("score", 0) < 100:
         warnings.append("One or more R12 improvement checks failed.")
+    if r13_checks.get("score", 0) < 100:
+        warnings.append("One or more R13 ensemble checks failed.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -2532,6 +2545,8 @@ def diagnostics(request: Request):
         "r7_eval":r7_checks,
         "r11_eval":r11_checks,
         "r12_eval":r12_checks,
+        "r13_eval":r13_checks,
+        "r13_ensemble":r13_status(),
         "r11_signal_registry":R11_SIGNAL_COUNT,
         "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "task_engine":task_stats(),
@@ -2575,6 +2590,8 @@ def status(request: Request):
         "r7_eval_score":run_r7_benchmarks().get("score",0),
         "r11_eval_score":run_r11_benchmarks().get("score",0),
         "r12_eval_score":run_r12_benchmarks().get("score",0),
+        "r13_eval_score":run_r13_benchmarks().get("score",0),
+        "r13_ensemble":r13_status(),
         "r11_signal_registry":R11_SIGNAL_COUNT,
         "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "task_engine":task_stats(),
