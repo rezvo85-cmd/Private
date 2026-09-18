@@ -33,6 +33,7 @@ from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNA
 from r12_improvements import r12_preflight, r12_directive, IMPROVEMENT_COUNT as R12_IMPROVEMENT_COUNT
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
+from r12_benchmarks import run_r12_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
@@ -2413,6 +2414,7 @@ def diagnostics(request: Request):
     r6_checks = run_r6_benchmarks()
     r7_checks = run_r7_benchmarks()
     r11_checks = run_r11_benchmarks()
+    r12_checks = run_r12_benchmarks()
     provider = provider_config_status()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"]:
@@ -2427,6 +2429,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R7 impact/agent checks failed.")
     if r11_checks.get("score", 0) < 100:
         warnings.append("One or more R11 reliability checks failed.")
+    if r12_checks.get("score", 0) < 100:
+        warnings.append("One or more R12 improvement checks failed.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -2444,7 +2448,9 @@ def diagnostics(request: Request):
         "r6_eval":r6_checks,
         "r7_eval":r7_checks,
         "r11_eval":r11_checks,
+        "r12_eval":r12_checks,
         "r11_signal_registry":R11_SIGNAL_COUNT,
+        "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "task_engine":task_stats(),
         "task_queue":queue_stats(owner_id(request)),
         "knowledge_base":kb_stats(owner_id(request)),
@@ -2483,7 +2489,9 @@ def status(request: Request):
         "r6_eval_score":run_r6_benchmarks().get("score",0),
         "r7_eval_score":run_r7_benchmarks().get("score",0),
         "r11_eval_score":run_r11_benchmarks().get("score",0),
+        "r12_eval_score":run_r12_benchmarks().get("score",0),
         "r11_signal_registry":R11_SIGNAL_COUNT,
+        "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "task_engine":task_stats(),
         "task_queue":queue_stats(owner),
         "knowledge_base":kb_stats(owner),
