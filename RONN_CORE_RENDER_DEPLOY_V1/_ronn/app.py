@@ -44,7 +44,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R10-ECOSYSTEM")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R10.1-WEB-AUTH")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -282,7 +282,7 @@ async def public_guard(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith("/api/v1/"):
-        response.headers["X-RONN-Core-Version"] = "1.1.0"
+        response.headers["X-RONN-Core-Version"] = "1.1.1"
     return response
 
 @app.middleware("http")
@@ -293,6 +293,18 @@ async def no_cache(request: Request, call_next):
     return response
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def pwa_manifest():
+    return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
+@app.get("/service-worker.js", include_in_schema=False)
+def pwa_service_worker():
+    return FileResponse(
+        STATIC / "service-worker.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 # ---------------- database / private per-browser memory ----------------
 
