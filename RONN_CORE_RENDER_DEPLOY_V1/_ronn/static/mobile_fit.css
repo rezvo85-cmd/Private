@@ -324,7 +324,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .capGrid b{font-size:13px!important}
   .ronn19 .capGrid span{font-size:11px!important}
 
-  /* ---------- composer: normal flow, no overlap ---------- */
+  /* ---------- ChatGPT-style mobile composer ---------- */
   .ronn19 .composerDock{
     position:relative!important;
     inset:auto!important;
@@ -332,9 +332,8 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     z-index:60!important;
     width:100%!important;
     max-width:100%!important;
-    padding:7px 8px max(8px,env(safe-area-inset-bottom))!important;
+    padding:8px 8px max(8px,env(safe-area-inset-bottom))!important;
     border:0!important;
-    border-top:1px solid rgba(255,255,255,.035)!important;
     background:#212121!important;
     pointer-events:auto!important;
   }
@@ -345,73 +344,123 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .attachments{
     width:100%!important;
     max-width:760px!important;
-    margin:0 auto 6px!important;
-    padding:0 3px!important;
+    margin:0 auto 7px!important;
+    padding:0 5px!important;
     overflow-x:auto!important;
   }
+
   .ronn19 .composerWrap{
     position:relative!important;
     width:100%!important;
     max-width:760px!important;
     margin:0 auto!important;
   }
+
   .ronn19 .composer{
-    display:flex!important;
-    grid-template-columns:none!important;
-    flex-wrap:nowrap!important;
-    align-items:flex-end!important;
+    display:grid!important;
+    grid-template-columns:42px minmax(0,1fr) 40px 40px!important;
+    grid-template-rows:minmax(48px,auto) 44px!important;
+    grid-template-areas:
+      "input input input input"
+      "attach spacer voice send"!important;
+    align-items:center!important;
     width:100%!important;
-    min-height:50px!important;
-    padding:6px!important;
-    gap:4px!important;
+    min-height:108px!important;
+    padding:10px 10px 8px!important;
+    gap:2px 6px!important;
     overflow:hidden!important;
-    border:1px solid #454545!important;
-    border-radius:25px!important;
+    border:1px solid rgba(255,255,255,.15)!important;
+    border-radius:30px!important;
     background:#2f2f2f!important;
     box-shadow:none!important;
   }
+
   .ronn19 .composer textarea{
-    flex:1 1 auto!important;
-    width:auto!important;
+    grid-area:input!important;
+    align-self:stretch!important;
+    width:100%!important;
     min-width:0!important;
-    min-height:38px!important;
-    max-height:120px!important;
+    min-height:48px!important;
+    max-height:144px!important;
     margin:0!important;
-    padding:9px 5px 7px!important;
+    padding:5px 8px 2px!important;
     border:0!important;
     outline:0!important;
     background:transparent!important;
-    color:#f4f4f4!important;
-    font-size:16px!important;
-    line-height:1.4!important;
+    color:#f5f5f5!important;
+    font-size:17px!important;
+    line-height:1.45!important;
     resize:none!important;
     transform:none!important;
     zoom:1!important;
     -webkit-appearance:none!important;
     appearance:none!important;
+    overflow-y:auto!important;
   }
-  .ronn19 .composer textarea::placeholder{color:#a9a9a9!important}
+  .ronn19 .composer textarea::placeholder{
+    color:#b7b7b7!important;
+    opacity:1!important;
+  }
+
+  .ronn19 .composer .attach{
+    grid-area:attach!important;
+    justify-self:start!important;
+  }
+  .ronn19 #voiceBtn{
+    grid-area:voice!important;
+    justify-self:end!important;
+  }
+  .ronn19 #sendBtn,
+  .ronn19 #stopBtn{
+    grid-area:send!important;
+    justify-self:end!important;
+  }
+  .ronn19 #screenBtn{display:none!important}
 
   .ronn19 .composer .attach,
   .ronn19 .composer .composerTool,
   .ronn19 .composer .send,
   .ronn19 .composer .stop{
-    flex:0 0 36px!important;
-    width:36px!important;
-    height:36px!important;
-    min-width:36px!important;
-    min-height:36px!important;
+    align-self:center!important;
+    width:40px!important;
+    height:40px!important;
+    min-width:40px!important;
+    min-height:40px!important;
     margin:0!important;
     padding:0!important;
-    align-self:flex-end!important;
+    border:0!important;
     border-radius:50%!important;
     box-shadow:none!important;
+    background:transparent!important;
+    color:#f1f1f1!important;
   }
-  .ronn19 .composer .attach{font-size:22px!important}
-  .ronn19 #screenBtn{display:none!important}
-  .ronn19 .composer .composerTool{font-size:15px!important}
-  .ronn19 .composer .send,
-  .ronn19 .composer .stop{order:20!important;font-size:17px!important}
+
+  .ronn19 .composer .attach{
+    font-size:31px!important;
+    font-weight:300!important;
+    line-height:1!important;
+  }
+  .ronn19 .composer .composerTool{
+    font-size:21px!important;
+    line-height:1!important;
+  }
+  .ronn19 .composer .send{
+    background:#f4f4f4!important;
+    color:#171717!important;
+    font-size:22px!important;
+    font-weight:700!important;
+  }
+  .ronn19 .composer .stop{
+    background:#1688ff!important;
+    color:#fff!important;
+    font-size:15px!important;
+  }
+  .ronn19 .composer .attach:active,
+  .ronn19 .composer .composerTool:active{
+    background:rgba(255,255,255,.08)!important;
+  }
+  .ronn19 .composer .send:active,
+  .ronn19 .composer .stop:active{transform:scale(.96)!important}
 
   .ronn19 .plusMenu{
     position:absolute!important;
@@ -428,7 +477,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     position:absolute!important;
     left:10px!important;
     right:10px!important;
-    bottom:72px!important;
+    bottom:128px!important;
     width:auto!important;
     max-width:none!important;
     transform:none!important;
@@ -567,16 +616,21 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
 @media(max-width:390px){
   .ronn19 .messages{padding-left:11px!important;padding-right:11px!important}
   .ronn19 .composerDock{padding-left:7px!important;padding-right:7px!important}
-  .ronn19 .composer{gap:3px!important}
+  .ronn19 .composer{
+    grid-template-columns:38px minmax(0,1fr) 38px 38px!important;
+    min-height:104px!important;
+    border-radius:28px!important;
+    padding-left:9px!important;
+    padding-right:9px!important;
+  }
   .ronn19 .composer .attach,
   .ronn19 .composer .composerTool,
   .ronn19 .composer .send,
   .ronn19 .composer .stop{
-    flex-basis:34px!important;
-    width:34px!important;
-    height:34px!important;
-    min-width:34px!important;
-    min-height:34px!important;
+    width:38px!important;
+    height:38px!important;
+    min-width:38px!important;
+    min-height:38px!important;
   }
   .ronn19 .welcome{padding-top:8vh!important}
   .ronn19 .welcome h1{font-size:27px!important}
