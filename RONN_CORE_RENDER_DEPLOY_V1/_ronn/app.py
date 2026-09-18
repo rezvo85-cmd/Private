@@ -2875,6 +2875,276 @@ def r14_user_model_api(request: Request):
     owner=_r14_require_owner(request)
     return {"profile":r14_user_profile(owner),"knowledge_graph":r14_graph_stats(owner)}
 
+
+def _r17_multi_agent_runner(payload, progress):
+    task=str((payload or {}).get("task") or "").strip()
+    context=str((payload or {}).get("context") or "")
+    profile=str((payload or {}).get("profile") or "auto")
+    if not task:
+        raise ValueError("Task is required.")
+    if profile=="auto":
+        profile=task_profile(task,[])
+    if not key_loaded():
+        raise RuntimeError("No AI provider is configured.")
+    default_model,_route,_=select_model(task,[],[],"deep")
+    specialist=r19_adapt_model(profile,default_model)
+    planner=OR_NEMOTRON_MODEL if openrouter_key_loaded() else specialist
+    critic=OR_CRITIC_MODEL if openrouter_key_loaded() else specialist
+    finalizer=OR_NEMOTRON_MODEL if openrouter_key_loaded() else specialist
+    outputs={}
+    used={}
+    progress(10)
+    outputs["planner"],used["planner"]=nonstream_with_fallback(planner,"deep",r17_agent_messages("planner",task,context),1000)
+    progress(32)
+    shared=context+"\n\nPLAN:\n"+outputs["planner"][:12000]
+    outputs["specialist"],used["specialist"]=nonstream_with_fallback(specialist,"deep",r17_agent_messages("specialist",task,shared),1500)
+    progress(58)
+    critic_context=shared+"\n\nSPECIALIST RESULT:\n"+outputs["specialist"][:18000]
+    outputs["critic"],used["critic"]=nonstream_with_fallback(critic,"review",r17_agent_messages("critic",task,critic_context),900)
+    progress(78)
+    final_context=(critic_context+"\n\nCRITIC FINDINGS:\n"+outputs["critic"][:10000])
+    outputs["final"],used["final"]=nonstream_with_fallback(finalizer,"deep",r17_agent_messages("finalizer",task,final_context),1800)
+    progress(96)
+    return {"ok":True,"profile":profile,"models":used,"final":outputs["final"],
+            "artifacts":{"plan":outputs["planner"],"specialist":outputs["specialist"],"critic":outputs["critic"]}}
+
+def _r16_repair_model(prompt):
+    profile="coding"
+    model=OR_DEEPSEEK_MODEL if openrouter_key_loaded() else (NVIDIA_MODEL if nvidia_key_loaded() else CREATOR_MODEL)
+    text,_used=nonstream_with_fallback(model,"deep",[
+      {"role":"system","content":"You are RONN's bounded code repair worker. Return only a complete corrected source file. Do not add markdown fences or commentary."},
+      {"role":"user","content":str(prompt)[:50000]}
+    ],1800)
+    return text
+
+@app.get("/api/r19/capabilities")
+def r19_capabilities_api(request: Request):
+    owner=_r14_require_owner(request)
+    cloud=r15_cloud_status()
+    computer=r17_computer_status()
+    training=r19_training_runtime_status()
+    return {
+      "build":BUILD_ID,
+      "working_now":{
+        "trust_rollback":True,
+        "evaluation_lab":True,
+        "controlled_code_execution":True,
+        "code_test_fix_retest":True,
+        "world_model_simulation":True,
+        "safe_text_browser":True,
+        "multi_agent_jobs":True,
+        "long_running_jobs":True,
+        "live_research":True,
+        "failure_memory":True,
+        "long_context_digest":True,
+        "evidence_first":True,
+        "project_brain":True,
+        "proactive_url_monitoring":True,
+        "self_created_safe_tools":True,
+        "self_learning_router":True,
+        "training_dataset_builder":True
+      },
+      "connected_when_configured":{
+        "permanent_cloud_brain":cloud,
+        "computer_control":computer,
+        "connectors":r17_connectors_status(),
+        "custom_model_training":training
+      },
+      "browser_voice":"browser-dependent",
+      "screen_context":"browser-dependent",
+      "trust":r15_trust_stats(owner),
+      "jobs":r17_job_stats(owner),
+      "monitors":r18_monitor_status(),
+      "safe_tools":r19_tool_status(owner),
+      "training":r19_training_stats(owner),
+      "model_router":r19_router_report(),
+    }
+
+@app.get("/api/r15/cloud")
+def r15_cloud_api(request: Request):
+    _r14_require_owner(request)
+    return {"status":r15_cloud_status(),"startup_restore":R15_CLOUD_RESTORE}
+
+@app.post("/api/r15/cloud/snapshot")
+def r15_cloud_snapshot_api(request: Request):
+    _r14_require_owner(request)
+    try:
+        return r15_cloud_snapshot(DATA)
+    except Exception as exc:
+        raise HTTPException(503,str(exc)[:400])
+
+@app.get("/api/r15/trust")
+def r15_trust_api(request: Request, limit: int=30):
+    owner=_r14_require_owner(request)
+    return {"stats":r15_trust_stats(owner),"actions":r15_trust_recent(owner,max(1,min(int(limit),100)))}
+
+@app.post("/api/r16/workspace/write")
+def r16_workspace_write_api(body: WorkspaceWriteBody, request: Request):
+    owner=_r14_require_owner(request)
+    return r16_ws_write(owner,body.workspace,body.name,body.content)
+
+@app.get("/api/r16/workspace/files")
+def r16_workspace_files_api(request: Request, workspace: str="default"):
+    owner=_r14_require_owner(request)
+    return {"workspace":workspace,"files":r16_ws_list(owner,workspace),"runtime":r16_ws_status()}
+
+@app.get("/api/r16/workspace/read")
+def r16_workspace_read_api(request: Request, name: str, workspace: str="default"):
+    owner=_r14_require_owner(request)
+    try:return r16_ws_read(owner,workspace,name)
+    except FileNotFoundError:raise HTTPException(404,"Workspace file not found.")
+
+@app.post("/api/r16/workspace/run")
+def r16_workspace_run_api(body: WorkspaceRunBody, request: Request):
+    owner=_r14_require_owner(request)
+    try:return r16_ws_run(owner,body.workspace,body.entry,body.language,body.execute)
+    except (ValueError,FileNotFoundError) as exc:raise HTTPException(400,str(exc)[:500])
+
+@app.post("/api/r16/workspace/rollback")
+def r16_workspace_rollback_api(body: WorkspaceRollbackBody, request: Request):
+    owner=_r14_require_owner(request)
+    return r16_ws_rollback(owner,body.action_id,body.workspace,body.name)
+
+@app.post("/api/r16/autofix")
+def r16_autofix_api(body: AutoFixBody, request: Request):
+    owner=_r14_require_owner(request)
+    try:
+        return r16_autofix_loop(owner,body.workspace,body.entry,_r16_repair_model,body.max_attempts)
+    except (ValueError,FileNotFoundError,RuntimeError) as exc:
+        raise HTTPException(400,str(exc)[:600])
+
+@app.post("/api/r16/simulate")
+def r16_simulate_api(body: SimulationBody, request: Request):
+    _r14_require_owner(request)
+    before=[{"name":x.name,"content":x.content} for x in body.before]
+    after=[{"name":x.name,"content":x.content} for x in body.after]
+    return r16_simulate(before,after)
+
+@app.post("/api/r17/browser")
+def r17_browser_api(body: BrowserBody, request: Request):
+    _r14_require_owner(request)
+    try:return r17_browser_fetch(body.url)
+    except Exception as exc:raise HTTPException(400,str(exc)[:600])
+
+@app.post("/api/r18/research")
+def r18_research_api(body: ResearchBody, request: Request):
+    _r14_require_owner(request)
+    pages=r18_collect_pages(body.urls)
+    prompt=r18_research_prompt(body.query,pages)
+    model=RESEARCH_MODEL if groq_key_loaded() else (OR_NEMOTRON_MODEL if openrouter_key_loaded() else SMART_MODEL)
+    try:
+        answer,used=nonstream_with_fallback(model,"research",[{"role":"user","content":prompt}],1800)
+    except Exception as exc:
+        raise HTTPException(503,str(exc)[:600])
+    return {"answer":answer,"model":used,"pages":[{"url":p.get("url"),"title":p.get("title"),"status":p.get("status"),"error":p.get("error")} for p in pages]}
+
+@app.post("/api/r17/agents")
+def r17_agents_api(body: MultiAgentBody, request: Request):
+    owner=_r14_require_owner(request)
+    job=r17_job_create(owner,"multi_agent",body.model_dump(),_r17_multi_agent_runner)
+    return {"job":job,"architecture":r17_agent_status()}
+
+@app.get("/api/r17/jobs")
+def r17_jobs_api(request: Request, limit: int=40):
+    owner=_r14_require_owner(request)
+    return {"jobs":r17_job_list(owner,limit),"stats":r17_job_stats(owner)}
+
+@app.get("/api/r17/jobs/{job_id}")
+def r17_job_api(job_id: str, request: Request):
+    owner=_r14_require_owner(request)
+    job=r17_job_get(job_id)
+    if not job or job.get("owner")!=owner:raise HTTPException(404,"Job not found.")
+    return job
+
+@app.get("/api/r17/computer/status")
+def r17_computer_status_api(request: Request):
+    _r14_require_owner(request)
+    return r17_computer_status()
+
+@app.post("/api/r17/computer/action")
+def r17_computer_action_api(body: ComputerActionBody, request: Request):
+    _r14_require_owner(request)
+    state=r17_computer_status()
+    if not state.get("verified"):
+        raise HTTPException(503,state.get("message") or "Computer runtime is not connected.")
+    try:return r17_computer_action(body.action,body.payload)
+    except Exception as exc:raise HTTPException(400,str(exc)[:600])
+
+@app.get("/api/r17/connectors")
+def r17_connectors_api(request: Request):
+    _r14_require_owner(request)
+    return {"connectors":r17_connectors_status()}
+
+@app.post("/api/r18/monitor")
+def r18_monitor_add_api(body: MonitorBody, request: Request):
+    owner=_r14_require_owner(request)
+    try:return {"watch":r18_monitor_add(owner,body.label or body.url,body.url,body.interval_s)}
+    except Exception as exc:raise HTTPException(400,str(exc)[:500])
+
+@app.get("/api/r18/monitor")
+def r18_monitor_list_api(request: Request):
+    owner=_r14_require_owner(request)
+    return {"status":r18_monitor_status(),"watches":r18_monitor_list(owner),"alerts":r18_monitor_alerts(owner,False,40)}
+
+@app.post("/api/r18/monitor/{watch_id}/check")
+def r18_monitor_check_api(watch_id: str, request: Request):
+    owner=_r14_require_owner(request)
+    watch=next((w for w in r18_monitor_list(owner) if w.get("id")==watch_id),None)
+    if not watch:raise HTTPException(404,"Watch not found.")
+    return r18_monitor_check(watch_id)
+
+@app.post("/api/r18/alerts/seen")
+def r18_alerts_seen_api(request: Request):
+    owner=_r14_require_owner(request);r18_monitor_mark_seen(owner);return {"ok":True}
+
+@app.post("/api/r19/tools")
+def r19_tools_create_api(body: ToolCreateBody, request: Request):
+    owner=_r14_require_owner(request)
+    try:return r19_tool_create(owner,body.name,body.description,body.source)
+    except Exception as exc:raise HTTPException(400,str(exc)[:600])
+
+@app.get("/api/r19/tools")
+def r19_tools_list_api(request: Request):
+    owner=_r14_require_owner(request)
+    return {"tools":r19_tool_list(owner),"status":r19_tool_status(owner)}
+
+@app.post("/api/r19/tools/run")
+def r19_tools_run_api(body: ToolRunBody, request: Request):
+    owner=_r14_require_owner(request)
+    try:return r19_tool_run(owner,body.tool_id)
+    except Exception as exc:raise HTTPException(400,str(exc)[:600])
+
+@app.delete("/api/r19/tools/{tool_id}")
+def r19_tools_delete_api(tool_id: str, request: Request):
+    owner=_r14_require_owner(request)
+    return {"ok":r19_tool_remove(owner,tool_id)}
+
+@app.get("/api/r19/router")
+def r19_router_api(request: Request, profile: str=""):
+    _r14_require_owner(request)
+    return {"outcomes":r19_router_report(profile or None)}
+
+@app.get("/api/r19/training")
+def r19_training_api(request: Request):
+    owner=_r14_require_owner(request)
+    return {"dataset":r19_training_stats(owner),"runtime":r19_training_runtime_status()}
+
+@app.get("/api/r19/training/export")
+def r19_training_export_api(request: Request, limit: int=1000):
+    owner=_r14_require_owner(request)
+    return {"jsonl":r19_training_export(owner,limit),"stats":r19_training_stats(owner)}
+
+@app.post("/api/r19/training/submit")
+def r19_training_submit_api(body: TrainingSubmitBody, request: Request):
+    owner=_r14_require_owner(request)
+    runtime=r19_training_runtime_status()
+    if not runtime.get("training_available"):
+        raise HTTPException(503,"No verified external training runtime is connected.")
+    data=r19_training_export(owner,body.limit)
+    if not data.strip():raise HTTPException(400,"RONN has no positively rated training examples yet.")
+    try:return r19_training_submit(data,body.base_model,body.job_name)
+    except Exception as exc:raise HTTPException(503,str(exc)[:600])
+
 @app.post("/api/chat")
 def chat(body: ChatBody, request: Request):
     owner = owner_id(request)
