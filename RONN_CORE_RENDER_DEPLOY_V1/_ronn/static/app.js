@@ -7,7 +7,7 @@ const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stop
 const attachmentsEl = $("attachments"), fileInput = $("fileInput"), jumpLatest = $("jumpLatest");
 const routeBadge = $("routeBadge"), stageBadge = $("stageBadge"), profileBadge = $("profileBadge");
 
-const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R14-CAPABILITY";
+const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R19-AGENT-OS";
 const CORE_API = "/api/v1";
 const CLIENT_KEY = "ronnClient";
 const LEGACY_CLIENT_KEY = "novaUltraClient";
@@ -49,7 +49,7 @@ async function unlockWebAuth(){
   if(btn){btn.disabled=true;btn.textContent="Unlocking…"}
   if(msg)msg.textContent="Creating secure owner session…";
   try{
-    const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Web",platform:navigator.platform||"web",app_version:"R10.1",return_token:false})});
+    const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Web",platform:navigator.platform||"web",app_version:"R19",return_token:false})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(d.detail||"Owner unlock failed.");
     $("webAuthSecret").value="";
@@ -70,6 +70,7 @@ function migrateLocalStorage(){
 migrateLocalStorage();
 
 let pending=[],busy=false,controller=null,currentView="chat",startedAt=0,activityTimer=null,currentRequestId="";
+let screenStream=null,screenVideo=null,voiceMode=false,voiceSpeaking=false;
 let chats=loadJSON(CHAT_KEY,[]),currentChatId=safeGet(CURRENT_KEY)||"",projects=loadJSON(PROJECT_KEY,[]),editingProjectId=null;
 
 function loadJSON(k,f){try{return JSON.parse(safeGet(k))??f}catch{return f}}
@@ -103,8 +104,8 @@ function renderChatList(){const q=$("chatSearch").value.toLowerCase().trim(),lis
 function auditWarnings(a){return [...(a?.warnings||[]),...(a?.r5_quality_gate?.warnings||[]),...(a?.r7_quality?.warnings||[])].filter((x,i,arr)=>arr.indexOf(x)===i)}
 function auditLabel(a){if(!a)return "";const warnings=auditWarnings(a).length;if(warnings)return `Review · ${warnings} flag${warnings===1?"":"s"}`;if(a.evidence_mode==="live")return "Live evidence route";const score=Number.isFinite(a?.r7_quality?.score)?a.r7_quality.score:a?.r5_quality_gate?.quality_score;return a.runtime_verified?"Runtime verified":Number.isFinite(score)?`Audited · ${score}`:"Answer audited"}
 function applyAudit(wrap,a){if(!wrap||!a)return;let chip=wrap.querySelector(".auditChip");if(!chip){chip=document.createElement("span");chip.className="auditChip";const tools=wrap.querySelector(".msgTools");if(tools)tools.prepend(chip)}const warnings=auditWarnings(a);chip.textContent=auditLabel(a);chip.className="auditChip "+(warnings.length?"warn":"ok");chip.title=warnings.length?warnings.join(" • "):`Evidence: ${a.evidence_mode||"model"}; runtime verified: ${a.runtime_verified?"yes":"no"}`}
-function addMessageNode(role,text,requestId="",audit=null,meta=null){const wrap=document.createElement("div");wrap.className="message "+role;if(role==="assistant"){wrap.dataset.requestId=requestId||"";wrap.innerHTML=`<div class="aiMark">R</div><div class="bubble aiBubble"><div class="answer">${renderMarkdown(text)}</div><div class="msgTools"><button class="copyMsg">Copy</button><button class="verifyMsg">Verify</button><button class="retryMsg">Retry</button>${meta?.decision_summary?'<button class="whyMsg">Why</button>':""}${requestId?'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>':""}</div></div>`;if(meta?.decision_summary)wrap.dataset.decision=meta.decision_summary.summary||"";if(audit)applyAudit(wrap,audit)}else wrap.innerHTML=`<div class="bubble userBubble">${escapeHTML(text)}</div>`;messages.appendChild(wrap);return wrap}
-function welcome(){messages.innerHTML=`<div class="welcome"><div class="welcomeOrb"><span>R</span></div><span class="eyebrow">RONN</span><h1>What are we working on?</h1><p>Ask naturally. RONN keeps simple questions simple and escalates harder work when it needs deeper reasoning, files, tools, or verification.</p><div class="capGrid"><button data-prompt="Debug this problem from the root cause. Track configuration, dependencies, stale processes, interfaces, and errors before changing anything."><b>Root-cause debug</b><span>Trace → test → repair</span></button><button data-prompt="Research this accurately using current evidence when needed. Compare sources and separate verified facts from uncertainty."><b>Reliable research</b><span>Evidence over confidence</span></button><button data-prompt="Build this software system completely. Keep every file and interface consistent and run every available check before saying it works."><b>Software architect</b><span>Build + validate</span></button><button data-prompt="Analyze these files as one project. Find dependencies, contradictions, risks, and the most important next fixes."><b>Project intelligence</b><span>Files + context + history</span></button></div></div>`;bindPromptButtons()}
+function addMessageNode(role,text,requestId="",audit=null,meta=null){const wrap=document.createElement("div");wrap.className="message "+role;if(role==="assistant"){wrap.dataset.requestId=requestId||"";wrap.innerHTML=`<div class="aiMark"><img src="/static/ronn_logo.svg" alt="RONN"></div><div class="bubble aiBubble"><div class="answer">${renderMarkdown(text)}</div><div class="msgTools"><button class="copyMsg">Copy</button><button class="verifyMsg">Verify</button><button class="retryMsg">Retry</button>${meta?.decision_summary?'<button class="whyMsg">Why</button>':""}${requestId?'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>':""}</div></div>`;if(meta?.decision_summary)wrap.dataset.decision=meta.decision_summary.summary||"";if(audit)applyAudit(wrap,audit)}else wrap.innerHTML=`<div class="bubble userBubble">${escapeHTML(text)}</div>`;messages.appendChild(wrap);return wrap}
+function welcome(){messages.innerHTML=`<div class="welcome"><div class="welcomeOrb"><span>R</span></div><h1>How can I help?</h1><p>Ask RONN anything, attach a project, or start with one of these.</p><div class="capGrid"><button data-prompt="Create this for me from start to finish. Keep it clean, functional, and verify what you can."><b>Create</b><span>Build something</span></button><button data-prompt="Research this using current reliable information and clearly separate verified facts from uncertainty."><b>Research</b><span>Use current evidence</span></button><button data-prompt="Solve this coding problem. Find the root cause, implement the fix, and run available checks before saying it works."><b>Code</b><span>Build + test</span></button><button data-prompt="Analyze this deeply, compare the important possibilities, and give me the clearest useful result."><b>Analyze</b><span>Think it through</span></button></div></div>`;bindPromptButtons()}
 function nearBottom(){return messages.scrollHeight-messages.scrollTop-messages.clientHeight<120}
 function updateJumpLatest(){if(!jumpLatest)return;const show=messages.scrollHeight>messages.clientHeight+40&&!nearBottom();jumpLatest.classList.toggle("hidden",!show)}
 function scrollToLatest(force=false){if(force||nearBottom()){messages.scrollTop=messages.scrollHeight;requestAnimationFrame(()=>{messages.scrollTop=messages.scrollHeight;updateJumpLatest()})}else updateJumpLatest()}
@@ -116,6 +117,31 @@ function setNeuralMeta(meta){const n=$("neuralBadge");if(!n||!meta)return;const 
 function routeLabel(x){return ({instant:"Instant",fast:"Fast",deep:"Deep",creator:"Creator",max:"Research",ultra:"ULTRA",apex:"APEX",knowledge:"Knowledge",live:"Live web",research:"Research",vision:"Vision",review:"Reviewed",backup:"Fallback","nvidia-apex":"APEX NVIDIA","nvidia-apex-final":"APEX synthesis","apex-final":"APEX synthesis","nvidia-ultra-final":"ULTRA synthesis","ultra-final":"ULTRA synthesis","local-tool":"Local tool",memory:"Memory"})[x]||x||"Auto"}
 function profileLabel(x){return ({coding:"Software",creative:"Creative",research:"Research",analysis:"Analysis",knowledge:"Knowledge",mathscience:"Math & science",writing:"Writing",chat:"General",memory:"Memory"})[x]||x||"General"}
 function autoSize(){input.style.height="auto";input.style.height=Math.min(input.scrollHeight,180)+"px"}
+
+async function currentScreenFrame(){
+  if(!screenStream||!screenVideo||screenVideo.readyState<2)return null;
+  const w=screenVideo.videoWidth||1280,h=screenVideo.videoHeight||720;if(!w||!h)return null;
+  const max=1400,scale=Math.min(1,max/w),cw=Math.max(1,Math.round(w*scale)),ch=Math.max(1,Math.round(h*scale));
+  const canvas=document.createElement("canvas");canvas.width=cw;canvas.height=ch;
+  const ctx=canvas.getContext("2d");ctx.drawImage(screenVideo,0,0,cw,ch);
+  return canvas.toDataURL("image/jpeg",0.72);
+}
+function stopScreenContext(){
+  if(screenStream){screenStream.getTracks().forEach(t=>t.stop())}
+  screenStream=null;screenVideo=null;
+  const b=$("screenBtn");if(b){b.classList.remove("active");b.textContent="▣ Screen";b.title="Share your screen as live chat context"}
+}
+async function toggleScreenContext(){
+  if(screenStream){stopScreenContext();showToast("Screen context off.");return}
+  if(!navigator.mediaDevices?.getDisplayMedia){showToast("Screen sharing is not supported by this browser.");return}
+  try{
+    screenStream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:5,max:10}},audio:false});
+    screenVideo=document.createElement("video");screenVideo.srcObject=screenStream;screenVideo.muted=true;screenVideo.playsInline=true;await screenVideo.play();
+    const track=screenStream.getVideoTracks()[0];if(track)track.onended=()=>stopScreenContext();
+    const b=$("screenBtn");if(b){b.classList.add("active");b.textContent="■ Screen";b.title="Screen context is active"}
+    showToast("Screen context on. RONN will see the latest frame when you send a message.");
+  }catch(e){stopScreenContext();if(e?.name!=="NotAllowedError")showToast("Screen share could not start.")}
+}
 
 function renderAttachments(){attachmentsEl.innerHTML="";pending.forEach((a,i)=>{const el=document.createElement("div");el.className="attachment";el.innerHTML=a.kind==="image"?`<img src="${a.data}"><span>${escapeHTML(a.name)}</span>`:`<div class="fileIcon">{ }</div><span>${escapeHTML(a.name)}</span>`;const x=document.createElement("button");x.textContent="×";x.onclick=()=>{pending.splice(i,1);renderAttachments()};el.appendChild(x);attachmentsEl.appendChild(el)})}
 const textExt=/\.(txt|md|py|js|ts|tsx|jsx|lua|luau|json|html|css|csv|xml|yaml|yml)$/i,docExt=/\.(pdf|docx|xlsx|pptx)$/i;
@@ -133,7 +159,7 @@ async function sendMessage(regenerate=false,overrideText=null){
   if(busy)return;
   const text=overrideText??(regenerate?(currentChat().messages.filter(m=>m.role==="user").at(-1)?.content||""):input.value.trim());if(!text&&!pending.length)return;
   busy=true;controller=new AbortController();sendBtn.classList.add("hidden");stopBtn.classList.remove("hidden");setStage("Planning");startActivity();
-  const atts=[...pending];if(!regenerate&&overrideText==null){pending=[];renderAttachments();input.value="";autoSize()}
+  const atts=[...pending];const sharedFrame=await currentScreenFrame();if(sharedFrame)atts.push({kind:"image",name:"Live screen",data:sharedFrame,screen:true});if(!regenerate&&overrideText==null){pending=[];renderAttachments();input.value="";autoSize()}
   const c=currentChat(),history=c.messages.slice(-36).map(m=>({role:m.role,content:m.content}));if(!regenerate&&overrideText==null){pushMessage("user",text||"[Attachment]");addMessageNode("user",text||"[Attachment]")}
   const ai=addMessageNode("assistant","");const answerEl=ai.querySelector(".answer");answerEl.innerHTML='<span class="thinkingDots"><i></i><i></i><i></i></span>';scrollToLatest(true);
   let answer="",first=true,responseRequestId="",responseAudit=null,responseMeta=null;
@@ -142,7 +168,7 @@ async function sendMessage(regenerate=false,overrideText=null){
     if(!res.ok){const d=await res.json().catch(()=>({}));if(res.status===401){setWebAuthGate(true,"Your secure owner session expired. Unlock RONN again.");throw new Error("RONN is locked.")}throw new Error(d.detail||`RONN server returned HTTP ${res.status}.`)}
     const reader=res.body.getReader(),decoder=new TextDecoder();let buffer="";
     while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split("\n");buffer=lines.pop();for(const line of lines){if(!line.trim())continue;let d;try{d=JSON.parse(line)}catch{continue}if(d.core?.conversation_id){const cc=currentChat();cc.coreConversationId=d.core.conversation_id;saveChats();continue}if(d.meta){responseMeta=d.meta;responseRequestId=d.meta.request_id||responseRequestId;currentRequestId=responseRequestId||currentRequestId;routeBadge.textContent=routeLabel(d.meta.route);profileBadge.textContent=profileLabel(d.meta.profile);setNeuralMeta(d.meta);if(d.meta.r11_preflight){const rr=d.meta.r11_preflight.route||{};const n=$("neuralBadge");if(n)n.textContent=`R11 · ${String(rr.tier||"adaptive").toUpperCase()}`;}if(d.meta.task_plan?.checkpoint_count){$("activityTitle").textContent=`RONN · ${d.meta.task_plan.checkpoint_count} checkpoints`}if(d.meta.adaptive_tier){$("activityDetail").textContent=`Adaptive tier: ${d.meta.adaptive_tier} · verifying requirements and evidence boundaries.`}const warnings=d.meta.r7_preflight?.agent_plan?.risk?.proactive_warnings||[];if(warnings.length)$("activityDetail").textContent=warnings[0];const stage=["live","research","max","tools"].includes(d.meta.route)?"Researching":String(d.meta.route||"").includes("ultra")?"Council":String(d.meta.route||"").startsWith("nvidia")?"Deep reasoning":d.meta.route==="knowledge"?"Thinking":d.meta.route==="vision"?"Analyzing":"Building";setStage(stage)}if(d.stage)setStage(d.stage);if(d.done&&d.audit)responseAudit=d.audit;if(d.error)throw new Error(d.error);if(d.token){if(first)first=false;answer=sanitizeVisible(answer+d.token);answerEl.innerHTML=renderMarkdown(answer)+'<span class="cursor">▌</span>';scrollToLatest(false)}}}
-    answer=sanitizeVisible(answer).trim();if(!answer)throw new Error("The provider returned no usable answer. RONN did not fabricate one.");answerEl.innerHTML=renderMarkdown(answer);if(responseAudit)applyAudit(ai,responseAudit);pushMessage("assistant",answer,responseRequestId,responseAudit,responseMeta);ai.dataset.requestId=responseRequestId||"";if(responseRequestId){const tools=ai.querySelector(".msgTools");if(tools&&!tools.querySelector(".rateMsg"))tools.insertAdjacentHTML("beforeend",'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>')}setStage("Complete");refreshMemory()
+    answer=sanitizeVisible(answer).trim();if(!answer)throw new Error("The provider returned no usable answer. RONN did not fabricate one.");answerEl.innerHTML=renderMarkdown(answer);if(responseAudit)applyAudit(ai,responseAudit);pushMessage("assistant",answer,responseRequestId,responseAudit,responseMeta);if(voiceMode)speakRONN(answer);ai.dataset.requestId=responseRequestId||"";if(responseRequestId){const tools=ai.querySelector(".msgTools");if(tools&&!tools.querySelector(".rateMsg"))tools.insertAdjacentHTML("beforeend",'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>')}setStage("Complete");refreshMemory()
   }catch(e){if(e.name==="AbortError"){answerEl.innerHTML=renderMarkdown(answer||"Stopped.");setStage("Stopped")}else{answerEl.innerHTML=`<p><strong>Error:</strong> ${escapeHTML(e.message)}</p><p>Open <strong>Diagnostics</strong> if this keeps happening.</p>`;setStage("Error")}}
   finally{busy=false;controller=null;currentRequestId="";stopBtn.classList.add("hidden");sendBtn.classList.remove("hidden");stopActivity();setTimeout(()=>setStage("Ready"),1500);input.focus()}
 }
@@ -184,7 +210,7 @@ $("saveProjectBtn").onclick=async()=>{const name=$("projectName").value.trim(),c
 $("deleteProjectBtn").onclick=()=>{if(!editingProjectId)return closeProjectEditor();projects=projects.filter(p=>p.id!==editingProjectId);saveJSON(PROJECT_KEY,projects);if(safeGet(ACTIVE_PROJECT_KEY)===editingProjectId)safeRemove(ACTIVE_PROJECT_KEY);closeProjectEditor();renderProjects();updateProjectBadge();showToast("Project deleted.")};
 
 async function registerDesktopDevice(){
-  try{await fetch(CORE_API+"/devices/register",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({device_id:deviceId,name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R10"})})}catch{}
+  try{await fetch(CORE_API+"/devices/register",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({device_id:deviceId,name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R19"})})}catch{}
 }
 async function refreshEcosystemStatus(){
   const chips=$("ecosystemChips");if(!chips)return;
@@ -195,7 +221,7 @@ async function refreshOwnerAccess(){
   try{const r=await fetch(CORE_API+"/owner/status",{headers:apiHeaders()});const d=await r.json();const active=!!d.op_active;$("opStatus").textContent=active?"Owner Active":"Locked";$("opStatus").classList.toggle("active",active);$("opUnlockRow").classList.toggle("hidden",active);$("ownerPanel").classList.toggle("hidden",!active);if(active){$("opPlan").textContent="Owner Unlimited";$("opCredits").textContent="Unlimited";await Promise.all([refreshOwnerDevices(),refreshFeatureFlags(),refreshVault(),refreshOwnerStats()])}}catch{}
 }
 async function refreshOwnerStats(){try{const d=await (await fetch(CORE_API+"/ecosystem/status",{headers:apiHeaders()})).json();$("ownerDeviceCount").textContent=String(d.devices||0);$("ownerSyncCursor").textContent=String(d.sync_cursor||0)}catch{}}
-async function unlockOp(){const secret=$("opSecret")?.value||"";if(!secret)return showToast("Enter the OP access code.");try{const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R10",return_token:false})});const d=await r.json().catch(()=>({}));$("opSecret").value="";if(!r.ok)return showToast(d.detail||"OP unlock failed.");showToast("Owner Unlimited enabled.");refreshOwnerAccess();refreshEcosystemStatus()}catch{showToast("Could not reach RONN Core.")}}
+async function unlockOp(){const secret=$("opSecret")?.value||"";if(!secret)return showToast("Enter the OP access code.");try{const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R19",return_token:false})});const d=await r.json().catch(()=>({}));$("opSecret").value="";if(!r.ok)return showToast(d.detail||"OP unlock failed.");showToast("Owner Unlimited enabled.");refreshOwnerAccess();refreshEcosystemStatus()}catch{showToast("Could not reach RONN Core.")}}
 async function lockOp(){try{await fetch(CORE_API+"/owner/lock",{method:"POST",headers:apiHeaders()});showToast("OP mode locked.");refreshOwnerAccess();refreshEcosystemStatus()}catch{}}
 async function refreshOwnerDevices(){const box=$("ownerDeviceList");if(!box)return;try{const d=await (await fetch(CORE_API+"/devices",{headers:apiHeaders()})).json();box.innerHTML="";(d.devices||[]).forEach(dev=>{const row=document.createElement("div");row.className="ownerRow";row.innerHTML=`<div><b>${escapeHTML(dev.name||"RONN device")}</b><small>${escapeHTML(dev.platform||"unknown")} · ${dev.trusted?"trusted":"standard"}${dev.revoked?" · revoked":""}</small></div>${dev.device_id!==deviceId&&!dev.revoked?`<button class="dangerText" data-revoke-device="${escapeHTML(dev.device_id)}">Revoke</button>`:""}`;box.appendChild(row)});if(!box.children.length)box.innerHTML='<div class="emptyState">No registered devices yet.</div>'}catch{}}
 async function generateRecoveryCodes(){try{const r=await fetch(CORE_API+"/owner/recovery-codes",{method:"POST",headers:apiHeaders()});const d=await r.json();if(!r.ok)return showToast(d.detail||"Could not create recovery codes.");const box=$("opRecoveryBox");box.classList.remove("hidden");box.innerHTML=`<b>One-time recovery codes</b><p>Save these somewhere private. Each code works once.</p><pre>${escapeHTML((d.codes||[]).join("\n"))}</pre>`}catch{}}
@@ -217,13 +243,43 @@ window.addEventListener("resize",()=>updateJumpLatest(),{passive:true});
 document.addEventListener("paste",e=>{const files=[...e.clipboardData.files];if(files.length){e.preventDefault();addFiles(files)}});let drag=0;document.addEventListener("dragenter",e=>{e.preventDefault();drag++;$("dropOverlay").classList.add("show")});document.addEventListener("dragleave",e=>{e.preventDefault();drag--;if(drag<=0){drag=0;$("dropOverlay").classList.remove("show")}});document.addEventListener("dragover",e=>e.preventDefault());document.addEventListener("drop",e=>{e.preventDefault();drag=0;$("dropOverlay").classList.remove("show");addFiles(e.dataTransfer.files)});
 document.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key.toLowerCase()==="n"){e.preventDefault();$("newChat").click()}if(e.key==="Escape"){$("confirmModal").classList.add("hidden");if(controller)controller.abort()}});
 
-// R7 voice input: browser-side only. No microphone audio is stored by RONN.
-const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;let recognizer=null;if($("voiceBtn")){if(SpeechRecognition){recognizer=new SpeechRecognition();recognizer.lang=navigator.language||"en-US";recognizer.interimResults=false;recognizer.continuous=false;recognizer.onstart=()=>{$("voiceBtn").classList.add("listening");$("voiceBtn").textContent="● Listening"};recognizer.onend=()=>{$("voiceBtn").classList.remove("listening");$("voiceBtn").textContent="◉ Voice"};recognizer.onresult=e=>{const text=[...e.results].map(r=>r[0]?.transcript||"").join(" ").trim();if(text){input.value=(input.value?input.value+" ":"")+text;autoSize();input.focus()}};recognizer.onerror=e=>showToast(`Voice input: ${e.error||"not available"}`);$("voiceBtn").onclick=()=>{try{recognizer.start()}catch{}}}else{$("voiceBtn").disabled=true;$("voiceBtn").title="Voice input is not supported by this browser"}}
+// R19 live voice: browser-side speech recognition + speech synthesis. Audio is not uploaded or stored.
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recognizer=null;
+function speakRONN(text){
+  if(!voiceMode||!("speechSynthesis" in window)||!String(text||"").trim())return;
+  try{
+    if(recognizer)recognizer.stop();
+    window.speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(String(text).replace(/[`*_#>]/g," ").slice(0,5000));
+    u.rate=1.02;u.pitch=.96;u.lang=navigator.language||"en-US";voiceSpeaking=true;
+    u.onend=()=>{voiceSpeaking=false;if(voiceMode)try{recognizer?.start()}catch{}};
+    u.onerror=()=>{voiceSpeaking=false;if(voiceMode)try{recognizer?.start()}catch{}};
+    window.speechSynthesis.speak(u);
+  }catch{}
+}
+function stopVoiceMode(){
+  voiceMode=false;voiceSpeaking=false;
+  try{recognizer?.stop()}catch{}
+  try{window.speechSynthesis?.cancel()}catch{}
+  const b=$("voiceBtn");if(b){b.classList.remove("listening");b.textContent="◉ Voice"}
+}
+if($("voiceBtn")){
+  if(SpeechRecognition){
+    recognizer=new SpeechRecognition();recognizer.lang=navigator.language||"en-US";recognizer.interimResults=false;recognizer.continuous=true;
+    recognizer.onstart=()=>{if(voiceMode){$("voiceBtn").classList.add("listening");$("voiceBtn").textContent="● Voice"}};
+    recognizer.onend=()=>{if(voiceMode&&!voiceSpeaking)setTimeout(()=>{try{recognizer.start()}catch{}},250);else if(!voiceMode){$("voiceBtn").classList.remove("listening");$("voiceBtn").textContent="◉ Voice"}};
+    recognizer.onresult=e=>{let final="";for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=(e.results[i][0]?.transcript||"")+" "}final=final.trim();if(final&&!busy){input.value=final;autoSize();sendMessage(false)}};
+    recognizer.onerror=e=>{if(!["no-speech","aborted"].includes(e.error||""))showToast(`Voice: ${e.error||"not available"}`)};
+    $("voiceBtn").onclick=()=>{if(voiceMode){stopVoiceMode();showToast("Live voice off.")}else{voiceMode=true;$("voiceBtn").textContent="● Voice";try{recognizer.start()}catch{}showToast("Live voice on.")}};
+  }else{$("voiceBtn").disabled=true;$("voiceBtn").title="Live voice is not supported by this browser"}
+}
+if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R14",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R19",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
