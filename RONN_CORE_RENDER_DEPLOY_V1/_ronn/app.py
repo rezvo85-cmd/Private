@@ -31,11 +31,19 @@ from r6_benchmarks import run_r6_benchmarks
 from r7_impact import r7_preflight, r7_directive, response_quality_score, capability_manifest, explanation_trace
 from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNAL_COUNT as R11_SIGNAL_COUNT
 from r12_improvements import r12_preflight, r12_directive, IMPROVEMENT_COUNT as R12_IMPROVEMENT_COUNT
-from r13_ensemble import NEMOTRON_MODEL as OR_NEMOTRON_MODEL, DEEPSEEK_MODEL as OR_DEEPSEEK_MODEL, QWEN_MODEL as OR_QWEN_MODEL, CRITIC_MODEL as OR_CRITIC_MODEL, ENSEMBLE_MODELS as OR_ENSEMBLE_MODELS, choose_primary as r13_choose_primary, council_models as r13_council_models, fallback_models as r13_fallback_models, status as r13_status\nfrom r14_knowledge_graph import ingest as r14_graph_ingest, ingest_files as r14_graph_ingest_files, context as r14_graph_context, stats as r14_graph_stats\nfrom r14_sandbox import execute as r14_sandbox_execute, SandboxError as R14SandboxError\nfrom r14_tool_brain import plan as r14_tool_plan, directive as r14_tool_directive\nfrom r14_user_model import observe as r14_user_observe, profile as r14_user_profile, directive as r14_user_directive\nfrom r14_multimodal import plan as r14_multimodal_plan, directive as r14_multimodal_directive\nfrom r14_self_correct import inspect as r14_self_inspect, reviewer_instruction as r14_reviewer_instruction\nfrom r14_agent import make_plan as r14_agent_plan, execute_local as r14_agent_execute
+from r13_ensemble import NEMOTRON_MODEL as OR_NEMOTRON_MODEL, DEEPSEEK_MODEL as OR_DEEPSEEK_MODEL, QWEN_MODEL as OR_QWEN_MODEL, CRITIC_MODEL as OR_CRITIC_MODEL, ENSEMBLE_MODELS as OR_ENSEMBLE_MODELS, choose_primary as r13_choose_primary, council_models as r13_council_models, fallback_models as r13_fallback_models, status as r13_status
+from r14_knowledge_graph import ingest as r14_graph_ingest, ingest_files as r14_graph_ingest_files, context as r14_graph_context, stats as r14_graph_stats
+from r14_sandbox import execute as r14_sandbox_execute, SandboxError as R14SandboxError
+from r14_tool_brain import plan as r14_tool_plan, directive as r14_tool_directive
+from r14_user_model import observe as r14_user_observe, profile as r14_user_profile, directive as r14_user_directive
+from r14_multimodal import plan as r14_multimodal_plan, directive as r14_multimodal_directive
+from r14_self_correct import inspect as r14_self_inspect, reviewer_instruction as r14_reviewer_instruction
+from r14_agent import make_plan as r14_agent_plan, execute_local as r14_agent_execute
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
-from r13_benchmarks import run_r13_benchmarks\nfrom r14_benchmarks import run_r14_benchmarks
+from r13_benchmarks import run_r13_benchmarks
+from r14_benchmarks import run_r14_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
