@@ -7,7 +7,7 @@
     "RONN_R10_30_SYSTEMS_COVERAGE.txt": "ed4c83f64668e413d61a69cf53cb48cafd36725a60ac2d68d05823cf8b6b1238",
     "RONN_R10_ECOSYSTEM_API.txt": "3f98d196ea6660b35add4bf44f4cf6dfe11ff40b52f41e22b947a7e256a2525f",
     "START_RONN.bat": "9339bad01cd9980d8b5c4575b8f47d40988a3d1f98b5a2bf1d9deed0195fd2d1",
-    "_ronn/app.py": "a8a14b23384d176c4d748aca40ae936a5131459f394cfc4aa0b9fdc7a8e2308c",
+    "_ronn/app.py": "730dfeea62fea0f518163e2391e572b23ac5a637b620c55db1f91fd08eee5a84",
     "_ronn/artifact_engine.py": "3ce9571196fc9a8da7d7991987178dc02bcc4340b68ff2beb0fca69f2ec5a3c3",
     "_ronn/brevity_engine.py": "0fc629a693d7851171cbcb3a501bacf1b0bac3450e6c521acf42213c22575b14",
     "_ronn/cognition_engine.py": "0bd6cc28e9dae475a90e6dd97bf05d14706911b113f19e697a4a0db6b07df01c",
@@ -80,6 +80,9 @@
     "_ronn/static/service-worker.js": "9a78ae2f8d002f0bab16578cb0864ec622270abbda43b68de3a9316c476f09ae",
     "_ronn/static/mobile_fit.css": "5efb06a5f66e1300c33628996a2f56ffe2c704a7975c29abe8d42e49ddc0a688",
     "_ronn/static/ronn_home_icon_v2.png": "1115e7eae139398a26c235bb5c6a8000a6c86c316f0e5b07936c2fa3a860eb91",
-    "_ronn/r20_controller.py": "019c2a8eb9191cb8561c1afbd5d8eb5dc77db6b1120ccce59371c92d76d389b0"
+    "_ronn/r20_controller.py": "e03bb620f78a3c9a12311d638e5c7f54b2e32cda76d679c30380bf213c36375b",
+    "_ronn/r20_web_tools.py": "b59b1349ffdfb33d73d10355ff49016cc95818ed785c5abbafa9f883ec2c0471",
+    "_ronn/crawl_service.py": "90696ae445529d12cf4f40a3bfedc1d03c76a3068a71bb553d6094050b8f4db0",
+    "_ronn/crawl_requirements.txt": "6cbf9ebbc00d5561f402c0b7d36fe9087eefdf60d700fedf78b4b3acd1ea084d"
   }
 }
