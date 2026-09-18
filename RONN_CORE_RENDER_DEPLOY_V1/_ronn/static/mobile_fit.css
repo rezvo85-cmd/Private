@@ -25,7 +25,8 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     background:#212121;
   }
   body.ronn19{
-    position:static!important;
+    position:fixed!important;
+    inset:0!important;
     width:100%!important;
     height:100%!important;
     min-height:0!important;
@@ -36,18 +37,20 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
 
   .ronn19 .appShell{
-    position:fixed!important;
+    position:absolute!important;
     left:0!important;
     top:0!important;
-    right:0!important;
+    right:auto!important;
     bottom:auto!important;
     display:block!important;
     width:100%!important;
-    height:var(--ronn-visible-bottom,100dvh)!important;
+    height:var(--ronn-vv-height,100dvh)!important;
     min-height:0!important;
     overflow:hidden!important;
     background:#212121!important;
-    transform:translateZ(0)!important;
+    transform:translate3d(0,var(--ronn-vv-top,0px),0)!important;
+    transform-origin:top left!important;
+    will-change:transform,height!important;
   }
 
   .ronn19 .main{
@@ -151,7 +154,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     z-index:1000!important;
     width:min(86vw,320px)!important;
     max-width:320px!important;
-    height:var(--ronn-visible-bottom,100dvh)!important;
+    height:var(--ronn-vv-height,100dvh)!important;
     min-height:0!important;
     padding:env(safe-area-inset-top) 8px max(8px,env(safe-area-inset-bottom))!important;
     overflow:hidden!important;
@@ -490,6 +493,9 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
 
   /* iOS Safari keyboard mode: the shell stays anchored.
      Safari may pan the visual viewport, but RONN always fills to its visible bottom. */
+  body.ronn19.mobileKeyboardOpen .appShell{
+    height:var(--ronn-vv-height,100dvh)!important;
+  }
   body.ronn19.mobileKeyboardOpen .composerDock{
     padding-bottom:7px!important;
   }
