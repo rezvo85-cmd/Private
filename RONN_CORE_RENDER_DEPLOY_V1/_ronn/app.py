@@ -44,6 +44,7 @@ from r15_trust import recent as r15_trust_recent, stats as r15_trust_stats, roll
 from r15_eval_lab import run as r15_eval_run
 from r16_workspace import write as r16_ws_write, read as r16_ws_read, list_files as r16_ws_list, run as r16_ws_run, rollback as r16_ws_rollback, status as r16_ws_status
 from r16_simulation import simulate as r16_simulate, project_model as r16_project_model
+from r16_autofix import loop as r16_autofix_loop
 from r17_browser import fetch as r17_browser_fetch
 from r17_computer import status as r17_computer_status, action as r17_computer_action
 from r17_connectors import status as r17_connectors_status
@@ -54,7 +55,8 @@ from r18_research import collect_pages as r18_collect_pages, prompt as r18_resea
 from r19_tools import create as r19_tool_create, list_tools as r19_tool_list, run as r19_tool_run, remove as r19_tool_remove, status as r19_tool_status
 from r19_router import choose as r19_router_choose, record as r19_router_record, report as r19_router_report
 from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
-from r19_training_data import add as r19_training_add, export as r19_training_export, stats as r19_training_stats
+from r19_training_data import add as r19_training_add, stage as r19_training_stage, promote as r19_training_promote, discard as r19_training_discard, pending_example as r19_training_pending, export as r19_training_export, stats as r19_training_stats
+from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -639,6 +641,16 @@ class WorkspaceRollbackBody(BaseModel):
     action_id: str
     workspace: str = "default"
     name: str
+
+class AutoFixBody(BaseModel):
+    workspace: str = "default"
+    entry: str
+    max_attempts: int = 3
+
+class TrainingSubmitBody(BaseModel):
+    base_model: str = ""
+    job_name: str = "RONN"
+    limit: int = 3000
 
 class SimulationBody(BaseModel):
     before: list[TextFile] = Field(default_factory=list)
