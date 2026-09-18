@@ -62,8 +62,8 @@
     "_ronn/skills/writer.md": "bf15a28b632dc9d7fc48e904aa52345a2f925118ddc60d779c286e44a065b16e",
     "_ronn/skills_engine.py": "8973115ec20cf727720885a3238d218edc023590835a32cc4d602f37be6b0c8f",
     "_ronn/snapshot_engine.py": "5a7181926dd062146ad1f7b4d08ac31ca2c46e6dc73631a39c78c13b29dce579",
-    "_ronn/static/app.js": "7d6c5e47211ff0dc6d15e66e34833f0ef2482aa99bbf88733726a5f75ef5a240",
-    "_ronn/static/index.html": "65341082080cd40d6288bfd50dbe078b6040b4273a43a271404ca5fe8e854042",
+    "_ronn/static/app.js": "7867b067dd26fb11b6aa5a40449d2b24a98bb119730b15df96ba2e200558d82c",
+    "_ronn/static/index.html": "0def8f7724f6ef613b4c1cbac4add76ff4eb7cf41f83622e9d5a42a99ff7d8be",
     "_ronn/static/ronn_app_icon.png": "1115e7eae139398a26c235bb5c6a8000a6c86c316f0e5b07936c2fa3a860eb91",
     "_ronn/static/style.css": "441999661033f482554c6144a706f8488b6ffe505ff8b38c98c8fe8db83bf362",
     "_ronn/task_engine.py": "3adeeedc78cae82e3d5ac376d5d91186dd250a99eb94473ab280f8b16e277499",
@@ -77,7 +77,7 @@
     "mobile/package.json": "7d224094e7b73932778f816aaf0b3e906921e9b52e060cfbeba028ca97838c73",
     "_ronn/static/ronn_logo.svg": "5f393fe13d02584cac6fddc8cb136e5528105c05aa4f7a1f5ddd8ff99312e734",
     "_ronn/static/manifest.webmanifest": "e46876cc0c28029e653f5c096939bd6722fa39fc34bab31f216aadd6c3799af6",
-    "_ronn/static/service-worker.js": "1192dbec281c9733a98a07a16996c386e60ec5f0b14935a9228a115875cd6f9f",
+    "_ronn/static/service-worker.js": "9b5032722ba1ed78f5487be895088b77f02300ad2deda853cd976b977e766d99",
     "_ronn/static/mobile_fit.css": "a7752d566ca2560b6f9a943af756af6328431f50e37b1a959612283b5ecd4b05",
     "_ronn/static/ronn_home_icon_v2.png": "1115e7eae139398a26c235bb5c6a8000a6c86c316f0e5b07936c2fa3a860eb91"
   }
