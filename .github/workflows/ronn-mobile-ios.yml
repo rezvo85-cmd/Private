@@ -21,7 +21,7 @@ jobs:
           node-version: "22"
       - run: npm install
       - run: npx expo-doctor
-      - run: npx expo export --platform web --output-dir dist
+      - run: npx expo export --platform ios --output-dir dist
 
   ios-simulator:
     runs-on: macos-latest
