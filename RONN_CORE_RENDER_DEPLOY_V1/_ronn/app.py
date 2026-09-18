@@ -1050,6 +1050,17 @@ def build_messages(owner: str, body: ChatBody, profile: str):
     _r14_user = r14_user_directive(owner)
     if _r14_user:
         system += "\n\n" + _r14_user
+    _r19_digest = r19_conversation_digest(body.history, 9000)
+    if _r19_digest:
+        system += "\n\nRONN R19 LONG-CONTEXT DIGEST (older conversation constraints and decisions):\n" + _r19_digest
+    _r19_evidence = r19_evidence_plan(body.message, bool(body.files), bool(body.images))
+    system += "\n\nRONN R19 EVIDENCE PLAN:\n" + json.dumps(_r19_evidence, ensure_ascii=False)
+    try:
+        _r19_failures = r19_relevant_failures(owner, body.message, 5)
+        if _r19_failures:
+            system += "\n\nRONN FAILURE LESSONS (avoid repeating these mistakes):\n" + "\n".join("- " + str(x.get("lesson","")) for x in _r19_failures)
+    except Exception:
+        pass
     if body.agent_mode:
         system += "\n\nRONN AGENT MODE: Continue through safe reversible analysis/tool steps automatically. Pause only at a real permission boundary or irreversible external action. Never pretend unsupported desktop control exists."
     if body.skill_profile and body.skill_profile != "auto":
