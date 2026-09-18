@@ -61,6 +61,7 @@ from r20_controller import plan as r20_plan, resolve_route as r20_resolve_route,
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 import memory_store_pg as pg_memory
+from r21_release_gate import run as r21_release_gate
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -2914,6 +2915,10 @@ def diagnostics(request: Request):
         "task_queue": (BASE / "task_queue.py").exists(),
         "core_api_v1": (BASE / "core_api.py").exists(),
         "core_store": (BASE / "core_store.py").exists(),
+        "core_store_pg": (BASE / "core_store_pg.py").exists(),
+        "memory_store_pg": (BASE / "memory_store_pg.py").exists(),
+        "r20_tool_hub": (BASE / "r20_tool_hub.py").exists(),
+        "r21_release_gate": (BASE / "r21_release_gate.py").exists(),
     }
     integrity = verify_package_integrity()
     r5_checks = run_r5_benchmarks()
@@ -2967,6 +2972,7 @@ def diagnostics(request: Request):
         "r13_eval":r13_checks,
         "r14_eval":r14_checks,
         "r15_eval":r15_checks,
+        "r21_release_gate":r21_release_gate(),
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner_id(request)),
