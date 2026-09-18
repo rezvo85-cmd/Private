@@ -306,7 +306,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-WEB4",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-IOS4",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
@@ -333,21 +333,17 @@ function syncMobileViewport(){
   mobileViewportFrame=requestAnimationFrame(()=>{
     const root=document.documentElement;
     if(window.innerWidth>780){
-      ["--ronn-vv-height","--ronn-vv-width","--ronn-vv-top","--ronn-vv-left"].forEach(k=>root.style.removeProperty(k));
+      root.style.removeProperty("--ronn-visible-bottom");
       document.body.classList.remove("mobileKeyboardOpen");
       return;
     }
     const vv=window.visualViewport;
-    const h=Math.max(1,Math.round((vv&&vv.height>0)?vv.height:window.innerHeight));
-    const w=Math.max(1,Math.round((vv&&vv.width>0)?vv.width:window.innerWidth));
+    const layoutH=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
+    const h=Math.max(1,Math.round((vv&&vv.height>0)?vv.height:layoutH));
     const top=Math.max(0,Math.round(vv?.offsetTop||0));
-    const left=Math.max(0,Math.round(vv?.offsetLeft||0));
-    root.style.setProperty("--ronn-vv-height",h+"px");
-    root.style.setProperty("--ronn-vv-width",w+"px");
-    root.style.setProperty("--ronn-vv-top",top+"px");
-    root.style.setProperty("--ronn-vv-left",left+"px");
-    const lostHeight=Math.max(0,window.innerHeight-h-top);
-    const keyboard=(document.activeElement===input)&&(lostHeight>100||h<window.innerHeight*0.82);
+    const visibleBottom=Math.max(h,Math.min(layoutH,top+h));
+    root.style.setProperty("--ronn-visible-bottom",visibleBottom+"px");
+    const keyboard=(document.activeElement===input)&&(h<layoutH*0.84);
     document.body.classList.toggle("mobileKeyboardOpen",keyboard);
     if(keyboard&&currentView==="chat")scrollToLatest(true);
   });
@@ -363,7 +359,7 @@ input.addEventListener("focus",()=>{
   if(window.innerWidth<=780){
     document.body.classList.add("mobileInputFocused");
     syncMobileViewport();
-    [60,180,360].forEach(ms=>setTimeout(()=>{syncMobileViewport();scrollToLatest(true)},ms));
+    [80,240].forEach(ms=>setTimeout(()=>{syncMobileViewport();scrollToLatest(true)},ms));
   }
 });
 input.addEventListener("blur",()=>{
