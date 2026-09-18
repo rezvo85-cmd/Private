@@ -30,6 +30,7 @@ from r6_intelligence import r6_preflight, r6_directive, ranking_policy as r6_ran
 from r6_benchmarks import run_r6_benchmarks
 from r7_impact import r7_preflight, r7_directive, response_quality_score, capability_manifest, explanation_trace
 from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNAL_COUNT as R11_SIGNAL_COUNT
+from r12_improvements import r12_preflight, r12_directive, IMPROVEMENT_COUNT as R12_IMPROVEMENT_COUNT
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
@@ -46,7 +47,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R11-RELIABILITY")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R12-IMPROVEMENTS")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -76,7 +77,7 @@ def verify_package_integrity():
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
-    } if str(BUILD_ID).endswith("R11-RELIABILITY") else set()
+    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
@@ -895,6 +896,8 @@ def build_messages(owner: str, body: ChatBody, profile: str):
     system += "\n\n" + r7_directive(_r7)
     _r11 = r11_preflight(body.message, history=body.history, profile=profile, difficulty=difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
     system += "\n\n" + r11_directive(_r11)
+    _r12 = r12_preflight(body.message, history=body.history, profile=profile, difficulty=difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
+    system += "\n\n" + r12_directive(_r12)
     if body.agent_mode:
         system += "\n\nRONN AGENT MODE: Continue through safe reversible analysis/tool steps automatically. Pause only at a real permission boundary or irreversible external action. Never pretend unsupported desktop control exists."
     if body.skill_profile and body.skill_profile != "auto":
@@ -1484,10 +1487,11 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _r7_preflight = r7_preflight(body.message, profile, _difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
     _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
     _r11_tier = r11_route_hint(_r11_preflight)
+    _r12_preflight = r12_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
     _auto_tier = route_override(_r5_preflight, body.mode)
     if body.mode == "auto":
         # R11 reliability routing gets first say for current facts and harder work.
-        if (_r11_preflight.get("route",{}).get("live_required") or _r7_preflight.get("agent_plan",{}).get("freshness",{}).get("live_required")) and groq_key_loaded():
+        if ("research" in _r12_preflight.get("active_domains",[]) or _r11_preflight.get("route",{}).get("live_required") or _r7_preflight.get("agent_plan",{}).get("freshness",{}).get("live_required")) and groq_key_loaded():
             model, route, profile = RESEARCH_MODEL, "research", "research"
         elif _r11_tier == "apex":
             model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
@@ -1553,7 +1557,11 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r7_preflight":_r7_preflight,
         "r11_preflight":_r11_preflight,
         "r11_signal_registry":R11_SIGNAL_COUNT,
+        "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "r11_matched_signals":_r11_preflight.get("matched_signal_count",0),
+        "r12_preflight":_r12_preflight,
+        "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
+        "r12_active_policy_count":_r12_preflight.get("active_policy_count",0),
         "adaptive_tier":_r11_tier if _r11_tier != "fast" else _auto_tier,
         "agent_mode":bool(body.agent_mode),
         "decision_summary":explanation_trace(body.message,_r7_preflight.get("agent_plan",{}),route,model),
@@ -1587,7 +1595,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             else:
                 r = cloud_request(NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL, "nvidia-deep" if nvidia_key_loaded() else "deep", messages, 1200, stream=True)
         else:
-            do_review = (body.review or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
+            do_review = (body.review or _r12_preflight.get("quality_floor") == "high" or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
             if do_review:
                 task_checkpoint(request_id, "Drafting", "started", "")
                 yield (json.dumps({"stage":"Drafting"})+"\n").encode()
@@ -2393,6 +2401,7 @@ def diagnostics(request: Request):
         "r7_impact": (BASE / "r7_impact.py").exists(),
         "r11_intelligence": (BASE / "r11_intelligence.py").exists(),
         "r11_benchmarks": (BASE / "r11_benchmarks.py").exists(),
+        "r12_improvements": (BASE / "r12_improvements.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
