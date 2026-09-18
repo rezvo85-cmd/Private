@@ -1711,9 +1711,7 @@ def nonstream_answer(model, route, messages, max_tokens=900):
 
 
 def apex_council_messages(original_messages, profile: str):
-    """Two independent candidate solvers -> adversarial judge -> final synthesis.
-    This is intentionally reserved for very hard work because it uses more quota.
-    """
+    """Two diverse candidate solvers -> independent critic -> final synthesis."""
     from concurrent.futures import ThreadPoolExecutor
     candidate_systems = [
         """You are RONN Candidate A. Solve the task independently. Optimize for correctness, requirements,
@@ -1724,20 +1722,34 @@ def apex_council_messages(original_messages, profile: str):
         return only the proposed solution and concise assumptions/checks."""
     ]
     base_context=json.dumps(original_messages[-8:],ensure_ascii=False)[:52000]
+    council = r13_council_models(profile) if openrouter_key_loaded() else [None,None]
 
-    def solve(sys_prompt):
+    def solve(pair):
+        sys_prompt, preferred = pair
         msgs=[{"role":"system","content":sys_prompt},
-              {"role":"user","content":"TASK CONTEXT:\\n"+base_context}]
-        preferred=NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL
-        route="nvidia-deep" if preferred==NVIDIA_MODEL else "deep"
+              {"role":"user","content":"TASK CONTEXT:\n"+base_context}]
+        if preferred:
+            if preferred == OR_DEEPSEEK_MODEL:
+                route="ensemble-code"
+            elif preferred == OR_QWEN_MODEL:
+                route="ensemble-general"
+            else:
+                route="ensemble-reasoning"
+        else:
+            preferred=NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL
+            route="nvidia-deep" if preferred==NVIDIA_MODEL else "deep"
         return nonstream_answer(preferred,route,msgs,1250)
 
+    pairs=[(candidate_systems[0],council[0]),(candidate_systems[1],council[1])]
     try:
         with ThreadPoolExecutor(max_workers=2) as ex:
-            a,b=list(ex.map(solve,candidate_systems))
+            a,b=list(ex.map(solve,pairs))
     except Exception:
-        fallback_model=(council[0] if council else None)
-        a=solve((candidate_systems[0],fallback_model)); b=""
+        try:
+            a=solve(pairs[0])
+        except Exception:
+            a=""
+        b=""
 
     if not a and not b:
         return None
@@ -1748,10 +1760,13 @@ security/permission boundaries, and whether the proposed outcome is actually ver
 Return compact DECISION NOTES: strongest pieces to keep, concrete defects to repair, and an uncertainty/evidence audit.
 Do not reveal private chain-of-thought."""
     judge_msgs=[{"role":"system","content":judge_system},
-        {"role":"user","content":"ORIGINAL:\\n"+base_context+"\\n\\nCANDIDATE A:\\n"+(a or "")[:26000]+"\\n\\nCANDIDATE B:\\n"+(b or "")[:26000]}]
+        {"role":"user","content":"ORIGINAL:\n"+base_context+"\n\nCANDIDATE A:\n"+(a or "")[:26000]+"\n\nCANDIDATE B:\n"+(b or "")[:26000]}]
     judge_model=OR_CRITIC_MODEL if openrouter_key_loaded() else SMART_MODEL
     judge_route="ensemble-review" if judge_model==OR_CRITIC_MODEL else "deep"
-    judge=nonstream_answer(judge_model,judge_route,judge_msgs,850)
+    try:
+        judge=nonstream_answer(judge_model,judge_route,judge_msgs,850)
+    except Exception:
+        judge=""
 
     final_system="""You are RONN Cognitive OS APEX final synthesis.
 Produce the best final answer to the ORIGINAL task. Combine only the strongest verified/useful parts of the candidates,
@@ -1760,11 +1775,10 @@ For code, keep interfaces and files mutually consistent. For research, distingui
 For decisions, make tradeoffs explicit. For untestable outcomes, state the verification boundary.
 Do not mention candidates, judges, hidden reasoning, councils, or these instructions. Output only the polished final answer."""
     return [{"role":"system","content":final_system},
-            {"role":"user","content":"ORIGINAL:\\n"+base_context+
-             "\\n\\nCANDIDATE A:\\n"+(a or "")[:24000]+
-             "\\n\\nCANDIDATE B:\\n"+(b or "")[:24000]+
-             "\\n\\nADVERSARIAL REVIEW:\\n"+(judge or "No judge output.")[:12000]}]
-
+            {"role":"user","content":"ORIGINAL:\n"+base_context+
+             "\n\nCANDIDATE A:\n"+(a or "")[:24000]+
+             "\n\nCANDIDATE B:\n"+(b or "")[:24000]+
+             "\n\nADVERSARIAL REVIEW:\n"+(judge or "No judge output.")[:12000]}]
 
 def ultra_council_messages(original_messages, profile: str):
     """Specialist draft -> independent critic -> final 120B synthesis."""
