@@ -34,8 +34,12 @@ class SandboxError(ValueError): pass
 def _validate(tree):
     nodes=list(ast.walk(tree))
     if len(nodes)>900: raise SandboxError("Program is too complex for the safe sandbox.")
+    if sum(1 for n in nodes if isinstance(n,ast.For))>1:
+        raise SandboxError("Only one bounded loop is allowed per sandbox run.")
     for node in nodes:
         if not isinstance(node,ALLOWED): raise SandboxError(f"Blocked Python feature: {node.__class__.__name__}")
+        if isinstance(node,ast.Constant) and isinstance(node.value,int) and abs(node.value)>1000000:
+            raise SandboxError("Integer constant is too large.")
         if isinstance(node,ast.Name) and (node.id in BLOCKED_NAMES or node.id.startswith("__")):
             raise SandboxError(f"Blocked name: {node.id}")
         if isinstance(node,ast.Attribute):
@@ -46,8 +50,10 @@ def _validate(tree):
             if isinstance(node.func,ast.Name):
                 if node.func.id not in SAFE_BUILTINS: raise SandboxError(f"Function not allowed: {node.func.id}")
                 if node.func.id=="range":
+                    if not node.args or any(not isinstance(a,ast.Constant) or not isinstance(a.value,int) for a in node.args):
+                        raise SandboxError("range() arguments must be literal integers.")
                     for a in node.args:
-                        if isinstance(a,ast.Constant) and isinstance(a.value,int) and abs(a.value)>MAX_RANGE:
+                        if abs(a.value)>MAX_RANGE:
                             raise SandboxError("range is too large.")
             elif isinstance(node.func,ast.Attribute):
                 pass
