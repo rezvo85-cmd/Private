@@ -624,6 +624,58 @@ class R14GraphBody(BaseModel):
     query: str = ""
     project_id: str = "default"
 
+class WorkspaceWriteBody(BaseModel):
+    workspace: str = "default"
+    name: str
+    content: str
+
+class WorkspaceRunBody(BaseModel):
+    workspace: str = "default"
+    entry: str
+    language: str = "auto"
+    execute: bool = True
+
+class WorkspaceRollbackBody(BaseModel):
+    action_id: str
+    workspace: str = "default"
+    name: str
+
+class SimulationBody(BaseModel):
+    before: list[TextFile] = Field(default_factory=list)
+    after: list[TextFile] = Field(default_factory=list)
+
+class BrowserBody(BaseModel):
+    url: str
+
+class ResearchBody(BaseModel):
+    query: str
+    urls: list[str] = Field(default_factory=list)
+
+class MultiAgentBody(BaseModel):
+    task: str
+    context: str = ""
+    profile: str = "auto"
+
+class ComputerActionBody(BaseModel):
+    action: str
+    payload: dict = Field(default_factory=dict)
+
+class MonitorBody(BaseModel):
+    label: str = ""
+    url: str
+    interval_s: int = 900
+
+class ToolCreateBody(BaseModel):
+    name: str
+    description: str = ""
+    source: str
+
+class ToolRunBody(BaseModel):
+    tool_id: str
+
+class TrainingExportBody(BaseModel):
+    limit: int = 1000
+
 # ---------------- reliability / evidence policy ----------------
 
 def reliability_flags(message: str, files=None):
