@@ -928,6 +928,14 @@ def complexity_score(message: str, files):
         score += 1
     return score
 
+def r19_adapt_model(profile: str, model: str):
+    if openrouter_key_loaded() and model in OR_ENSEMBLE_MODELS:
+        try:
+            return r19_router_choose(profile, list(OR_ENSEMBLE_MODELS), model)
+        except Exception:
+            return model
+    return model
+
 def select_model(message: str, images, files, mode: str):
     mode = (mode or "auto").lower()
     profile = task_profile(message, files)
@@ -1686,6 +1694,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         return
 
     model, route, profile = select_model(body.message, body.images, body.files, body.mode)
+    model = r19_adapt_model(profile, model)
     request_id = new_task_id()
     started_at = time.time()
     _difficulty = task_difficulty(body.message)
@@ -1722,6 +1731,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
         elif _auto_tier == "deep" and route in {"fast","knowledge","deep"}:
             model, route = (NVIDIA_MODEL, "nvidia-deep") if nvidia_key_loaded() else (SMART_MODEL, "deep")
+    model = r19_adapt_model(profile, model)
     _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
     _project_id = ensure_project((body.project_context[:180] if body.project_context else "default"))
