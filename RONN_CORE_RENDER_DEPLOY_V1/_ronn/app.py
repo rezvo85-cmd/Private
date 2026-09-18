@@ -51,7 +51,7 @@ from r17_connectors import status as r17_connectors_status
 from r17_jobs import create as r17_job_create, get as r17_job_get, list_jobs as r17_job_list, stats as r17_job_stats
 from r17_agents import messages as r17_agent_messages, status as r17_agent_status
 from r18_monitor import add as r18_monitor_add, list_watches as r18_monitor_list, alerts as r18_monitor_alerts, mark_seen as r18_monitor_mark_seen, start as r18_monitor_start, status as r18_monitor_status, check as r18_monitor_check
-from r18_research import collect_pages as r18_collect_pages, prompt as r18_research_prompt
+from r18_research import extract_urls as r18_extract_urls, collect_pages as r18_collect_pages, prompt as r18_research_prompt
 from r19_tools import create as r19_tool_create, list_tools as r19_tool_list, run as r19_tool_run, remove as r19_tool_remove, status as r19_tool_status
 from r19_router import choose as r19_router_choose, record as r19_router_record, report as r19_router_report
 from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
@@ -1757,6 +1757,47 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         start_run(request_id, owner, _project_id, body.message, profile, route, model, _strategy, _difficulty)
     except Exception:
         pass
+    _real_tool_evidence=[]
+    if body.agent_mode:
+        # R19 tool controller: automatically use safe real tools only when the request
+        # clearly calls for them. Results are injected as evidence, never invented.
+        try:
+            _urls=r18_extract_urls(body.message)
+            if _urls and any(x.get("tool")=="live_research" for x in _r14_tools.get("tools",[])):
+                _pages=r18_collect_pages(_urls[:3])
+                _real_tool_evidence.append({"tool":"browser","pages":[
+                    {"url":p.get("url"),"title":p.get("title"),"status":p.get("status"),"text":p.get("text","")[:9000],"error":p.get("error")}
+                    for p in _pages
+                ]})
+                task_checkpoint(request_id,"Inspect evidence","complete",f"Fetched {len(_pages)} explicitly supplied web page(s) through the safe browser.")
+        except Exception as _browser_exc:
+            _real_tool_evidence.append({"tool":"browser","error":str(_browser_exc)[:300]})
+        try:
+            _low=(body.message or "").lower()
+            _run_requested=profile=="coding" and bool(body.files) and any(x in _low for x in ("run ","run this","test ","test this","execute","debug","fix ","repair"))
+            _runnable=[x for x in body.files if str(getattr(x,"name","")).lower().endswith((".py",".js",".mjs",".cjs"))]
+            if _run_requested and _runnable:
+                _workspace="chat_"+request_id[-12:]
+                # Keep the automatic path bounded to the first runnable file. Multi-file projects
+                # remain available through the explicit workspace APIs.
+                _f=_runnable[0]
+                _write=r16_ws_write(owner,_workspace,_f.name,_f.content)
+                _run=r16_ws_run(owner,_workspace,_f.name,"auto",True)
+                _entry={"tool":"controlled_code_execution","workspace":_workspace,"file":_f.name,"write":_write,"run":_run}
+                if (not _run.get("ok")) and any(x in _low for x in ("fix","repair")):
+                    _fix=r16_autofix_loop(owner,_workspace,_f.name,_r16_repair_model,2)
+                    _entry["autofix"]=_fix
+                    try:_entry["final_file"]=r16_ws_read(owner,_workspace,_f.name).get("content","")[:30000]
+                    except Exception:pass
+                _real_tool_evidence.append(_entry)
+                task_checkpoint(request_id,"Verify","complete" if _entry.get("autofix",_run).get("ok") else "blocked",
+                                "Executed the attached code in RONN's controlled workspace and recorded the real result.")
+        except Exception as _exec_exc:
+            _real_tool_evidence.append({"tool":"controlled_code_execution","error":str(_exec_exc)[:400]})
+    if _real_tool_evidence:
+        _tool_block="RONN REAL TOOL EVIDENCE (actual results from this run; distinguish failures from success):\n"+json.dumps(_real_tool_evidence,ensure_ascii=False)[:50000]
+        body.project_context=((body.project_context or "")+"\n\n"+_tool_block).strip()
+
     messages = build_messages(owner, body, profile)
     if route in {"live","research","max"}:
         messages[0]["content"] += "\nFor current or research-dependent claims, use available live tools when useful and ground the answer in retrieved information."
