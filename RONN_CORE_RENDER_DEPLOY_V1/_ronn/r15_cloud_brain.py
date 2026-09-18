@@ -7,6 +7,8 @@ restore those databases before normal use. No provider/API secrets are mirrored.
 from __future__ import annotations
 import hashlib
 import os
+import sqlite3
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -65,6 +67,25 @@ def _safe_file(path: Path):
 def _sha(data: bytes):
     return hashlib.sha256(data).hexdigest()
 
+def _stable_bytes(path: Path):
+    """Return a consistent snapshot of a live SQLite DB, including WAL state."""
+    if path.suffix.lower() not in {".db",".sqlite",".sqlite3"}:
+        return path.read_bytes()
+    fd,tmp=tempfile.mkstemp(prefix="ronn-cloud-",suffix=path.suffix)
+    os.close(fd)
+    try:
+        src=sqlite3.connect(str(path),timeout=3)
+        dst=sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+            dst.commit()
+        finally:
+            dst.close();src.close()
+        return Path(tmp).read_bytes()
+    finally:
+        try: os.unlink(tmp)
+        except OSError: pass
+
 def restore_directory(data_dir):
     """Restore durable database/json files before RONN starts using them."""
     root=Path(data_dir)
@@ -97,8 +118,8 @@ def snapshot_directory(data_dir):
         if not _safe_file(path):
             continue
         try:
-            data=path.read_bytes()
-        except OSError:
+            data=_stable_bytes(path)
+        except (OSError,sqlite3.Error):
             continue
         # Skip unexpectedly huge local artifacts.
         if len(data)>25*1024*1024:
