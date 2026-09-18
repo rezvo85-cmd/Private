@@ -1063,3 +1063,17 @@ input,textarea,select,button{max-width:100%}
   .ronn19 .activityDock{bottom:92px;width:calc(100% - 20px)}
   .ronn19 .panelView{padding:18px 13px 90px}
 }
+
+.ronn19 .r19CapabilityCard{margin-top:18px;background:#272727;border:1px solid #383838;border-radius:16px;padding:18px}
+.ronn19 .r19CapabilityHead{display:flex;gap:18px;align-items:flex-start;justify-content:space-between}
+.ronn19 .r19CapabilityHead h2{margin:4px 0 6px;font-size:18px}
+.ronn19 .r19CapabilityHead p{margin:0;color:#999;font-size:12px;max-width:650px}
+.ronn19 .r19CapabilityMatrix{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:15px}
+.ronn19 .r19CapRow{display:flex;align-items:center;gap:10px;min-height:42px;padding:9px 11px;background:#222;border:1px solid #333;border-radius:10px}
+.ronn19 .r19CapRow i{width:8px;height:8px;border-radius:50%;background:#777;flex:0 0 auto}
+.ronn19 .r19CapRow.on i{background:#df2c47;box-shadow:0 0 10px rgba(223,44,71,.32)}
+.ronn19 .r19CapRow.wait i{background:#a77b3d}
+.ronn19 .r19CapRow div{min-width:0;display:flex;flex-direction:column}
+.ronn19 .r19CapRow b{font-size:12px;font-weight:600;color:#eee}
+.ronn19 .r19CapRow small{font-size:10px;color:#858585;margin-top:2px}
+@media(max-width:780px){.ronn19 .r19CapabilityMatrix{grid-template-columns:1fr}.ronn19 .r19CapabilityCard{padding:14px}}
