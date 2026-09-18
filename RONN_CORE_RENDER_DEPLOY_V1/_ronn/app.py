@@ -1037,7 +1037,8 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
         has_files=bool(body.files), has_project=bool(body.project_context)
     )
     _r6 = r6_preflight(body.message, profile, difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
-    system += "\n\n" + brevity_directive(_r6["brevity"])
+    _brevity = response_length_policy(body.message, body.style, difficulty, bool(body.files), bool(body.images), bool(body.project_context))
+    system += "\n\n" + brevity_directive(_brevity)
     _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
     system += "\n\n" + r14_tool_directive(_r14_tools)
     _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files)
@@ -1874,7 +1875,10 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             "Never expose tool-call JSON, tool names, internal arguments, executed-tools data, or hidden reasoning to the user. "
             "Return only the normal user-facing answer and include useful source links for current claims."
         )
-    _length_policy = _r6_preflight.get("brevity", {})
+    _length_policy = response_length_policy(
+        body.message, body.style, int(_r20.get("difficulty") or _difficulty),
+        bool(body.files), bool(body.images), bool(body.project_context)
+    )
     _base_budget = {"fast":700,"smart":1200,"deep":1800,"apex":2400}.get(str(_r20.get("depth") or "smart"),1200)
     max_tokens = min(_base_budget, int(_length_policy.get("max_tokens") or _base_budget))
     # Research/list questions need enough room for the requested list even when each entry should stay concise.
