@@ -7,7 +7,7 @@ const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stop
 const attachmentsEl = $("attachments"), fileInput = $("fileInput"), jumpLatest = $("jumpLatest");
 const routeBadge = $("routeBadge"), stageBadge = $("stageBadge"), profileBadge = $("profileBadge");
 
-const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R10.1-WEB-AUTH";
+const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R11-RELIABILITY";
 const CORE_API = "/api/v1";
 const CLIENT_KEY = "ronnClient";
 const LEGACY_CLIENT_KEY = "novaUltraClient";
@@ -141,7 +141,7 @@ async function sendMessage(regenerate=false,overrideText=null){
     const res=await fetch(CORE_API+"/chat",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),signal:controller.signal,body:JSON.stringify({message:text,conversation_id:currentChat().coreConversationId||null,project_id:activeProject()?.coreProjectId||"default",history,images:atts.filter(a=>a.kind==="image").map(a=>a.data),files:atts.filter(a=>a.kind==="text").map(a=>({name:a.name,content:a.content})),mode:$("modeSelect").value,style:$("styleSelect").value,project_context:composeActiveProjectContext(),review:$("reviewToggle").checked,agent_mode:$("agentToggle")?.checked!==false,skill_profile:"auto"})});
     if(!res.ok){const d=await res.json().catch(()=>({}));if(res.status===401){setWebAuthGate(true,"Your secure owner session expired. Unlock RONN again.");throw new Error("RONN is locked.")}throw new Error(d.detail||`RONN server returned HTTP ${res.status}.`)}
     const reader=res.body.getReader(),decoder=new TextDecoder();let buffer="";
-    while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split("\n");buffer=lines.pop();for(const line of lines){if(!line.trim())continue;let d;try{d=JSON.parse(line)}catch{continue}if(d.core?.conversation_id){const cc=currentChat();cc.coreConversationId=d.core.conversation_id;saveChats();continue}if(d.meta){responseMeta=d.meta;responseRequestId=d.meta.request_id||responseRequestId;currentRequestId=responseRequestId||currentRequestId;routeBadge.textContent=routeLabel(d.meta.route);profileBadge.textContent=profileLabel(d.meta.profile);setNeuralMeta(d.meta);if(d.meta.task_plan?.checkpoint_count){$("activityTitle").textContent=`RONN · ${d.meta.task_plan.checkpoint_count} checkpoints`}if(d.meta.adaptive_tier){$("activityDetail").textContent=`Adaptive tier: ${d.meta.adaptive_tier} · verifying requirements and evidence boundaries.`}const warnings=d.meta.r7_preflight?.agent_plan?.risk?.proactive_warnings||[];if(warnings.length)$("activityDetail").textContent=warnings[0];const stage=["live","research","max","tools"].includes(d.meta.route)?"Researching":String(d.meta.route||"").includes("ultra")?"Council":String(d.meta.route||"").startsWith("nvidia")?"Deep reasoning":d.meta.route==="knowledge"?"Thinking":d.meta.route==="vision"?"Analyzing":"Building";setStage(stage)}if(d.stage)setStage(d.stage);if(d.done&&d.audit)responseAudit=d.audit;if(d.error)throw new Error(d.error);if(d.token){if(first)first=false;answer=sanitizeVisible(answer+d.token);answerEl.innerHTML=renderMarkdown(answer)+'<span class="cursor">▌</span>';scrollToLatest(false)}}}
+    while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split("\n");buffer=lines.pop();for(const line of lines){if(!line.trim())continue;let d;try{d=JSON.parse(line)}catch{continue}if(d.core?.conversation_id){const cc=currentChat();cc.coreConversationId=d.core.conversation_id;saveChats();continue}if(d.meta){responseMeta=d.meta;responseRequestId=d.meta.request_id||responseRequestId;currentRequestId=responseRequestId||currentRequestId;routeBadge.textContent=routeLabel(d.meta.route);profileBadge.textContent=profileLabel(d.meta.profile);setNeuralMeta(d.meta);if(d.meta.r11_preflight){const rr=d.meta.r11_preflight.route||{};const n=$("neuralBadge");if(n)n.textContent=`R11 · ${String(rr.tier||"adaptive").toUpperCase()}`;}if(d.meta.task_plan?.checkpoint_count){$("activityTitle").textContent=`RONN · ${d.meta.task_plan.checkpoint_count} checkpoints`}if(d.meta.adaptive_tier){$("activityDetail").textContent=`Adaptive tier: ${d.meta.adaptive_tier} · verifying requirements and evidence boundaries.`}const warnings=d.meta.r7_preflight?.agent_plan?.risk?.proactive_warnings||[];if(warnings.length)$("activityDetail").textContent=warnings[0];const stage=["live","research","max","tools"].includes(d.meta.route)?"Researching":String(d.meta.route||"").includes("ultra")?"Council":String(d.meta.route||"").startsWith("nvidia")?"Deep reasoning":d.meta.route==="knowledge"?"Thinking":d.meta.route==="vision"?"Analyzing":"Building";setStage(stage)}if(d.stage)setStage(d.stage);if(d.done&&d.audit)responseAudit=d.audit;if(d.error)throw new Error(d.error);if(d.token){if(first)first=false;answer=sanitizeVisible(answer+d.token);answerEl.innerHTML=renderMarkdown(answer)+'<span class="cursor">▌</span>';scrollToLatest(false)}}}
     answer=sanitizeVisible(answer).trim();if(!answer)throw new Error("The provider returned no usable answer. RONN did not fabricate one.");answerEl.innerHTML=renderMarkdown(answer);if(responseAudit)applyAudit(ai,responseAudit);pushMessage("assistant",answer,responseRequestId,responseAudit,responseMeta);ai.dataset.requestId=responseRequestId||"";if(responseRequestId){const tools=ai.querySelector(".msgTools");if(tools&&!tools.querySelector(".rateMsg"))tools.insertAdjacentHTML("beforeend",'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>')}setStage("Complete");refreshMemory()
   }catch(e){if(e.name==="AbortError"){answerEl.innerHTML=renderMarkdown(answer||"Stopped.");setStage("Stopped")}else{answerEl.innerHTML=`<p><strong>Error:</strong> ${escapeHTML(e.message)}</p><p>Open <strong>Diagnostics</strong> if this keeps happening.</p>`;setStage("Error")}}
   finally{busy=false;controller=null;currentRequestId="";stopBtn.classList.add("hidden");sendBtn.classList.remove("hidden");stopActivity();setTimeout(()=>setStage("Ready"),1500);input.focus()}
@@ -223,7 +223,7 @@ const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R10-1-2",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R11",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
@@ -242,3 +242,13 @@ if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){cur
 renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);input.focus();
 
 window.__RONN_UI_READY=true;
+
+function setMobileNav(open){
+  document.body.classList.toggle("mobileNavOpen",!!open);
+  const btn=$("mobileMenuBtn");
+  if(btn)btn.setAttribute("aria-expanded",open?"true":"false");
+}
+if($("mobileMenuBtn"))$("mobileMenuBtn").onclick=()=>setMobileNav(!document.body.classList.contains("mobileNavOpen"));
+if($("sidebarScrim"))$("sidebarScrim").onclick=()=>setMobileNav(false);
+qsa(".navBtn").forEach(b=>b.addEventListener("click",()=>{if(window.innerWidth<=780)setMobileNav(false)}));
+window.addEventListener("resize",()=>{if(window.innerWidth>780)setMobileNav(false)},{passive:true});
