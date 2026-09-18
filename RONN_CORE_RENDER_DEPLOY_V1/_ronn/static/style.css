@@ -1077,3 +1077,8 @@ input,textarea,select,button{max-width:100%}
 .ronn19 .r19CapRow b{font-size:12px;font-weight:600;color:#eee}
 .ronn19 .r19CapRow small{font-size:10px;color:#858585;margin-top:2px}
 @media(max-width:780px){.ronn19 .r19CapabilityMatrix{grid-template-columns:1fr}.ronn19 .r19CapabilityCard{padding:14px}}
+
+.ronn19 .composerTool{width:36px;height:36px;min-width:36px;border:0;border-radius:50%;background:transparent;color:#a9a9a9;cursor:pointer;font-size:15px}
+.ronn19 .composerTool:hover{background:#3a3a3a;color:#fff}
+.ronn19 .composerTool.active,.ronn19 .composerTool.listening{color:#ff5068;background:rgba(225,42,70,.12)}
+@media(max-width:520px){.ronn19 .composerTool{width:34px;height:34px;min-width:34px}.ronn19 .composer{padding-left:7px}.ronn19 .attach{width:36px;height:36px}}
