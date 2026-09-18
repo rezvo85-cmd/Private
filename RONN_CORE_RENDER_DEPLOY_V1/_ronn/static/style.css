@@ -603,3 +603,14 @@ input,textarea,select,button{max-width:100%}
 .ronn19 .composerTool.active,.ronn19 .composerTool.listening{color:#ff5068;background:rgba(225,42,70,.12)}
 
 /* Phone/mobile layout lives in static/mobile_fit.css. Keep desktop/tablet rules here. */
+
+/* R21 rich answer cards */
+.richCards{display:grid;gap:10px;margin:14px 0 4px;max-width:680px}
+.richCard{border:1px solid rgba(255,255,255,.09);background:#292929;border-radius:18px;padding:14px 15px}
+.weatherCard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:center}
+.weatherCard div{display:grid;gap:3px}.weatherCard small{font-size:9px;letter-spacing:.12em;color:#9d9d9d}
+.weatherCard b{font-size:14px;color:#f4f4f4}.weatherCard strong{font-size:28px;letter-spacing:-.04em;color:#fff}
+.weatherCard p{grid-column:1/-1;margin:2px 0 0;color:#bdbdbd;font-size:12px;line-height:1.45}
+.sourceCards{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.sourceCards>span{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#969696;margin-right:2px}
+.sourceCards a{display:inline-flex;align-items:center;max-width:220px;min-height:30px;padding:6px 9px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:#262626;color:#d8d8d8;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sourceCards a:hover{background:#303030;color:#fff}
