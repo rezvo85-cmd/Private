@@ -4,7 +4,7 @@ const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stop
 const attachmentsEl = $("attachments"), fileInput = $("fileInput"), jumpLatest = $("jumpLatest");
 const routeBadge = $("routeBadge"), stageBadge = $("stageBadge"), profileBadge = $("profileBadge");
 
-const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R10-ECOSYSTEM";
+const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R10.1-WEB-AUTH";
 const CORE_API = "/api/v1";
 const CLIENT_KEY = "ronnClient";
 const LEGACY_CLIENT_KEY = "novaUltraClient";
@@ -17,6 +17,47 @@ const DEVICE_KEY="ronnDevice";
 let deviceId=localStorage.getItem(DEVICE_KEY);
 if(!deviceId){deviceId=(crypto.randomUUID?crypto.randomUUID():"dev-"+Date.now()+"-"+Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,"");localStorage.setItem(DEVICE_KEY,deviceId);}
 const apiHeaders = extra => Object.assign({"X-RONN-Client":clientId,"X-RONN-Device":deviceId,"X-RONN-Account":"ronn_primary"},extra||{});
+
+function setWebAuthGate(show,message="") {
+  const gate=$("webAuthGate"), msg=$("webAuthMessage");
+  if(!gate)return;
+  gate.classList.toggle("hidden",!show);
+  document.body.classList.toggle("authLocked",show);
+  if(msg&&message)msg.textContent=message;
+  if(show)setTimeout(()=>$("webAuthSecret")?.focus(),60);
+}
+async function ensureWebAuth(){
+  try{
+    const health=await (await fetch(CORE_API+"/health",{cache:"no-store"})).json();
+    if(!health.auth_required){setWebAuthGate(false);return true}
+    const state=await (await fetch(CORE_API+"/owner/status",{headers:apiHeaders(),cache:"no-store"})).json();
+    if(state.op_active){setWebAuthGate(false);return true}
+    setWebAuthGate(true,"Owner session required. Your Core token stays private on the server.");
+    return false;
+  }catch{
+    setWebAuthGate(true,"RONN Core is waking up or unavailable. Try again in a moment.");
+    return false;
+  }
+}
+async function unlockWebAuth(){
+  const secret=$("webAuthSecret")?.value||"";
+  if(!secret)return;
+  const btn=$("webAuthUnlock"),msg=$("webAuthMessage");
+  if(btn){btn.disabled=true;btn.textContent="Unlocking…"}
+  if(msg)msg.textContent="Creating secure owner session…";
+  try{
+    const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Web",platform:navigator.platform||"web",app_version:"R10.1",return_token:false})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Owner unlock failed.");
+    $("webAuthSecret").value="";
+    setWebAuthGate(false);
+    await refreshStatus();
+    await refreshMemory();
+    refreshOwnerAccess();
+    showToast("RONN unlocked.");
+  }catch(e){if(msg)msg.textContent=e.message||"Could not unlock RONN."}
+  finally{if(btn){btn.disabled=false;btn.textContent="Unlock RONN"}}
+}
 
 const CHAT_KEY="ronnChats", CURRENT_KEY="ronnCurrentChat", PROJECT_KEY="ronnProjects", ACTIVE_PROJECT_KEY="ronnActiveProject";
 function migrateLocalStorage(){
@@ -95,7 +136,7 @@ async function sendMessage(regenerate=false,overrideText=null){
   let answer="",first=true,responseRequestId="",responseAudit=null,responseMeta=null;
   try{
     const res=await fetch(CORE_API+"/chat",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),signal:controller.signal,body:JSON.stringify({message:text,conversation_id:currentChat().coreConversationId||null,project_id:activeProject()?.coreProjectId||"default",history,images:atts.filter(a=>a.kind==="image").map(a=>a.data),files:atts.filter(a=>a.kind==="text").map(a=>({name:a.name,content:a.content})),mode:$("modeSelect").value,style:$("styleSelect").value,project_context:composeActiveProjectContext(),review:$("reviewToggle").checked,agent_mode:$("agentToggle")?.checked!==false,skill_profile:"auto"})});
-    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||`RONN server returned HTTP ${res.status}.`)}
+    if(!res.ok){const d=await res.json().catch(()=>({}));if(res.status===401){setWebAuthGate(true,"Your secure owner session expired. Unlock RONN again.");throw new Error("RONN is locked.")}throw new Error(d.detail||`RONN server returned HTTP ${res.status}.`)}
     const reader=res.body.getReader(),decoder=new TextDecoder();let buffer="";
     while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split("\n");buffer=lines.pop();for(const line of lines){if(!line.trim())continue;let d;try{d=JSON.parse(line)}catch{continue}if(d.core?.conversation_id){const cc=currentChat();cc.coreConversationId=d.core.conversation_id;saveChats();continue}if(d.meta){responseMeta=d.meta;responseRequestId=d.meta.request_id||responseRequestId;currentRequestId=responseRequestId||currentRequestId;routeBadge.textContent=routeLabel(d.meta.route);profileBadge.textContent=profileLabel(d.meta.profile);setNeuralMeta(d.meta);if(d.meta.task_plan?.checkpoint_count){$("activityTitle").textContent=`RONN · ${d.meta.task_plan.checkpoint_count} checkpoints`}if(d.meta.adaptive_tier){$("activityDetail").textContent=`Adaptive tier: ${d.meta.adaptive_tier} · verifying requirements and evidence boundaries.`}const warnings=d.meta.r7_preflight?.agent_plan?.risk?.proactive_warnings||[];if(warnings.length)$("activityDetail").textContent=warnings[0];const stage=["live","research","max","tools"].includes(d.meta.route)?"Researching":String(d.meta.route||"").includes("ultra")?"Council":String(d.meta.route||"").startsWith("nvidia")?"Deep reasoning":d.meta.route==="knowledge"?"Thinking":d.meta.route==="vision"?"Analyzing":"Building";setStage(stage)}if(d.stage)setStage(d.stage);if(d.done&&d.audit)responseAudit=d.audit;if(d.error)throw new Error(d.error);if(d.token){if(first)first=false;answer=sanitizeVisible(answer+d.token);answerEl.innerHTML=renderMarkdown(answer)+'<span class="cursor">▌</span>';scrollToLatest(false)}}}
     answer=sanitizeVisible(answer).trim();if(!answer)throw new Error("The provider returned no usable answer. RONN did not fabricate one.");answerEl.innerHTML=renderMarkdown(answer);if(responseAudit)applyAudit(ai,responseAudit);pushMessage("assistant",answer,responseRequestId,responseAudit,responseMeta);ai.dataset.requestId=responseRequestId||"";if(responseRequestId){const tools=ai.querySelector(".msgTools");if(tools&&!tools.querySelector(".rateMsg"))tools.insertAdjacentHTML("beforeend",'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>')}setStage("Complete");refreshMemory()
@@ -177,6 +218,10 @@ document.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key.toLowerCase()==="n")
 const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;let recognizer=null;if($("voiceBtn")){if(SpeechRecognition){recognizer=new SpeechRecognition();recognizer.lang=navigator.language||"en-US";recognizer.interimResults=false;recognizer.continuous=false;recognizer.onstart=()=>{$("voiceBtn").classList.add("listening");$("voiceBtn").textContent="● Listening"};recognizer.onend=()=>{$("voiceBtn").classList.remove("listening");$("voiceBtn").textContent="◉ Voice"};recognizer.onresult=e=>{const text=[...e.results].map(r=>r[0]?.transcript||"").join(" ").trim();if(text){input.value=(input.value?input.value+" ":"")+text;autoSize();input.focus()}};recognizer.onerror=e=>showToast(`Voice input: ${e.error||"not available"}`);$("voiceBtn").onclick=()=>{try{recognizer.start()}catch{}}}else{$("voiceBtn").disabled=true;$("voiceBtn").title="Voice input is not supported by this browser"}}
 
 
+if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
+if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js").catch(()=>{}))}
+
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
 if($("opLockBtn"))$("opLockBtn").onclick=lockOp;
@@ -187,7 +232,7 @@ if($("vaultSaveBtn"))$("vaultSaveBtn").onclick=saveVaultItem;
 if($("ownerDeviceList"))$("ownerDeviceList").addEventListener("click",async e=>{const id=e.target.dataset.revokeDevice;if(!id)return;const r=await fetch(CORE_API+`/devices/${encodeURIComponent(id)}`,{method:"DELETE",headers:apiHeaders()});if(r.ok){showToast("Device revoked.");refreshOwnerDevices();refreshOwnerStats()}});
 if($("vaultList"))$("vaultList").addEventListener("click",async e=>{const id=e.target.dataset.vaultDelete;if(!id)return;const r=await fetch(CORE_API+`/vault/${encodeURIComponent(id)}`,{method:"DELETE",headers:apiHeaders()});if(r.ok){showToast("Vault item deleted.");refreshVault()}});
 if($("featureFlagList"))$("featureFlagList").addEventListener("change",async e=>{const flag=e.target.dataset.flag;if(!flag)return;const r=await fetch(CORE_API+`/feature-flags/${encodeURIComponent(flag)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({enabled:!!e.target.checked})});if(!r.ok){e.target.checked=!e.target.checked;showToast("Feature flag change failed.")}else showToast("Feature flag updated.")});
-registerDesktopDevice();refreshEcosystemStatus();
+registerDesktopDevice();refreshEcosystemStatus();\nensureWebAuth();
 
 if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){currentChatId=chats[0].id;localStorage.setItem(CURRENT_KEY,currentChatId)}
 renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);input.focus();
