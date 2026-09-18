@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -233,3 +234,14 @@ def stats(owner):
         conv = c.execute("SELECT COUNT(*) n FROM conversations WHERE owner=?", (owner,)).fetchone()["n"]
         msg = c.execute("SELECT COUNT(*) n FROM messages WHERE owner=?", (owner,)).fetchone()["n"]
     return {"projects": p, "conversations": conv, "messages": msg}
+
+
+# R21 cloud-store delegation: Render/production uses Postgres when DATABASE_URL is bound.
+# Local/offline runs keep the existing SQLite implementation.
+if (os.getenv("DATABASE_URL") or "").strip():
+    from core_store_pg import (
+        ensure_default_project, list_projects, create_project, get_project, update_project,
+        delete_project, create_conversation, ensure_conversation, list_conversations,
+        get_conversation, add_message, delete_conversation, get_settings, update_settings,
+        stats,
+    )
