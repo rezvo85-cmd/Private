@@ -31,11 +31,11 @@ from r6_benchmarks import run_r6_benchmarks
 from r7_impact import r7_preflight, r7_directive, response_quality_score, capability_manifest, explanation_trace
 from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNAL_COUNT as R11_SIGNAL_COUNT
 from r12_improvements import r12_preflight, r12_directive, IMPROVEMENT_COUNT as R12_IMPROVEMENT_COUNT
-from r13_ensemble import NEMOTRON_MODEL as OR_NEMOTRON_MODEL, DEEPSEEK_MODEL as OR_DEEPSEEK_MODEL, QWEN_MODEL as OR_QWEN_MODEL, CRITIC_MODEL as OR_CRITIC_MODEL, ENSEMBLE_MODELS as OR_ENSEMBLE_MODELS, choose_primary as r13_choose_primary, council_models as r13_council_models, fallback_models as r13_fallback_models, status as r13_status
+from r13_ensemble import NEMOTRON_MODEL as OR_NEMOTRON_MODEL, DEEPSEEK_MODEL as OR_DEEPSEEK_MODEL, QWEN_MODEL as OR_QWEN_MODEL, CRITIC_MODEL as OR_CRITIC_MODEL, ENSEMBLE_MODELS as OR_ENSEMBLE_MODELS, choose_primary as r13_choose_primary, council_models as r13_council_models, fallback_models as r13_fallback_models, status as r13_status\nfrom r14_knowledge_graph import ingest as r14_graph_ingest, ingest_files as r14_graph_ingest_files, context as r14_graph_context, stats as r14_graph_stats\nfrom r14_sandbox import execute as r14_sandbox_execute, SandboxError as R14SandboxError\nfrom r14_tool_brain import plan as r14_tool_plan, directive as r14_tool_directive\nfrom r14_user_model import observe as r14_user_observe, profile as r14_user_profile, directive as r14_user_directive\nfrom r14_multimodal import plan as r14_multimodal_plan, directive as r14_multimodal_directive\nfrom r14_self_correct import inspect as r14_self_inspect, reviewer_instruction as r14_reviewer_instruction\nfrom r14_agent import make_plan as r14_agent_plan, execute_local as r14_agent_execute
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
-from r13_benchmarks import run_r13_benchmarks
+from r13_benchmarks import run_r13_benchmarks\nfrom r14_benchmarks import run_r14_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
@@ -50,7 +50,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R13-ENSEMBLE")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R14-CAPABILITY")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -80,7 +80,7 @@ def verify_package_integrity():
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
-    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE")) else set()
+    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
@@ -309,7 +309,7 @@ async def public_guard(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith("/api/v1/"):
-        response.headers["X-RONN-Core-Version"] = "1.3.0"
+        response.headers["X-RONN-Core-Version"] = "1.4.0"
     return response
 
 @app.middleware("http")
@@ -582,6 +582,18 @@ class SnapshotRestoreBody(BaseModel):
     project_id: str = "default"
     snapshot_id: str
     workspace: str = "default"
+
+class R14SandboxBody(BaseModel):
+    source: str
+
+class R14AgentBody(BaseModel):
+    task: str
+    profile: str = "auto"
+    project_context: str = ""
+
+class R14GraphBody(BaseModel):
+    query: str = ""
+    project_id: str = "default"
 
 # ---------------- reliability / evidence policy ----------------
 
@@ -936,6 +948,15 @@ def build_messages(owner: str, body: ChatBody, profile: str):
     system += "\n\n" + r11_directive(_r11)
     _r12 = r12_preflight(body.message, history=body.history, profile=profile, difficulty=difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
     system += "\n\n" + r12_directive(_r12)
+    _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
+    system += "\n\n" + r14_tool_directive(_r14_tools)
+    _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files)
+    _r14_mm_directive = r14_multimodal_directive(_r14_mm)
+    if _r14_mm_directive:
+        system += "\n\n" + _r14_mm_directive
+    _r14_user = r14_user_directive(owner)
+    if _r14_user:
+        system += "\n\n" + _r14_user
     if body.agent_mode:
         system += "\n\nRONN AGENT MODE: Continue through safe reversible analysis/tool steps automatically. Pause only at a real permission boundary or irreversible external action. Never pretend unsupported desktop control exists."
     if body.skill_profile and body.skill_profile != "auto":
@@ -954,6 +975,16 @@ def build_messages(owner: str, body: ChatBody, profile: str):
     # Persistent project intelligence: scoped to the active project/context name.
     project_name = (body.project_context[:180] if body.project_context else "default")
     pid = ensure_project(project_name)
+    try:
+        r14_graph_ingest(owner,pid,body.message,"conversation")
+        if body.project_context:
+            r14_graph_ingest(owner,pid,body.project_context,"project_context")
+        r14_graph_ingest_files(owner,pid,body.files or [])
+        _r14_graph = r14_graph_context(owner,pid,body.message,10)
+        if _r14_graph:
+            system += "\n\nRONN R14 KNOWLEDGE GRAPH (relevant connected project facts):\n" + _r14_graph
+    except Exception:
+        pass
     if body.project_context:
         ingest_project_text(pid, body.project_context, "project_context")
     for _f in body.files or []:
@@ -1380,10 +1411,12 @@ def max_review_draft(messages, model, route):
             break
     local_audit = answer_audit(user_text, draft, profile="", runtime_verified=False, evidence_mode="model")
     local_audit["static_code"] = static_code_checks(draft)
+    local_audit["r14_self_correction"] = r14_self_inspect(user_text, draft, tool_evidence=False)
     review_system = """You are RONN's final quality reviewer. You are given the original task, a draft answer, and a LOCAL AUDIT SIGNAL.
 Independently check correctness, missing requirements, inconsistent names, broken code interfaces, likely syntax/runtime problems,
 unsupported completion claims, suspicious specificity, weak evidence boundaries, and unnecessary filler. Return a corrected, polished FINAL answer.
 The local audit is a heuristic signal, not proof. Fix valid issues but do not invent evidence to satisfy it.
+Apply any R14 self-correction issues before finalizing.
 If the draft claims something was tested/executed/verified and no real tool evidence exists, rewrite that claim accurately.
 Do not discuss the review process. Do not reveal chain-of-thought."""
     review_messages = [
@@ -1488,6 +1521,10 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
 
 
 def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
+    try:
+        r14_user_observe(owner, body.message)
+    except Exception:
+        pass
     fast = quick_reply(body.message, body.images, body.files)
     if fast:
         save_message(owner,"user",body.message)
@@ -1523,6 +1560,17 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 for item in ({"meta":{"route":"local-tool","model":"json-validator","profile":"coding","tools_enabled":True}},{"token":reply},{"done":True}):
                     yield (json.dumps(item)+"\n").encode()
                 return
+            if local_text.lower().startswith("/runpy "):
+                result = r14_sandbox_execute(local_text[7:])
+                reply = (result.get("output") or "")
+                if result.get("variables"):
+                    reply += ("\n" if reply else "") + "Variables: " + json.dumps(result.get("variables"), ensure_ascii=False)
+                reply = reply.strip() or "Program completed with no printed output."
+                save_message(owner,"user",body.message)
+                save_message(owner,"assistant",reply)
+                for item in ({"meta":{"route":"r14-sandbox","model":"restricted-python-v1","profile":"coding","tools_enabled":True,"runtime_verified":True}},{"token":reply},{"done":True,"audit":{"runtime_verified":True,"sandbox":"restricted-python-v1"}}):
+                    yield (json.dumps(item)+"\n").encode()
+                return
         except Exception as exc:
             reply = f"Local tool error: {exc}"
             for item in ({"meta":{"route":"local-tool","model":"local","profile":"coding"}},{"token":reply},{"done":True}):
@@ -1543,6 +1591,9 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
     _r11_tier = r11_route_hint(_r11_preflight)
     _r12_preflight = r12_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
+    _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
+    _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files)
+    _r14_agent = r14_agent_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message)) if body.agent_mode else {"version":"R14","steps":[],"tool_plan":_r14_tools}
     _auto_tier = route_override(_r5_preflight, body.mode)
     if body.mode == "auto":
         # R11 reliability routing gets first say for current facts and harder work.
@@ -1624,6 +1675,11 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r12_active_policy_count":_r12_preflight.get("active_policy_count",0),
         "r13_ensemble":r13_status(),
         "r13_ensemble_active":openrouter_key_loaded(),
+        "r14_tool_plan":_r14_tools,
+        "r14_multimodal":_r14_mm,
+        "r14_agent_plan":_r14_agent,
+        "r14_user_model":r14_user_profile(owner),
+        "r14_knowledge_graph":r14_graph_stats(owner),
         "adaptive_tier":_r11_tier if _r11_tier != "fast" else _auto_tier,
         "agent_mode":bool(body.agent_mode),
         "decision_summary":explanation_trace(body.message,_r7_preflight.get("agent_plan",{}),route,model),
@@ -2505,6 +2561,14 @@ def diagnostics(request: Request):
         "r12_benchmarks": (BASE / "r12_benchmarks.py").exists(),
         "r13_ensemble": (BASE / "r13_ensemble.py").exists(),
         "r13_benchmarks": (BASE / "r13_benchmarks.py").exists(),
+        "r14_knowledge_graph": (BASE / "r14_knowledge_graph.py").exists(),
+        "r14_sandbox": (BASE / "r14_sandbox.py").exists(),
+        "r14_tool_brain": (BASE / "r14_tool_brain.py").exists(),
+        "r14_user_model": (BASE / "r14_user_model.py").exists(),
+        "r14_multimodal": (BASE / "r14_multimodal.py").exists(),
+        "r14_self_correct": (BASE / "r14_self_correct.py").exists(),
+        "r14_agent": (BASE / "r14_agent.py").exists(),
+        "r14_benchmarks": (BASE / "r14_benchmarks.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -2518,6 +2582,7 @@ def diagnostics(request: Request):
     r11_checks = run_r11_benchmarks()
     r12_checks = run_r12_benchmarks()
     r13_checks = run_r13_benchmarks()
+    r14_checks = run_r14_benchmarks()
     provider = provider_config_status()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
@@ -2536,6 +2601,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R12 improvement checks failed.")
     if r13_checks.get("score", 0) < 100:
         warnings.append("One or more R13 ensemble checks failed.")
+    if r14_checks.get("score", 0) < 100:
+        warnings.append("One or more R14 capability checks failed.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -2555,7 +2622,10 @@ def diagnostics(request: Request):
         "r11_eval":r11_checks,
         "r12_eval":r12_checks,
         "r13_eval":r13_checks,
+        "r14_eval":r14_checks,
         "r13_ensemble":r13_status(),
+        "r14_knowledge_graph":r14_graph_stats(owner_id(request)),
+        "r14_user_model":r14_user_profile(owner_id(request)),
         "r11_signal_registry":R11_SIGNAL_COUNT,
         "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "task_engine":task_stats(),
@@ -2600,7 +2670,10 @@ def status(request: Request):
         "r11_eval_score":run_r11_benchmarks().get("score",0),
         "r12_eval_score":run_r12_benchmarks().get("score",0),
         "r13_eval_score":run_r13_benchmarks().get("score",0),
+        "r14_eval_score":run_r14_benchmarks().get("score",0),
         "r13_ensemble":r13_status(),
+        "r14_knowledge_graph":r14_graph_stats(owner),
+        "r14_user_model":r14_user_profile(owner),
         "r11_signal_registry":R11_SIGNAL_COUNT,
         "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "task_engine":task_stats(),
