@@ -243,7 +243,7 @@ STOPWORDS = {
     "can","could","would","should","what","how","why","when","where","who","be",
 }
 
-app = FastAPI(title="RONN Core + Cognitive OS", version="R11 RELIABILITY / Core API v1.1")
+app = FastAPI(title="RONN Core + Cognitive OS", version="R12 IMPROVEMENTS / Core API v1.2")
 _CORS = [x.strip() for x in os.getenv("RONN_CORS_ORIGINS", "").split(",") if x.strip()]
 if _CORS:
     app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
@@ -1558,7 +1558,6 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r7_preflight":_r7_preflight,
         "r11_preflight":_r11_preflight,
         "r11_signal_registry":R11_SIGNAL_COUNT,
-        "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "r11_matched_signals":_r11_preflight.get("matched_signal_count",0),
         "r12_preflight":_r12_preflight,
         "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
@@ -2403,6 +2402,7 @@ def diagnostics(request: Request):
         "r11_intelligence": (BASE / "r11_intelligence.py").exists(),
         "r11_benchmarks": (BASE / "r11_benchmarks.py").exists(),
         "r12_improvements": (BASE / "r12_improvements.py").exists(),
+        "r12_benchmarks": (BASE / "r12_benchmarks.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
