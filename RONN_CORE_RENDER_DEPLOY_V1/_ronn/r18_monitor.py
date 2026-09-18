@@ -26,6 +26,12 @@ def add(owner,label,url,interval_s=900):
           (wid,str(owner)[:120],str(label or url)[:180],str(url)[:1500],interval,1,None,None,"",0,now));c.commit()
     return get(wid)
 
+def ensure(owner,label,url,interval_s=900):
+    with _db() as c:
+        r=c.execute("SELECT * FROM watches WHERE owner=? AND url=? LIMIT 1",(str(owner),str(url))).fetchone()
+    if r:return dict(r)
+    return add(owner,label,url,interval_s)
+
 def get(wid):
     with _db() as c:r=c.execute("SELECT * FROM watches WHERE id=?",(str(wid),)).fetchone()
     return dict(r) if r else None
