@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import requests
 
-SEARXNG_URL = os.getenv("RONN_SEARXNG_URL", "https://ronn-search-engine.onrender.com").rstrip("/")
+SEARXNG_URL = os.getenv("RONN_SEARXNG_URL", "https://ronn-search-live.onrender.com").rstrip("/")
 CRAWL4AI_URL = os.getenv("RONN_CRAWL4AI_URL", "https://ronn-reader.onrender.com").rstrip("/")
 
 _HEALTH_CACHE = {"at": 0.0, "value": {}}
