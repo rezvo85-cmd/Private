@@ -87,7 +87,10 @@ def _chat_auth(request: Request, authorization: str | None = Header(default=None
 
     OP/admin/private APIs still use _auth. Public chat identities are device/client
     scoped by owner_id, so an unauthenticated device does not inherit ronn_primary.
+    Any request claiming an account or OP session must still pass real owner auth.
     """
+    if (request.headers.get("x-ronn-account") or "").strip() or (request.headers.get("x-ronn-op-session") or "").strip():
+        return _auth(request, authorization)
     public_mode=(os.getenv("RONN_PUBLIC_MODE") or "false").strip().lower()=="true"
     if public_mode:
         return True
