@@ -3269,6 +3269,14 @@ configure_core_api({
 })
 app.include_router(core_v1_router)
 app.include_router(ecosystem_router)
+try:
+    R15_CLOUD_SYNC_STATUS = r15_cloud_start(DATA)
+except Exception as _cloud_start_exc:
+    R15_CLOUD_SYNC_STATUS = {"configured":False,"durable":False,"error":str(_cloud_start_exc)[:180]}
+try:
+    R18_MONITOR_START_STATUS = r18_monitor_start()
+except Exception as _monitor_start_exc:
+    R18_MONITOR_START_STATUS = {"running":False,"error":str(_monitor_start_exc)[:180]}
 start_routine_scheduler(queue_add)
 
 
