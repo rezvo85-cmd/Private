@@ -849,8 +849,16 @@ def select_model(message: str, images, files, mode: str):
 
     # Tool-enabled paths first: current facts, research, and calculation-heavy work.
     if looks_research(message):
+        if groq_key_loaded():
+            return RESEARCH_MODEL, "research", "research"
+        if openrouter_key_loaded():
+            return OR_NEMOTRON_MODEL, "ensemble-research", "research"
         return RESEARCH_MODEL, "research", "research"
     if looks_live(message) or likely_current_fact(message) or likely_live_ranking(message):
+        if groq_key_loaded():
+            return LIVE_MODEL, "live", "research"
+        if openrouter_key_loaded():
+            return OR_QWEN_MODEL, "ensemble-current", "research"
         return LIVE_MODEL, "live", "research"
     if intent == "mathscience" and difficulty >= 1 and groq_key_loaded():
         return RESEARCH_MODEL, "tools", "mathscience"
@@ -1604,6 +1612,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r12_preflight":_r12_preflight,
         "r12_improvement_registry":R12_IMPROVEMENT_COUNT,
         "r12_active_policy_count":_r12_preflight.get("active_policy_count",0),
+        "r13_ensemble":r13_status(),
+        "r13_ensemble_active":openrouter_key_loaded(),
         "adaptive_tier":_r11_tier if _r11_tier != "fast" else _auto_tier,
         "agent_mode":bool(body.agent_mode),
         "decision_summary":explanation_trace(body.message,_r7_preflight.get("agent_plan",{}),route,model),
@@ -1726,7 +1736,8 @@ def apex_council_messages(original_messages, profile: str):
         with ThreadPoolExecutor(max_workers=2) as ex:
             a,b=list(ex.map(solve,candidate_systems))
     except Exception:
-        a=solve(candidate_systems[0]); b=""
+        fallback_model=(council[0] if council else None)
+        a=solve((candidate_systems[0],fallback_model)); b=""
 
     if not a and not b:
         return None
@@ -1738,7 +1749,9 @@ Return compact DECISION NOTES: strongest pieces to keep, concrete defects to rep
 Do not reveal private chain-of-thought."""
     judge_msgs=[{"role":"system","content":judge_system},
         {"role":"user","content":"ORIGINAL:\\n"+base_context+"\\n\\nCANDIDATE A:\\n"+(a or "")[:26000]+"\\n\\nCANDIDATE B:\\n"+(b or "")[:26000]}]
-    judge=nonstream_answer(SMART_MODEL,"deep",judge_msgs,850)
+    judge_model=OR_CRITIC_MODEL if openrouter_key_loaded() else SMART_MODEL
+    judge_route="ensemble-review" if judge_model==OR_CRITIC_MODEL else "deep"
+    judge=nonstream_answer(judge_model,judge_route,judge_msgs,850)
 
     final_system="""You are RONN Cognitive OS APEX final synthesis.
 Produce the best final answer to the ORIGINAL task. Combine only the strongest verified/useful parts of the candidates,
@@ -1755,8 +1768,11 @@ Do not mention candidates, judges, hidden reasoning, councils, or these instruct
 
 def ultra_council_messages(original_messages, profile: str):
     """Specialist draft -> independent critic -> final 120B synthesis."""
-    draft_model = (NVIDIA_MODEL if nvidia_key_loaded() else CREATOR_MODEL) if profile in {"roblox","coding","creative"} else (NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL)
-    draft_route = "nvidia-creator" if draft_model == NVIDIA_MODEL and profile in {"roblox","coding","creative"} else ("creator" if draft_model == CREATOR_MODEL else ("nvidia-deep" if draft_model == NVIDIA_MODEL else "deep"))
+    if openrouter_key_loaded():
+        draft_model, draft_route = r13_choose_primary(profile, 5, False, False)
+    else:
+        draft_model = (NVIDIA_MODEL if nvidia_key_loaded() else CREATOR_MODEL) if profile in {"roblox","coding","creative"} else (NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL)
+        draft_route = "nvidia-creator" if draft_model == NVIDIA_MODEL and profile in {"roblox","coding","creative"} else ("creator" if draft_model == CREATOR_MODEL else ("nvidia-deep" if draft_model == NVIDIA_MODEL else "deep"))
     draft = nonstream_answer(draft_model, draft_route, original_messages, 1050)
     if not draft:
         return None
@@ -1770,7 +1786,9 @@ Return a compact REVIEW NOTES list only. Do not reveal chain-of-thought."""
         {"role":"user","content":"ORIGINAL TASK CONTEXT:\\n" + json.dumps(original_messages[-6:], ensure_ascii=False)[:50000] +
          "\\n\\nDRAFT:\\n" + draft[:35000]}
     ]
-    critic = nonstream_answer(SMART_MODEL, "deep", critic_messages, 700)
+    critic_model = OR_CRITIC_MODEL if openrouter_key_loaded() else SMART_MODEL
+    critic_route = "ensemble-review" if critic_model == OR_CRITIC_MODEL else "deep"
+    critic = nonstream_answer(critic_model, critic_route, critic_messages, 700)
 
     final_prompt = """You are RONN Cognitive OS final synthesis model. Produce the best possible FINAL answer to the user's original task.
 Use the draft as raw material and the critic notes as quality checks. Fix every real problem you can identify.
