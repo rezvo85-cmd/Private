@@ -57,7 +57,6 @@ async function unlockWebAuth(){
     await refreshStatus();
     await refreshMemory();
     refreshOwnerAccess();
-    showToast("RONN unlocked.");
   }catch(e){if(msg)msg.textContent=e.message||"Could not unlock RONN."}
   finally{if(btn){btn.disabled=false;btn.textContent="Unlock RONN"}}
 }
