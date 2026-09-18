@@ -9,3 +9,4 @@ openpyxl
 python-pptx
 cryptography
 psycopg[binary]
+openai-agents
