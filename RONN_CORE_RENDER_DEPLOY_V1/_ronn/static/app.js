@@ -300,7 +300,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R19-CLEAN2",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-CONTROLLER1",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
