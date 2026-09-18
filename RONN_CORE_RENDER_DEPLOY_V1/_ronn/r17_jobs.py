@@ -21,19 +21,22 @@ def _pack(x):
     try:return json.dumps(x,ensure_ascii=False)[:200000]
     except Exception:return json.dumps({"text":str(x)[:100000]})
 
+def _submit_existing(jid,payload,runner):
+    def work():
+        update(jid,status="running",progress=5,error="")
+        try:
+            result=runner(payload,lambda p:update(jid,progress=max(5,min(int(p),95))))
+            update(jid,status="completed",progress=100,result=result,error="")
+        except Exception as exc:
+            update(jid,status="failed",progress=100,error=str(exc)[:1200])
+    POOL.submit(work)
+
 def create(owner,kind,payload,runner):
     jid="job_"+uuid.uuid4().hex[:18]; now=int(time.time())
     with _db() as c:
         c.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
           (jid,str(owner)[:120],str(kind)[:80],_pack(payload),"queued",0,"","",now,now)); c.commit()
-    def work():
-        update(jid,status="running",progress=5)
-        try:
-            result=runner(payload,lambda p:update(jid,progress=max(5,min(int(p),95))))
-            update(jid,status="completed",progress=100,result=result)
-        except Exception as exc:
-            update(jid,status="failed",progress=100,error=str(exc)[:1200])
-    POOL.submit(work)
+    _submit_existing(jid,payload,runner)
     return get(jid)
 
 def update(jid,status=None,progress=None,result=None,error=None):
@@ -65,3 +68,38 @@ def stats(owner=None):
         if owner:rows=c.execute("SELECT status,COUNT(*) n FROM jobs WHERE owner=? GROUP BY status",(str(owner),)).fetchall()
         else:rows=c.execute("SELECT status,COUNT(*) n FROM jobs GROUP BY status").fetchall()
     return {r["status"]:int(r["n"]) for r in rows}
+
+
+def resume(jid,runner):
+    job=get(jid)
+    if not job:return None
+    if job.get("status") in {"running","queued"}:
+        return job
+    if job.get("status")=="completed":
+        return job
+    update(jid,status="queued",progress=0,error="")
+    _submit_existing(jid,job.get("payload") or {},runner)
+    return get(jid)
+
+def recover_kind(kind,runner):
+    """Resume queued/running jobs after an app restart for a known job kind."""
+    with _db() as c:
+        rows=c.execute("SELECT id FROM jobs WHERE kind=? AND status IN ('queued','running','interrupted')",(str(kind),)).fetchall()
+        ids=[r["id"] for r in rows]
+        for jid in ids:
+            c.execute("UPDATE jobs SET status='interrupted',updated_at=? WHERE id=?",(int(time.time()),jid))
+        c.commit()
+    resumed=[]
+    for jid in ids:
+        job=get(jid)
+        if job:
+            update(jid,status="queued",progress=0,error="")
+            _submit_existing(jid,job.get("payload") or {},runner)
+            resumed.append(jid)
+    return resumed
+
+def mark_unknown_running_interrupted():
+    with _db() as c:
+        cur=c.execute("UPDATE jobs SET status='interrupted',updated_at=? WHERE status='running'",(int(time.time()),))
+        c.commit()
+    return cur.rowcount
