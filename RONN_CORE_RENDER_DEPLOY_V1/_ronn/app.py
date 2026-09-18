@@ -2659,11 +2659,11 @@ def feedback_api(body: FeedbackBody, request: Request):
             r19_training_discard(body.request_id)
         except Exception:
             pass
-        if body.note.strip():
-            try:
-                learned["failure_lesson"]=r19_record_failure(owner,body.note,run.get("profile") if run else "general")
-            except Exception:
-                pass
+        try:
+            _lesson=body.note.strip() or ("User rated this "+str(run.get("profile") if run else "general")+" answer negatively. For similar tasks, increase requirement coverage, verification, and correction before delivery.")
+            learned["failure_lesson"]=r19_record_failure(owner,_lesson,run.get("profile") if run else "general")
+        except Exception:
+            pass
     try:
         r15_cloud_event(owner,"feedback",json.dumps({"request_id":body.request_id,"rating":body.rating,"profile":run.get("profile") if run else ""},ensure_ascii=False))
     except Exception:
