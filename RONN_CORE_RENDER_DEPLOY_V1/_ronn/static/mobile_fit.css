@@ -37,13 +37,13 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
 
   .ronn19 .appShell{
     position:fixed!important;
-    left:var(--ronn-vv-left,0px)!important;
-    top:var(--ronn-vv-top,0px)!important;
-    right:auto!important;
+    left:0!important;
+    top:0!important;
+    right:0!important;
     bottom:auto!important;
     display:block!important;
-    width:var(--ronn-vv-width,100vw)!important;
-    height:var(--ronn-vv-height,100dvh)!important;
+    width:100%!important;
+    height:var(--ronn-visible-bottom,100dvh)!important;
     min-height:0!important;
     overflow:hidden!important;
     background:#212121!important;
@@ -151,7 +151,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     z-index:1000!important;
     width:min(86vw,320px)!important;
     max-width:320px!important;
-    height:var(--ronn-vv-height,100dvh)!important;
+    height:var(--ronn-visible-bottom,100dvh)!important;
     min-height:0!important;
     padding:env(safe-area-inset-top) 8px max(8px,env(safe-area-inset-bottom))!important;
     overflow:hidden!important;
@@ -436,8 +436,8 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
   .ronn19 .jumpLatest{bottom:12px!important}
 
-  /* iOS Safari keyboard mode: the app shell follows the visual viewport.
-     Remove the home-indicator gap while the software keyboard is visible. */
+  /* iOS Safari keyboard mode: the shell stays anchored.
+     Safari may pan the visual viewport, but RONN always fills to its visible bottom. */
   body.ronn19.mobileKeyboardOpen .composerDock{
     padding-bottom:7px!important;
   }
@@ -446,6 +446,9 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
   body.ronn19.mobileKeyboardOpen .activityDock{
     bottom:64px!important;
+  }
+  body.ronn19.mobileInputFocused .main{
+    scroll-behavior:auto!important;
   }
 
   /* ---------- panels ---------- */
