@@ -1,4 +1,4 @@
-name: RONN R14 Core Checks
+name: RONN R19 Core Checks
 
 on:
   push:
@@ -36,6 +36,11 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Compile Python
         run: |
           python -m py_compile *.py
@@ -47,12 +52,14 @@ jobs:
           from r12_benchmarks import run_r12_benchmarks
           from r13_benchmarks import run_r13_benchmarks
           from r14_benchmarks import run_r14_benchmarks
+          from r15_eval_lab import run as run_r15_eval
 
           suites = {
               "R11": run_r11_benchmarks(),
               "R12": run_r12_benchmarks(),
               "R13": run_r13_benchmarks(),
               "R14": run_r14_benchmarks(),
+              "R15-R19": run_r15_eval(),
           }
           failed = False
           for name, result in suites.items():
@@ -61,6 +68,16 @@ jobs:
                   failed = True
           if failed:
               raise SystemExit("One or more RONN benchmark suites failed.")
+          PY
+
+      - name: Import RONN app
+        env:
+          RONN_PUBLIC_MODE: "false"
+        run: |
+          python - <<'PY'
+          import app
+          print("imported:", app.BUILD_ID)
+          assert "R19-AGENT-OS" in app.BUILD_ID
           PY
 
       - name: Check browser JavaScript
