@@ -306,7 +306,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-COMPOSER5",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R20-VIEWPORT6",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
@@ -333,7 +333,8 @@ function syncMobileViewport(){
   mobileViewportFrame=requestAnimationFrame(()=>{
     const root=document.documentElement;
     if(window.innerWidth>780){
-      root.style.removeProperty("--ronn-visible-bottom");
+      root.style.removeProperty("--ronn-vv-height");
+      root.style.removeProperty("--ronn-vv-top");
       document.body.classList.remove("mobileKeyboardOpen");
       return;
     }
@@ -341,11 +342,13 @@ function syncMobileViewport(){
     const layoutH=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
     const h=Math.max(1,Math.round((vv&&vv.height>0)?vv.height:layoutH));
     const top=Math.max(0,Math.round(vv?.offsetTop||0));
-    const visibleBottom=Math.max(h,Math.min(layoutH,top+h));
-    root.style.setProperty("--ronn-visible-bottom",visibleBottom+"px");
-    const keyboard=(document.activeElement===input)&&(h<layoutH*0.84);
+    root.style.setProperty("--ronn-vv-height",h+"px");
+    root.style.setProperty("--ronn-vv-top",top+"px");
+    const keyboard=(document.activeElement===input)&&(h<layoutH*0.88);
     document.body.classList.toggle("mobileKeyboardOpen",keyboard);
-    if(keyboard&&currentView==="chat")scrollToLatest(true);
+    if(keyboard&&currentView==="chat"){
+      requestAnimationFrame(()=>scrollToLatest(true));
+    }
   });
 }
 syncMobileViewport();
@@ -359,7 +362,7 @@ input.addEventListener("focus",()=>{
   if(window.innerWidth<=780){
     document.body.classList.add("mobileInputFocused");
     syncMobileViewport();
-    [80,240].forEach(ms=>setTimeout(()=>{syncMobileViewport();scrollToLatest(true)},ms));
+    [40,120,260,420].forEach(ms=>setTimeout(()=>{syncMobileViewport();scrollToLatest(true)},ms));
   }
 });
 input.addEventListener("blur",()=>{
