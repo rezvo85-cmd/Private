@@ -62,10 +62,10 @@
     "_ronn/skills/writer.md": "bf15a28b632dc9d7fc48e904aa52345a2f925118ddc60d779c286e44a065b16e",
     "_ronn/skills_engine.py": "8973115ec20cf727720885a3238d218edc023590835a32cc4d602f37be6b0c8f",
     "_ronn/snapshot_engine.py": "5a7181926dd062146ad1f7b4d08ac31ca2c46e6dc73631a39c78c13b29dce579",
-    "_ronn/static/app.js": "732773e5de3d411f08cb9bfae8f2106ea0f187cc12f40ce29d8f78e88cd424e7",
-    "_ronn/static/index.html": "bc02eff3246606653d0efdafbf3e1b5d3a0fd1204c82b6539e29c38be4da6340",
+    "_ronn/static/app.js": "7d6c5e47211ff0dc6d15e66e34833f0ef2482aa99bbf88733726a5f75ef5a240",
+    "_ronn/static/index.html": "65341082080cd40d6288bfd50dbe078b6040b4273a43a271404ca5fe8e854042",
     "_ronn/static/ronn_app_icon.png": "1115e7eae139398a26c235bb5c6a8000a6c86c316f0e5b07936c2fa3a860eb91",
-    "_ronn/static/style.css": "cb334b56b8aeec274f5ffc4441ecec4b16c1a40dd8bf06bd80f56d24f44b8704",
+    "_ronn/static/style.css": "441999661033f482554c6144a706f8488b6ffe505ff8b38c98c8fe8db83bf362",
     "_ronn/task_engine.py": "3adeeedc78cae82e3d5ac376d5d91186dd250a99eb94473ab280f8b16e277499",
     "_ronn/task_queue.py": "575e02512bc01073e6ebdd5a060e940a18798ce727d5bc6450de51a7f13ebf9b",
     "_ronn/tool_system.py": "f527f503b9c8e68d9027b4499177b0a310159d60144717d7c3d46135312cef39",
@@ -77,8 +77,8 @@
     "mobile/package.json": "7d224094e7b73932778f816aaf0b3e906921e9b52e060cfbeba028ca97838c73",
     "_ronn/static/ronn_logo.svg": "5f393fe13d02584cac6fddc8cb136e5528105c05aa4f7a1f5ddd8ff99312e734",
     "_ronn/static/manifest.webmanifest": "e46876cc0c28029e653f5c096939bd6722fa39fc34bab31f216aadd6c3799af6",
-    "_ronn/static/service-worker.js": "361558585a5af72205a9278a36b75e2415bae15a08948bb3f77cde3438e5df36",
-    "_ronn/static/mobile_fit.css": "5dfe4603b02f7245bb13c20a6aa8c378aedb7467d0aa31eeacc68a696ead771b",
+    "_ronn/static/service-worker.js": "1192dbec281c9733a98a07a16996c386e60ec5f0b14935a9228a115875cd6f9f",
+    "_ronn/static/mobile_fit.css": "a7752d566ca2560b6f9a943af756af6328431f50e37b1a959612283b5ecd4b05",
     "_ronn/static/ronn_home_icon_v2.png": "1115e7eae139398a26c235bb5c6a8000a6c86c316f0e5b07936c2fa3a860eb91"
   }
 }
