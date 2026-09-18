@@ -1,0 +1,71 @@
+name: RONN Mobile iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "RONN_CORE_RENDER_DEPLOY_V1/mobile/**"
+      - ".github/workflows/ronn-mobile-ios.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: RONN_CORE_RENDER_DEPLOY_V1/mobile/package-lock.json
+      - run: npm install
+      - run: npx expo-doctor
+      - run: npx expo export --platform web --output-dir dist
+
+  ios-simulator:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: RONN_CORE_RENDER_DEPLOY_V1/mobile/package-lock.json
+      - run: npm install
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+      - name: Install CocoaPods
+        run: cd ios && pod install
+      - name: Build unsigned iOS Simulator app
+        run: |
+          cd ios
+          WORKSPACE="$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "No Xcode workspace generated"
+            exit 1
+          fi
+          SCHEME="$(xcodebuild -list -workspace "$WORKSPACE" | awk '/Schemes:/{getline; gsub(/^[ \t]+|[ \t]+$/, ""); print; exit}')"
+          if [ -z "$SCHEME" ]; then
+            echo "No Xcode scheme found"
+            exit 1
+          fi
+          xcodebuild             -workspace "$WORKSPACE"             -scheme "$SCHEME"             -configuration Release             -sdk iphonesimulator             -derivedDataPath build             CODE_SIGNING_ALLOWED=NO
+      - name: Package simulator app
+        run: |
+          APP="$(find ios/build/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "No simulator .app produced"
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$APP" RONN-iOS-Simulator.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RONN-iOS-Simulator
+          path: RONN_CORE_RENDER_DEPLOY_V1/mobile/RONN-iOS-Simulator.zip
+          if-no-files-found: error
