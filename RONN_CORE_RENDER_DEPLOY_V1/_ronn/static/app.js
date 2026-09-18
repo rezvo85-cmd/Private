@@ -128,7 +128,7 @@ async function currentScreenFrame(){
 function stopScreenContext(){
   if(screenStream){screenStream.getTracks().forEach(t=>t.stop())}
   screenStream=null;screenVideo=null;
-  const b=$("screenBtn");if(b){b.classList.remove("active");b.textContent="▣ Screen";b.title="Share your screen as live chat context"}
+  const b=$("screenBtn");if(b){b.classList.remove("active");b.textContent="▣";b.title="Share your screen as live chat context"}
 }
 async function toggleScreenContext(){
   if(screenStream){stopScreenContext();showToast("Screen context off.");return}
@@ -137,7 +137,7 @@ async function toggleScreenContext(){
     screenStream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:5,max:10}},audio:false});
     screenVideo=document.createElement("video");screenVideo.srcObject=screenStream;screenVideo.muted=true;screenVideo.playsInline=true;await screenVideo.play();
     const track=screenStream.getVideoTracks()[0];if(track)track.onended=()=>stopScreenContext();
-    const b=$("screenBtn");if(b){b.classList.add("active");b.textContent="■ Screen";b.title="Screen context is active"}
+    const b=$("screenBtn");if(b){b.classList.add("active");b.textContent="■";b.title="Screen context is active"}
     showToast("Screen context on. RONN will see the latest frame when you send a message.");
   }catch(e){stopScreenContext();if(e?.name!=="NotAllowedError")showToast("Screen share could not start.")}
 }
@@ -281,7 +281,7 @@ function stopVoiceMode(){
   voiceMode=false;voiceSpeaking=false;
   try{recognizer?.stop()}catch{}
   try{window.speechSynthesis?.cancel()}catch{}
-  const b=$("voiceBtn");if(b){b.classList.remove("listening");b.textContent="◉ Voice"}
+  const b=$("voiceBtn");if(b){b.classList.remove("listening");b.textContent="◉"}
 }
 if($("voiceBtn")){
   if(SpeechRecognition){
@@ -318,6 +318,17 @@ if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){cur
 renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);input.focus();
 
 window.__RONN_UI_READY=true;
+
+function syncMobileViewport(){
+  const h=window.visualViewport?.height||window.innerHeight;
+  if(h>0)document.documentElement.style.setProperty("--ronn-vh",Math.round(h)+"px");
+}
+syncMobileViewport();
+window.addEventListener("resize",syncMobileViewport,{passive:true});
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize",syncMobileViewport,{passive:true});
+  window.visualViewport.addEventListener("scroll",syncMobileViewport,{passive:true});
+}
 
 function setMobileNav(open){
   document.body.classList.toggle("mobileNavOpen",!!open);
