@@ -82,6 +82,18 @@ def _auth(request: Request, authorization: str | None = Header(default=None)):
     raise HTTPException(401, "RONN is locked. Unlock Owner access to continue.")
 
 
+def _chat_auth(request: Request, authorization: str | None = Header(default=None)):
+    """Normal chat may run without OP when public mode is enabled.
+
+    OP/admin/private APIs still use _auth. Public chat identities are device/client
+    scoped by owner_id, so an unauthenticated device does not inherit ronn_primary.
+    """
+    public_mode=(os.getenv("RONN_PUBLIC_MODE") or "false").strip().lower()=="true"
+    if public_mode:
+        return True
+    return _auth(request, authorization)
+
+
 class CoreFile(BaseModel):
     name: str = ""
     content: str = ""
@@ -209,7 +221,7 @@ def capabilities(_: bool = Depends(_auth)):
 
 
 @router.post("/chat")
-def chat(body: CoreChatBody, request: Request, _: bool = Depends(_auth)):
+def chat(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)):
     owner = _owner(request)
     expand = _optional("expand_shortcut")
     if expand:
@@ -265,14 +277,14 @@ def chat(body: CoreChatBody, request: Request, _: bool = Depends(_auth)):
 
 
 @router.post("/research")
-def research(body: CoreChatBody, request: Request, _: bool = Depends(_auth)):
+def research(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)):
     body.mode = "max"
     body.review = True
     return chat(body, request, True)
 
 
 @router.post("/chat/complete")
-def chat_complete(body: CoreChatBody, request: Request, _: bool = Depends(_auth)):
+def chat_complete(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)):
     owner = _owner(request)
     expand = _optional("expand_shortcut")
     if expand:
@@ -312,7 +324,7 @@ def chat_complete(body: CoreChatBody, request: Request, _: bool = Depends(_auth)
 
 
 @router.post("/chat/sse")
-def chat_sse(body: CoreChatBody, request: Request, _: bool = Depends(_auth)):
+def chat_sse(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)):
     # Mobile-friendly SSE stream. Desktop continues using the lower-overhead NDJSON route.
     owner=_owner(request)
     expand=_optional("expand_shortcut")
