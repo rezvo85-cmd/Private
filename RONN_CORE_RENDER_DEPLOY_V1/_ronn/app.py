@@ -1536,9 +1536,23 @@ Do not discuss the review process. Do not reveal chain-of-thought."""
     ]
     return review_messages
 
+def looks_like_internal_tool_payload(text: str) -> bool:
+    """Block tool-call protocol text from ever becoming a visible assistant answer."""
+    raw=(text or "").strip()
+    if not raw:
+        return False
+    low=raw.lower()
+    tool_names=("groq_web_search","web_search","visit_website","browser.search","browser.open","searxng","crawl4ai")
+    jsonish=(raw.startswith("{") or raw.startswith("[") or raw.startswith("```json"))
+    protocol=(("\"tool\"" in low or "'tool'" in low or "tool_call" in low) and
+              ("\"args\"" in low or "'args'" in low or "\"arguments\"" in low or "'arguments'" in low))
+    named=any(name in low for name in tool_names) and ("query" in low or "url" in low or "args" in low)
+    return bool((jsonish and protocol) or named)
+
 def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None):
     filt = ThinkFilter()
     full = ""
+    _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} or model in {"groq/compound","groq/compound-mini"}
     with r:
         if not r.ok:
             if r.status_code == 429:
@@ -1560,15 +1574,39 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                 clean = filt.feed(token)
                 if clean:
                     full += clean
-                    yield json.dumps({"token":clean}) + "\n"
+                    if not _guard_live:
+                        yield json.dumps({"token":clean}) + "\n"
             except Exception:
                 continue
         tail = filt.flush()
         if tail:
             full += tail
-            yield json.dumps({"token":tail}) + "\n"
+            if not _guard_live:
+                yield json.dumps({"token":tail}) + "\n"
 
     full = full.strip()
+
+    # Never surface model-generated tool protocol. Recover with a real full Compound
+    # completion when live evidence/tool execution was requested.
+    if _guard_live and looks_like_internal_tool_payload(full):
+        try:
+            _recovery_messages = retry_messages or []
+            if _recovery_messages and groq_key_loaded():
+                recovered, used_model = nonstream_with_fallback(RESEARCH_MODEL, "research", _recovery_messages, 1100)
+                recovered=(recovered or "").strip()
+                if recovered and not looks_like_internal_tool_payload(recovered):
+                    full=recovered
+                    model=used_model
+                    route="research-recovered"
+                else:
+                    full=""
+            else:
+                full=""
+        except Exception:
+            full=""
+
+    if _guard_live and full:
+        yield json.dumps({"token":full}) + "\n"
     # Critical R5.1 reliability fix: HTTP 200 + empty stream is NOT success.
     # Retry as a normal completion and cascade through backup models automatically.
     if not full and retry_messages:
@@ -1615,7 +1653,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
             finish_run(request_id, (time.time()-(started_at or time.time())), len(full), "complete", model=model, route=route)
         except Exception:
             pass
-    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research"} else "model"
+    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} else "model"
     audit = answer_audit(original_message, full, profile=profile, runtime_verified=False, evidence_mode=evidence_mode)
     audit["static_code"] = static_code_checks(full)
     audit["r5_quality_gate"] = quality_report(original_message, full, evidence_mode=evidence_mode, runtime_verified=False)
@@ -1810,13 +1848,27 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             except Exception:
                 pass
 
+    # R20 execution boundary: tools gather evidence; an answer model writes the answer.
+    # This prevents a model from printing a pseudo tool call such as {"tool":"groq_web_search",...}.
+    if _r20.get("needs_live"):
+        if _web_research.get("evidence"):
+            if groq_key_loaded():
+                model, route = SMART_MODEL, "web-synthesis"
+            elif openrouter_key_loaded():
+                model, route = OR_QWEN_MODEL, "web-synthesis"
+            elif nvidia_key_loaded():
+                model, route = NVIDIA_MODEL, "web-synthesis"
+        elif groq_key_loaded():
+            # Full Compound supports multiple server-side web_search / visit_website calls.
+            model, route = RESEARCH_MODEL, "research"
+
     messages = build_messages(owner, body, profile, _r20)
     if _r20.get("needs_live"):
         messages[0]["content"] += (
-            "\nFor current or research-dependent claims, use retrieved web evidence and available live tools. "
-            "If the supplied evidence is insufficient, search/visit additional sources with the live provider. "
-            "Never expose tool-call JSON, tool names, internal arguments, or hidden reasoning to the user. "
-            "Answer normally and include short source links when they materially support current claims."
+            "\nFor current or research-dependent claims, answer from the retrieved web evidence when it is present. "
+            "Do not describe, simulate, request, or print a tool call. If no retrieved evidence is present and the provider supports built-in live tools, it may use them internally. "
+            "Never expose tool-call JSON, tool names, internal arguments, executed-tools data, or hidden reasoning to the user. "
+            "Return only the normal user-facing answer and include useful source links for current claims."
         )
     _length_policy = _r6_preflight.get("brevity", {})
     _base_budget = {"fast":700,"smart":1200,"deep":1800,"apex":2400}.get(str(_r20.get("depth") or "smart"),1200)
