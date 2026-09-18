@@ -29,6 +29,7 @@ from brevity_engine import response_length_policy, brevity_directive, brevity_au
 from r6_intelligence import r6_preflight, r6_directive, ranking_policy as r6_ranking_policy
 from r6_benchmarks import run_r6_benchmarks
 from r7_impact import r7_preflight, r7_directive, response_quality_score, capability_manifest, explanation_trace
+from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNAL_COUNT as R11_SIGNAL_COUNT
 from r7_benchmarks import run_r7_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
@@ -44,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R10.1-WEB-AUTH")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R11-RELIABILITY")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -221,7 +222,7 @@ STOPWORDS = {
     "can","could","would","should","what","how","why","when","where","who","be",
 }
 
-app = FastAPI(title="RONN Core + Cognitive OS", version="R10 ECOSYSTEM / Core API v1.1")
+app = FastAPI(title="RONN Core + Cognitive OS", version="R11 RELIABILITY / Core API v1.1")
 _CORS = [x.strip() for x in os.getenv("RONN_CORS_ORIGINS", "").split(",") if x.strip()]
 if _CORS:
     app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
@@ -282,7 +283,7 @@ async def public_guard(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith("/api/v1/"):
-        response.headers["X-RONN-Core-Version"] = "1.1.1"
+        response.headers["X-RONN-Core-Version"] = "1.2.0"
     return response
 
 @app.middleware("http")
@@ -873,6 +874,8 @@ def build_messages(owner: str, body: ChatBody, profile: str):
     system += "\n\n" + brevity_directive(_r6["brevity"])
     _r7 = r7_preflight(body.message, profile, difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
     system += "\n\n" + r7_directive(_r7)
+    _r11 = r11_preflight(body.message, history=body.history, profile=profile, difficulty=difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
+    system += "\n\n" + r11_directive(_r11)
     if body.agent_mode:
         system += "\n\nRONN AGENT MODE: Continue through safe reversible analysis/tool steps automatically. Pause only at a real permission boundary or irreversible external action. Never pretend unsupported desktop control exists."
     if body.skill_profile and body.skill_profile != "auto":
@@ -1460,12 +1463,20 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
     _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
     _r7_preflight = r7_preflight(body.message, profile, _difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
+    _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
+    _r11_tier = r11_route_hint(_r11_preflight)
     _auto_tier = route_override(_r5_preflight, body.mode)
     if body.mode == "auto":
-        # R7 impact routing: time-sensitive/current work gets the full research route when Groq is configured.
-        if _r7_preflight.get("agent_plan",{}).get("freshness",{}).get("live_required") and groq_key_loaded():
+        # R11 reliability routing gets first say for current facts and harder work.
+        if (_r11_preflight.get("route",{}).get("live_required") or _r7_preflight.get("agent_plan",{}).get("freshness",{}).get("live_required")) and groq_key_loaded():
             model, route, profile = RESEARCH_MODEL, "research", "research"
-        # Escalate automatically only when the policy indicates a stronger route.
+        elif _r11_tier == "apex":
+            model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
+        elif _r11_tier == "deep" and route not in {"research","live","vision"}:
+            model, route = (NVIDIA_MODEL, "nvidia-deep") if nvidia_key_loaded() else (SMART_MODEL, "deep")
+        elif _r11_tier == "smart" and route == "fast":
+            model, route = SMART_MODEL, "knowledge"
+        # Preserve earlier adaptive route signals as a secondary layer.
         elif _auto_tier == "tools":
             model, route = (RESEARCH_MODEL, "research") if groq_key_loaded() else (model, route)
         elif _auto_tier == "apex":
@@ -1492,7 +1503,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     if route in {"live","research","max"}:
         messages[0]["content"] += "\nFor current or research-dependent claims, use available live tools when useful and ground the answer in retrieved information."
     _length_policy = _r6_preflight.get("brevity", {})
-    _base_budget = 600 if route in {"fast","live"} else (1450 if route == "ultra" else 1100)
+    _base_budget = 700 if route in {"fast","live"} else (2200 if route in {"ultra","apex","nvidia-apex","apex-final","nvidia-apex-final"} else 1600)
     max_tokens = min(_base_budget, int(_length_policy.get("max_tokens") or _base_budget))
     # Research/list questions need enough room for the requested list even when each entry should stay concise.
     if _length_policy.get("list_count"):
@@ -1521,7 +1532,10 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "task_plan":_preflight["plan"],
         "r5_preflight":_r5_preflight,
         "r7_preflight":_r7_preflight,
-        "adaptive_tier":_auto_tier,
+        "r11_preflight":_r11_preflight,
+        "r11_signal_registry":R11_SIGNAL_COUNT,
+        "r11_matched_signals":_r11_preflight.get("matched_signal_count",0),
+        "adaptive_tier":_r11_tier if _r11_tier != "fast" else _auto_tier,
         "agent_mode":bool(body.agent_mode),
         "decision_summary":explanation_trace(body.message,_r7_preflight.get("agent_plan",{}),route,model),
         "capabilities":capability_manifest()
@@ -1554,7 +1568,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             else:
                 r = cloud_request(NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL, "nvidia-deep" if nvidia_key_loaded() else "deep", messages, 1200, stream=True)
         else:
-            do_review = (body.review or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
+            do_review = (body.review or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
             if do_review:
                 task_checkpoint(request_id, "Drafting", "started", "")
                 yield (json.dumps({"stage":"Drafting"})+"\n").encode()
