@@ -174,7 +174,7 @@ async function sendMessage(regenerate=false,overrideText=null){
 }
 
 function showToast(text){const t=$("toast");t.textContent=text;t.classList.add("show");clearTimeout(showToast._t);showToast._t=setTimeout(()=>t.classList.remove("show"),2700)}
-function showView(name){currentView=name;qsa(".view").forEach(v=>v.classList.remove("active"));$(name+"View")?.classList.add("active");const family=(name==="memory"||name==="projects")?"projects":(name==="diagnostics"||name==="brain")?"brain":name;qsa(".navBtn").forEach(b=>b.classList.toggle("active",b.dataset.view===family));qsa("[data-view-target]").forEach(b=>b.classList.toggle("active",b.dataset.viewTarget===name));if(name==="memory")refreshMemory();if(name==="projects")renderProjects();if(name==="brain"){refreshBrain();refreshAgentOps()}if(name==="diagnostics")runDiagnostics();if(name==="settings"){refreshOwnerAccess();refreshEcosystemStatus()}const pm=$("plusMenu");if(pm)pm.classList.add("hidden")}
+function showView(name){currentView=name;qsa(".view").forEach(v=>v.classList.remove("active"));$(name+"View")?.classList.add("active");const family=(name==="memory"||name==="projects")?"projects":(name==="diagnostics"||name==="brain")?"brain":name;qsa(".navBtn").forEach(b=>b.classList.toggle("active",b.dataset.view===family));qsa("[data-view-target]").forEach(b=>b.classList.toggle("active",b.dataset.viewTarget===name));if(name==="memory")refreshMemory();if(name==="projects")renderProjects();if(name==="brain"){refreshBrain();refreshAgentOps()}if(name==="diagnostics")runDiagnostics();if(name==="settings"){refreshOwnerAccess();refreshEcosystemStatus();refreshR19Capabilities()}const pm=$("plusMenu");if(pm)pm.classList.add("hidden")}
 
 async function refreshStatus(){try{const r=await fetch(CORE_API+"/status",{headers:apiHeaders()});if(!r.ok)throw new Error();const d=await r.json();const buildOk=d.build===BUILD_EXPECTED;$("statusDot").classList.toggle("on",buildOk);$("buildText").textContent=d.build||"RONN";$("serverStatus").textContent=buildOk?"Exact build verified":"Build mismatch";$("memoryCount").textContent=d.memory_count??0;const any=d.api_key_loaded,p=$("providerBadge");p.textContent=d.groq_key_loaded?"Groq configured":d.nvidia_key_loaded?"NVIDIA configured":"No AI key";p.className="providerBadge "+(any?"ok":"warn");$("diagnosticDot").className=buildOk&&d.internal_eval_score===100&&d.r5_eval_score===100&&d.r6_eval_score===100&&d.r7_eval_score===100&&d.r11_eval_score===100&&d.r12_eval_score===100&&d.r13_eval_score===100&&d.r14_eval_score===100&&d.r15_eval_score===100?"good":"on"}catch{$("serverStatus").textContent="Server unavailable";$("statusDot").classList.remove("on")}}
 async function refreshMemory(){try{const d=await (await fetch(CORE_API+"/memory",{headers:apiHeaders()})).json();$("memoryCount").textContent=d.memories.length;const list=$("memoryList");list.innerHTML="";if(!d.memories.length){list.innerHTML='<div class="emptyState">No saved memories yet.</div>';return}d.memories.forEach(m=>{const row=document.createElement("div");row.className="memoryItem";row.innerHTML=`<div class="memoryMain"><span>${escapeHTML(m.text)}</span><small>${escapeHTML(m.category||"general")} · ${Math.round(Number(m.confidence||.8)*100)}% confidence${m.use_count?` · used ${m.use_count}×`:""}</small></div><div class="memoryActions"><button class="pinMemory ${m.pinned?"active":""}" title="${m.pinned?"Unpin":"Pin"}">${m.pinned?"◆":"◇"}</button><button class="deleteMemory" title="Forget">×</button></div>`;row.querySelector(".deleteMemory").onclick=async()=>{await fetch(CORE_API+`/memory/${m.id}`,{method:"DELETE",headers:apiHeaders()});refreshMemory();refreshStatus()};row.querySelector(".pinMemory").onclick=async()=>{await fetch(CORE_API+`/memory/${m.id}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({pinned:!m.pinned})});refreshMemory()};list.appendChild(row)})}catch{}}
@@ -212,6 +212,26 @@ $("deleteProjectBtn").onclick=()=>{if(!editingProjectId)return closeProjectEdito
 async function registerDesktopDevice(){
   try{await fetch(CORE_API+"/devices/register",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({device_id:deviceId,name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R19"})})}catch{}
 }
+async function refreshR19Capabilities(){
+  const box=$("r19CapabilityMatrix");if(!box)return;
+  try{
+    const r=await fetch("/api/r19/capabilities",{headers:apiHeaders(),cache:"no-store"});
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||"Capability check failed.");
+    const rows=[];
+    const label=s=>String(s||"").replaceAll("_"," ").replace(/\b\w/g,m=>m.toUpperCase());
+    for(const [k,v] of Object.entries(d.working_now||{}))rows.push({name:label(k),state:!!v?"on":"wait",note:!!v?"Active now":"Unavailable"});
+    const cloud=d.connected_when_configured?.permanent_cloud_brain||{};
+    rows.push({name:"Permanent Cloud Brain",state:cloud.durable?"on":"wait",note:cloud.durable?"Durable sync active":cloud.configured?"Configured · connection not verified":"Needs DATABASE_URL"});
+    const computer=d.connected_when_configured?.computer_control||{};
+    rows.push({name:"Computer Control",state:computer.verified?"on":"wait",note:computer.verified?"Remote computer verified":"Needs isolated computer runtime"});
+    const training=d.connected_when_configured?.custom_model_training||{};
+    rows.push({name:"RONN Custom Model Training",state:training.training_available?"on":"wait",note:training.training_available?"Training runtime connected":"Dataset builder active · trainer not connected"});
+    rows.push({name:"Live Voice",state:("SpeechRecognition" in window||"webkitSpeechRecognition" in window)?"on":"wait",note:"Browser-dependent"});
+    rows.push({name:"Screen Context",state:navigator.mediaDevices?.getDisplayMedia?"on":"wait",note:"Browser screen-share"});
+    box.innerHTML=rows.map(x=>`<div class="r19CapRow ${x.state}"><i></i><div><b>${escapeHTML(x.name)}</b><small>${escapeHTML(x.note)}</small></div></div>`).join("");
+  }catch(e){box.innerHTML=`<div class="emptyState">R19 status unavailable: ${escapeHTML(e.message)}</div>`}
+}
+
 async function refreshEcosystemStatus(){
   const chips=$("ecosystemChips");if(!chips)return;
   try{const r=await fetch(CORE_API+"/ecosystem/status",{headers:apiHeaders()});const d=await r.json();const c=d.credits||{};chips.innerHTML=`<span>Core sync ${Number(d.sync_cursor||0)}</span><span>${Number(d.devices||0)} device${Number(d.devices||0)===1?"":"s"}</span><span>${Number(d.plugins||0)} plugins</span><span>${Number(d.unread_notifications||0)} notifications</span><span>${c.unlimited?"Owner unlimited":`Credits ${c.balance??"—"}`}</span>`}catch{chips.innerHTML="<span>Ecosystem unavailable</span>"}
@@ -285,6 +305,7 @@ if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
 if($("opLockBtn"))$("opLockBtn").onclick=lockOp;
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
+if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;
 if($("ownerRecoveryBtn"))$("ownerRecoveryBtn").onclick=generateRecoveryCodes;
 if($("ownerBackupBtn"))$("ownerBackupBtn").onclick=createOwnerBackup;
 if($("vaultSaveBtn"))$("vaultSaveBtn").onclick=saveVaultItem;
