@@ -39,6 +39,22 @@ from r14_user_model import observe as r14_user_observe, profile as r14_user_prof
 from r14_multimodal import plan as r14_multimodal_plan, directive as r14_multimodal_directive
 from r14_self_correct import inspect as r14_self_inspect, reviewer_instruction as r14_reviewer_instruction
 from r14_agent import make_plan as r14_agent_plan, execute_local as r14_agent_execute
+from r15_cloud_brain import restore_directory as r15_cloud_restore, snapshot_directory as r15_cloud_snapshot, start_sync as r15_cloud_start, status as r15_cloud_status, record_event as r15_cloud_event
+from r15_trust import recent as r15_trust_recent, stats as r15_trust_stats, rollback_payload as r15_trust_rollback_payload
+from r15_eval_lab import run as r15_eval_run
+from r16_workspace import write as r16_ws_write, read as r16_ws_read, list_files as r16_ws_list, run as r16_ws_run, rollback as r16_ws_rollback, status as r16_ws_status
+from r16_simulation import simulate as r16_simulate, project_model as r16_project_model
+from r17_browser import fetch as r17_browser_fetch
+from r17_computer import status as r17_computer_status, action as r17_computer_action
+from r17_connectors import status as r17_connectors_status
+from r17_jobs import create as r17_job_create, get as r17_job_get, list_jobs as r17_job_list, stats as r17_job_stats
+from r17_agents import messages as r17_agent_messages, status as r17_agent_status
+from r18_monitor import add as r18_monitor_add, list_watches as r18_monitor_list, alerts as r18_monitor_alerts, mark_seen as r18_monitor_mark_seen, start as r18_monitor_start, status as r18_monitor_status, check as r18_monitor_check
+from r18_research import collect_pages as r18_collect_pages, prompt as r18_research_prompt
+from r19_tools import create as r19_tool_create, list_tools as r19_tool_list, run as r19_tool_run, remove as r19_tool_remove, status as r19_tool_status
+from r19_router import choose as r19_router_choose, record as r19_router_record, report as r19_router_report
+from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
+from r19_training_data import add as r19_training_add, export as r19_training_export, stats as r19_training_stats
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -58,7 +74,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R14-CAPABILITY")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R19-AGENT-OS")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -256,7 +272,7 @@ STOPWORDS = {
     "can","could","would","should","what","how","why","when","where","who","be",
 }
 
-app = FastAPI(title="RONN Core + Cognitive OS", version="R14 CAPABILITY / Core API v1.4")
+app = FastAPI(title="RONN Core + Cognitive OS", version="R19 AGENT OS / Core API v1.9")
 _CORS = [x.strip() for x in os.getenv("RONN_CORS_ORIGINS", "").split(",") if x.strip()]
 if _CORS:
     app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
@@ -315,9 +331,9 @@ async def public_guard(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), display-capture=(self), geolocation=()"
     if request.url.path.startswith("/api/v1/"):
-        response.headers["X-RONN-Core-Version"] = "1.4.0"
+        response.headers["X-RONN-Core-Version"] = "1.9.0"
     return response
 
 @app.middleware("http")
@@ -377,6 +393,11 @@ def init_db():
         ensure_column(conn, "messages", "owner", "TEXT NOT NULL DEFAULT 'legacy'")
         conn.execute("UPDATE memories SET updated_at=created_at WHERE updated_at=0")
         conn.commit()
+
+try:
+    R15_CLOUD_RESTORE = r15_cloud_restore(DATA)
+except Exception as _cloud_restore_exc:
+    R15_CLOUD_RESTORE = {"configured":False,"durable":False,"error":str(_cloud_restore_exc)[:180]}
 
 init_db()
 
