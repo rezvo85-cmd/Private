@@ -33,7 +33,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     position:relative!important;
     width:100%!important;
     max-width:100%!important;
-    height:100dvh!important;
+    height:var(--ronn-vh,100dvh)!important;
     min-height:0!important;
     overflow:hidden!important;
     background:#212121!important;
@@ -45,7 +45,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     position:relative!important;
     width:100%!important;
     max-width:100%!important;
-    height:100dvh!important;
+    height:var(--ronn-vh,100dvh)!important;
     min-width:0!important;
     min-height:0!important;
     overflow:hidden!important;
@@ -174,7 +174,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     z-index:1000!important;
     width:min(86vw,320px)!important;
     max-width:320px!important;
-    height:100dvh!important;
+    height:var(--ronn-vh,100dvh)!important;
     min-height:0!important;
     padding:env(safe-area-inset-top) 8px max(8px,env(safe-area-inset-bottom))!important;
     overflow:hidden!important;
@@ -631,6 +631,27 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
   .ronn19 .r19CapabilityHead .ghost{margin-top:12px!important}
 
+  /* ---------- mobile notices ---------- */
+  .ronn19 .toast{
+    left:12px!important;
+    right:12px!important;
+    top:calc(env(safe-area-inset-top) + 58px)!important;
+    bottom:auto!important;
+    z-index:1300!important;
+    width:auto!important;
+    max-width:520px!important;
+    margin:0 auto!important;
+    padding:10px 12px!important;
+    font-size:12px!important;
+    line-height:1.35!important;
+    text-align:center!important;
+    transform:translateY(-8px)!important;
+  }
+  .ronn19 .toast.show{
+    opacity:1!important;
+    transform:none!important;
+  }
+
   /* ---------- auth / modal / overlays ---------- */
   .ronn19 .webAuthGate{
     padding:max(18px,env(safe-area-inset-top)) 16px max(18px,env(safe-area-inset-bottom))!important;
@@ -644,6 +665,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .webAuthCard h1{font-size:28px!important}
 
   .ronn19 .modalBackdrop{
+    z-index:1200!important;
     padding:16px!important;
   }
   .ronn19 .modalCard{
