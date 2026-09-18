@@ -1,5 +1,8 @@
 const $ = id => document.getElementById(id);
 const qsa = s => [...document.querySelectorAll(s)];
+function safeGet(k){try{return window.localStorage.getItem(k)}catch{return null}}
+function safeSet(k,v){try{window.localStorage.setItem(k,v);return true}catch{return false}}
+function safeRemove(k){try{window.localStorage.removeItem(k);return true}catch{return false}}
 const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stopBtn = $("stopBtn");
 const attachmentsEl = $("attachments"), fileInput = $("fileInput"), jumpLatest = $("jumpLatest");
 const routeBadge = $("routeBadge"), stageBadge = $("stageBadge"), profileBadge = $("profileBadge");
@@ -8,14 +11,14 @@ const BUILD_EXPECTED = "RONN-COGNITIVE-OS-APEX-2026-R10.1-WEB-AUTH";
 const CORE_API = "/api/v1";
 const CLIENT_KEY = "ronnClient";
 const LEGACY_CLIENT_KEY = "novaUltraClient";
-let clientId = localStorage.getItem(CLIENT_KEY) || localStorage.getItem(LEGACY_CLIENT_KEY);
+let clientId = safeGet(CLIENT_KEY) || safeGet(LEGACY_CLIENT_KEY);
 if(!clientId){
   clientId=(crypto.randomUUID?crypto.randomUUID():"ronn-"+Date.now()+"-"+Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,"");
 }
-localStorage.setItem(CLIENT_KEY,clientId);
+safeSet(CLIENT_KEY,clientId);
 const DEVICE_KEY="ronnDevice";
-let deviceId=localStorage.getItem(DEVICE_KEY);
-if(!deviceId){deviceId=(crypto.randomUUID?crypto.randomUUID():"dev-"+Date.now()+"-"+Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,"");localStorage.setItem(DEVICE_KEY,deviceId);}
+let deviceId=safeGet(DEVICE_KEY);
+if(!deviceId){deviceId=(crypto.randomUUID?crypto.randomUUID():"dev-"+Date.now()+"-"+Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,"");safeSet(DEVICE_KEY,deviceId);}
 const apiHeaders = extra => Object.assign({"X-RONN-Client":clientId,"X-RONN-Device":deviceId,"X-RONN-Account":"ronn_primary"},extra||{});
 
 function setWebAuthGate(show,message="") {
@@ -62,15 +65,15 @@ async function unlockWebAuth(){
 const CHAT_KEY="ronnChats", CURRENT_KEY="ronnCurrentChat", PROJECT_KEY="ronnProjects", ACTIVE_PROJECT_KEY="ronnActiveProject";
 function migrateLocalStorage(){
   const pairs=[["novaUltraChats",CHAT_KEY],["novaUltraCurrentChat",CURRENT_KEY],["novaUltraProjects",PROJECT_KEY],["novaUltraActiveProject",ACTIVE_PROJECT_KEY]];
-  for(const [oldKey,newKey] of pairs){if(localStorage.getItem(newKey)==null&&localStorage.getItem(oldKey)!=null)localStorage.setItem(newKey,localStorage.getItem(oldKey));}
+  for(const [oldKey,newKey] of pairs){if(safeGet(newKey)==null&&safeGet(oldKey)!=null)safeSet(newKey,safeGet(oldKey));}
 }
 migrateLocalStorage();
 
 let pending=[],busy=false,controller=null,currentView="chat",startedAt=0,activityTimer=null,currentRequestId="";
-let chats=loadJSON(CHAT_KEY,[]),currentChatId=localStorage.getItem(CURRENT_KEY)||"",projects=loadJSON(PROJECT_KEY,[]),editingProjectId=null;
+let chats=loadJSON(CHAT_KEY,[]),currentChatId=safeGet(CURRENT_KEY)||"",projects=loadJSON(PROJECT_KEY,[]),editingProjectId=null;
 
-function loadJSON(k,f){try{return JSON.parse(localStorage.getItem(k))??f}catch{return f}}
-function saveJSON(k,v){localStorage.setItem(k,JSON.stringify(v))}
+function loadJSON(k,f){try{return JSON.parse(safeGet(k))??f}catch{return f}}
+function saveJSON(k,v){safeSet(k,JSON.stringify(v))}
 function uid(p){return p+"-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)}
 function escapeHTML(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
 function sanitizeVisible(s){return String(s||"").replace(/<think>[\s\S]*?<\/think>/gi,"").replace(/<\/?think>/gi,"").replace(/\\\|/g,"|").replace(/\\<(ul|li|br|table|tr|td|th)>/gi,"<$1>")}
@@ -93,10 +96,10 @@ function renderMarkdown(raw){
   }close();let html=out.join("");blocks.forEach((b,i)=>html=html.replace(`@@CODE${i}@@`,b));return html;
 }
 
-function currentChat(){let c=chats.find(x=>x.id===currentChatId);if(!c){c={id:uid("chat"),title:"New chat",messages:[],created:Date.now(),updated:Date.now()};chats.unshift(c);currentChatId=c.id;localStorage.setItem(CURRENT_KEY,currentChatId);saveChats()}return c}
+function currentChat(){let c=chats.find(x=>x.id===currentChatId);if(!c){c={id:uid("chat"),title:"New chat",messages:[],created:Date.now(),updated:Date.now()};chats.unshift(c);currentChatId=c.id;safeSet(CURRENT_KEY,currentChatId);saveChats()}return c}
 function saveChats(){saveJSON(CHAT_KEY,chats.slice(0,100));renderChatList()}
 function autoTitle(t){return (t||"New chat").replace(/\s+/g," ").trim().slice(0,46)||"New chat"}
-function renderChatList(){const q=$("chatSearch").value.toLowerCase().trim(),list=$("chatList");list.innerHTML="";$("chatCount").textContent=chats.length;chats.filter(c=>!q||c.title.toLowerCase().includes(q)).slice(0,10).forEach(c=>{const row=document.createElement("button");row.className="chatRow"+(c.id===currentChatId?" active":"");row.innerHTML=`<span>${escapeHTML(c.title)}</span><b data-del="${c.id}" title="Delete">×</b>`;row.onclick=e=>{if(e.target.dataset.del){e.stopPropagation();if(c.coreConversationId){fetch(CORE_API+`/conversations/${encodeURIComponent(c.coreConversationId)}`,{method:"DELETE",headers:apiHeaders()}).catch(()=>{})}chats=chats.filter(x=>x.id!==c.id);if(currentChatId===c.id)currentChatId="";saveChats();renderMessages();return}currentChatId=c.id;localStorage.setItem(CURRENT_KEY,currentChatId);renderMessages();renderChatList();showView("chat")};list.appendChild(row)})}
+function renderChatList(){const q=$("chatSearch").value.toLowerCase().trim(),list=$("chatList");list.innerHTML="";$("chatCount").textContent=chats.length;chats.filter(c=>!q||c.title.toLowerCase().includes(q)).slice(0,10).forEach(c=>{const row=document.createElement("button");row.className="chatRow"+(c.id===currentChatId?" active":"");row.innerHTML=`<span>${escapeHTML(c.title)}</span><b data-del="${c.id}" title="Delete">×</b>`;row.onclick=e=>{if(e.target.dataset.del){e.stopPropagation();if(c.coreConversationId){fetch(CORE_API+`/conversations/${encodeURIComponent(c.coreConversationId)}`,{method:"DELETE",headers:apiHeaders()}).catch(()=>{})}chats=chats.filter(x=>x.id!==c.id);if(currentChatId===c.id)currentChatId="";saveChats();renderMessages();return}currentChatId=c.id;safeSet(CURRENT_KEY,currentChatId);renderMessages();renderChatList();showView("chat")};list.appendChild(row)})}
 function auditWarnings(a){return [...(a?.warnings||[]),...(a?.r5_quality_gate?.warnings||[]),...(a?.r7_quality?.warnings||[])].filter((x,i,arr)=>arr.indexOf(x)===i)}
 function auditLabel(a){if(!a)return "";const warnings=auditWarnings(a).length;if(warnings)return `Review · ${warnings} flag${warnings===1?"":"s"}`;if(a.evidence_mode==="live")return "Live evidence route";const score=Number.isFinite(a?.r7_quality?.score)?a.r7_quality.score:a?.r5_quality_gate?.quality_score;return a.runtime_verified?"Runtime verified":Number.isFinite(score)?`Audited · ${score}`:"Answer audited"}
 function applyAudit(wrap,a){if(!wrap||!a)return;let chip=wrap.querySelector(".auditChip");if(!chip){chip=document.createElement("span");chip.className="auditChip";const tools=wrap.querySelector(".msgTools");if(tools)tools.prepend(chip)}const warnings=auditWarnings(a);chip.textContent=auditLabel(a);chip.className="auditChip "+(warnings.length?"warn":"ok");chip.title=warnings.length?warnings.join(" • "):`Evidence: ${a.evidence_mode||"model"}; runtime verified: ${a.runtime_verified?"yes":"no"}`}
@@ -118,7 +121,7 @@ function renderAttachments(){attachmentsEl.innerHTML="";pending.forEach((a,i)=>{
 const textExt=/\.(txt|md|py|js|ts|tsx|jsx|lua|luau|json|html|css|csv|xml|yaml|yml)$/i,docExt=/\.(pdf|docx|xlsx|pptx)$/i;
 function addFiles(files){[...files].slice(0,8).forEach(file=>{if(file.type.startsWith("image/")){if(file.size>20*1024*1024)return showToast("Image is over 20 MB.");const r=new FileReader();r.onload=()=>{pending.push({kind:"image",name:file.name,data:r.result});renderAttachments()};r.readAsDataURL(file)}else if(docExt.test(file.name)){if(file.size>25*1024*1024)return showToast("Document is over 25 MB.");const r=new FileReader();r.onload=async()=>{try{showToast("Extracting "+file.name+"…");const resp=await fetch("/api/document/extract",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({filename:file.name,data:r.result})});const d=await resp.json();if(!resp.ok)throw new Error(d.detail||"Document extraction failed.");pending.push({kind:"text",name:file.name,content:String(d.text||"").slice(0,80000)});renderAttachments();showToast("Document ready.")}catch(e){showToast(e.message)}};r.readAsDataURL(file)}else if(textExt.test(file.name)){if(file.size>4*1024*1024)return showToast("Text/code files must be under 4 MB.");const r=new FileReader();r.onload=()=>{pending.push({kind:"text",name:file.name,content:String(r.result).slice(0,80000)});renderAttachments()};r.readAsText(file)}else showToast("RONN accepts images, code/text, PDF, DOCX, XLSX, and PPTX files.")})}
 
-function activeProject(){const id=localStorage.getItem(ACTIVE_PROJECT_KEY)||"";return projects.find(p=>p.id===id)||null}
+function activeProject(){const id=safeGet(ACTIVE_PROJECT_KEY)||"";return projects.find(p=>p.id===id)||null}
 function composeActiveProjectContext(){const p=activeProject();if(!p)return "";const name=String(p.name||"").trim(),ctx=String(p.context||"").trim();return [name?"Project: "+name:"",ctx].filter(Boolean).join("\n")}
 function updateProjectBadge(){const p=activeProject(),b=$("projectBadge");b.textContent=p?p.name:"No project";b.classList.toggle("active",!!p);$("activeProjectDot").classList.toggle("on",!!p)}
 
@@ -150,7 +153,7 @@ function showView(name){currentView=name;qsa(".view").forEach(v=>v.classList.rem
 async function refreshStatus(){try{const r=await fetch(CORE_API+"/status",{headers:apiHeaders()});if(!r.ok)throw new Error();const d=await r.json();const buildOk=d.build===BUILD_EXPECTED;$("statusDot").classList.toggle("on",buildOk);$("buildText").textContent=d.build||"RONN";$("serverStatus").textContent=buildOk?"Exact build verified":"Build mismatch";$("memoryCount").textContent=d.memory_count??0;const any=d.api_key_loaded,p=$("providerBadge");p.textContent=d.groq_key_loaded?"Groq configured":d.nvidia_key_loaded?"NVIDIA configured":"No AI key";p.className="providerBadge "+(any?"ok":"warn");$("diagnosticDot").className=buildOk&&d.internal_eval_score===100&&d.r5_eval_score===100&&d.r6_eval_score===100&&d.r7_eval_score===100&&d.integrity?.verified?"good":"on"}catch{$("serverStatus").textContent="Server unavailable";$("statusDot").classList.remove("on")}}
 async function refreshMemory(){try{const d=await (await fetch(CORE_API+"/memory",{headers:apiHeaders()})).json();$("memoryCount").textContent=d.memories.length;const list=$("memoryList");list.innerHTML="";if(!d.memories.length){list.innerHTML='<div class="emptyState">No saved memories yet.</div>';return}d.memories.forEach(m=>{const row=document.createElement("div");row.className="memoryItem";row.innerHTML=`<div class="memoryMain"><span>${escapeHTML(m.text)}</span><small>${escapeHTML(m.category||"general")} · ${Math.round(Number(m.confidence||.8)*100)}% confidence${m.use_count?` · used ${m.use_count}×`:""}</small></div><div class="memoryActions"><button class="pinMemory ${m.pinned?"active":""}" title="${m.pinned?"Unpin":"Pin"}">${m.pinned?"◆":"◇"}</button><button class="deleteMemory" title="Forget">×</button></div>`;row.querySelector(".deleteMemory").onclick=async()=>{await fetch(CORE_API+`/memory/${m.id}`,{method:"DELETE",headers:apiHeaders()});refreshMemory();refreshStatus()};row.querySelector(".pinMemory").onclick=async()=>{await fetch(CORE_API+`/memory/${m.id}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({pinned:!m.pinned})});refreshMemory()};list.appendChild(row)})}catch{}}
 
-function renderProjects(){const grid=$("projectGrid");grid.innerHTML="";const active=activeProject();if(!projects.length){grid.innerHTML='<div class="emptyState big">Create a project to keep architecture, names, constraints, visual language, and known failures consistent.</div>';return}projects.forEach(p=>{const card=document.createElement("button");card.className="projectCard"+(active?.id===p.id?" active":"");card.innerHTML=`<div><b>${escapeHTML(p.name)}</b><span>${active?.id===p.id?"ACTIVE":"PROJECT"}</span></div><p>${escapeHTML((p.context||"").slice(0,180))}</p>`;card.onclick=()=>{localStorage.setItem(ACTIVE_PROJECT_KEY,p.id);updateProjectBadge();renderProjects();openProject(p.id)};grid.appendChild(card)})}
+function renderProjects(){const grid=$("projectGrid");grid.innerHTML="";const active=activeProject();if(!projects.length){grid.innerHTML='<div class="emptyState big">Create a project to keep architecture, names, constraints, visual language, and known failures consistent.</div>';return}projects.forEach(p=>{const card=document.createElement("button");card.className="projectCard"+(active?.id===p.id?" active":"");card.innerHTML=`<div><b>${escapeHTML(p.name)}</b><span>${active?.id===p.id?"ACTIVE":"PROJECT"}</span></div><p>${escapeHTML((p.context||"").slice(0,180))}</p>`;card.onclick=()=>{safeSet(ACTIVE_PROJECT_KEY,p.id);updateProjectBadge();renderProjects();openProject(p.id)};grid.appendChild(card)})}
 function openProject(id){const p=projects.find(x=>x.id===id);if(!p)return;editingProjectId=id;$("projectName").value=p.name;$("projectContext").value=p.context||"";$("projectEditor").classList.remove("hidden");$("projectGrid").classList.add("dim")}
 function closeProjectEditor(){$("projectEditor").classList.add("hidden");$("projectGrid").classList.remove("dim");editingProjectId=null}
 
@@ -173,12 +176,12 @@ async function showRepairPlan(){try{const d=await (await fetch(CORE_API+"/repair
 
 
 const SIDEBAR_KEY="ronnSidebarCompact";
-if(localStorage.getItem(SIDEBAR_KEY)==="1")document.body.classList.add("sidebarCompact");
-$("sidebarCollapse").onclick=()=>{document.body.classList.toggle("sidebarCompact");localStorage.setItem(SIDEBAR_KEY,document.body.classList.contains("sidebarCompact")?"1":"0");$("sidebarCollapse").textContent=document.body.classList.contains("sidebarCompact")?"›":"‹"};
+if(safeGet(SIDEBAR_KEY)==="1")document.body.classList.add("sidebarCompact");
+$("sidebarCollapse").onclick=()=>{document.body.classList.toggle("sidebarCompact");safeSet(SIDEBAR_KEY,document.body.classList.contains("sidebarCompact")?"1":"0");$("sidebarCollapse").textContent=document.body.classList.contains("sidebarCompact")?"›":"‹"};
 
 $("newProjectBtn").onclick=()=>{editingProjectId=null;$("projectName").value="";$("projectContext").value="";$("projectEditor").classList.remove("hidden");$("projectGrid").classList.add("dim");$("projectName").focus()};$("cancelProjectBtn").onclick=closeProjectEditor;
-$("saveProjectBtn").onclick=async()=>{const name=$("projectName").value.trim(),context=$("projectContext").value.trim();if(!name)return showToast("Give the project a name.");let id=editingProjectId,p;if(id){p=projects.find(x=>x.id===id);p.name=name;p.context=context;if(p.coreProjectId){try{await fetch(CORE_API+`/projects/${encodeURIComponent(p.coreProjectId)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({name,description:context.slice(0,2000)})})}catch{}}else{try{const r=await fetch(CORE_API+"/projects",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({name,description:context.slice(0,2000)})});const d=await r.json();if(r.ok&&d.project?.project_id)p.coreProjectId=d.project.project_id}catch{}}}else{p={id:uid("project"),name,context};try{const r=await fetch(CORE_API+"/projects",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({name,description:context.slice(0,2000)})});const d=await r.json();if(r.ok&&d.project?.project_id)p.coreProjectId=d.project.project_id}catch{}projects.unshift(p);id=p.id}saveJSON(PROJECT_KEY,projects);localStorage.setItem(ACTIVE_PROJECT_KEY,id);closeProjectEditor();renderProjects();updateProjectBadge();showToast("Project saved and activated.")};
-$("deleteProjectBtn").onclick=()=>{if(!editingProjectId)return closeProjectEditor();projects=projects.filter(p=>p.id!==editingProjectId);saveJSON(PROJECT_KEY,projects);if(localStorage.getItem(ACTIVE_PROJECT_KEY)===editingProjectId)localStorage.removeItem(ACTIVE_PROJECT_KEY);closeProjectEditor();renderProjects();updateProjectBadge();showToast("Project deleted.")};
+$("saveProjectBtn").onclick=async()=>{const name=$("projectName").value.trim(),context=$("projectContext").value.trim();if(!name)return showToast("Give the project a name.");let id=editingProjectId,p;if(id){p=projects.find(x=>x.id===id);p.name=name;p.context=context;if(p.coreProjectId){try{await fetch(CORE_API+`/projects/${encodeURIComponent(p.coreProjectId)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({name,description:context.slice(0,2000)})})}catch{}}else{try{const r=await fetch(CORE_API+"/projects",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({name,description:context.slice(0,2000)})});const d=await r.json();if(r.ok&&d.project?.project_id)p.coreProjectId=d.project.project_id}catch{}}}else{p={id:uid("project"),name,context};try{const r=await fetch(CORE_API+"/projects",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({name,description:context.slice(0,2000)})});const d=await r.json();if(r.ok&&d.project?.project_id)p.coreProjectId=d.project.project_id}catch{}projects.unshift(p);id=p.id}saveJSON(PROJECT_KEY,projects);safeSet(ACTIVE_PROJECT_KEY,id);closeProjectEditor();renderProjects();updateProjectBadge();showToast("Project saved and activated.")};
+$("deleteProjectBtn").onclick=()=>{if(!editingProjectId)return closeProjectEditor();projects=projects.filter(p=>p.id!==editingProjectId);saveJSON(PROJECT_KEY,projects);if(safeGet(ACTIVE_PROJECT_KEY)===editingProjectId)safeRemove(ACTIVE_PROJECT_KEY);closeProjectEditor();renderProjects();updateProjectBadge();showToast("Project deleted.")};
 
 async function registerDesktopDevice(){
   try{await fetch(CORE_API+"/devices/register",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({device_id:deviceId,name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R10"})})}catch{}
@@ -202,7 +205,7 @@ async function refreshVault(){const box=$("vaultList");if(!box)return;try{const 
 async function saveVaultItem(){const title=$("vaultTitle")?.value.trim()||"Secure note",text=$("vaultText")?.value||"";if(!text.trim())return showToast("Enter something to secure.");const r=await fetch(CORE_API+"/vault",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({title,text})});if(r.ok){$("vaultTitle").value="";$("vaultText").value="";showToast("Saved encrypted note.");refreshVault()}else{const d=await r.json().catch(()=>({}));showToast(d.detail||"Vault save failed.")}}
 
 $("memoryAddBtn").onclick=async()=>{const text=$("memoryInput").value.trim();if(!text)return;const r=await fetch(CORE_API+"/memory",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({text})});const d=await r.json().catch(()=>({}));if(!r.ok)return showToast(d.detail||"Could not save memory");$("memoryInput").value="";refreshMemory();refreshStatus()};$("memoryInput").addEventListener("keydown",e=>{if(e.key==="Enter")$("memoryAddBtn").click()});
-$("newChat").onclick=()=>{currentChatId="";localStorage.removeItem(CURRENT_KEY);currentChat();renderMessages();renderChatList();showView("chat");input.focus()};
+$("newChat").onclick=()=>{currentChatId="";safeRemove(CURRENT_KEY);currentChat();renderMessages();renderChatList();showView("chat");input.focus()};
 $("clearBtn").onclick=()=>$("confirmModal").classList.remove("hidden");$("cancelClearBtn").onclick=()=>$("confirmModal").classList.add("hidden");$("confirmClearBtn").onclick=()=>{const c=currentChat();c.messages=[];c.title="New chat";c.updated=Date.now();saveChats();renderMessages();$("confirmModal").classList.add("hidden");showToast("Conversation cleared.")};
 $("exportBtn").onclick=()=>{const c=currentChat(),md=`# ${c.title}\n\n`+c.messages.map(m=>`## ${m.role==="user"?"You":"RONN"}\n\n${m.content}\n`).join("\n");const blob=new Blob([md],{type:"text/markdown"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=(c.title.replace(/[^a-z0-9_-]+/gi,"_")||"ronn-chat")+".md";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 $("chatSearch").addEventListener("input",renderChatList);qsa(".navBtn").forEach(b=>b.onclick=()=>showView(b.dataset.view));qsa("[data-view-target]").forEach(b=>b.onclick=()=>showView(b.dataset.viewTarget));const plusMenu=$("plusMenu");$("attachBtn").onclick=e=>{e.stopPropagation();plusMenu?.classList.toggle("hidden")};$("plusAttach").onclick=()=>{plusMenu?.classList.add("hidden");fileInput.click()};$("plusNewChat").onclick=()=>{plusMenu?.classList.add("hidden");$("newChat").click()};$("plusProject").onclick=()=>showView("projects");$("plusMemory").onclick=()=>showView("memory");fileInput.onchange=e=>{addFiles(e.target.files);fileInput.value=""};sendBtn.onclick=()=>sendMessage(false);stopBtn.onclick=async()=>{const id=currentRequestId;controller?.abort();if(id){try{await fetch(`/api/tasks/${encodeURIComponent(id)}/cancel`,{method:"POST",headers:apiHeaders()})}catch{}}};input.addEventListener("input",autoSize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage(false)}});$("presetRow").addEventListener("click",e=>{const b=e.target.closest("[data-prompt]");if(b){input.value=b.dataset.prompt;autoSize();input.focus()}});$("runDiagnosticsBtn").onclick=runDiagnostics;$("testGroqBtn").onclick=()=>testProvider("groq");$("testNvidiaBtn").onclick=()=>testProvider("nvidia");$("repairPlanBtn").onclick=showRepairPlan;$("queueAddBtn").onclick=addQueueItem;$("kbSearchBtn").onclick=searchKnowledge;$("queueInput").addEventListener("keydown",e=>{if(e.key==="Enter")addQueueItem()});$("kbSearchInput").addEventListener("keydown",e=>{if(e.key==="Enter")searchKnowledge()});$("queueList").addEventListener("click",async e=>{const id=e.target.dataset.queueDone;if(id){await fetch(CORE_API+`/tasks/${encodeURIComponent(id)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({status:"complete"})});refreshAgentOps()}});
@@ -220,7 +223,7 @@ const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js").catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R10-1-2",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
 if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
@@ -235,5 +238,7 @@ if($("featureFlagList"))$("featureFlagList").addEventListener("change",async e=>
 registerDesktopDevice();refreshEcosystemStatus();
 ensureWebAuth();
 
-if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){currentChatId=chats[0].id;localStorage.setItem(CURRENT_KEY,currentChatId)}
+if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){currentChatId=chats[0].id;safeSet(CURRENT_KEY,currentChatId)}
 renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);input.focus();
+
+window.__RONN_UI_READY=true;
