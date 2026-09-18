@@ -836,14 +836,23 @@ def select_model(message: str, images, files, mode: str):
     if mode == "fast":
         return FAST_MODEL, "fast", profile
     if mode == "deep":
+        if openrouter_key_loaded():
+            return OR_NEMOTRON_MODEL, "ensemble-reasoning", profile
         return (NVIDIA_MODEL, "nvidia-deep", profile) if nvidia_key_loaded() else (SMART_MODEL, "deep", profile)
     if mode == "creator":
+        if openrouter_key_loaded():
+            model, route = r13_choose_primary(profile, max(difficulty,3), bool(images), False)
+            return model, route, profile
         return (NVIDIA_MODEL, "nvidia-creator", profile) if nvidia_key_loaded() else (CREATOR_MODEL, "creator", profile)
     if mode == "max":
         return RESEARCH_MODEL, "max", profile
     if mode == "ultra":
+        if openrouter_key_loaded():
+            return OR_NEMOTRON_MODEL, "ensemble-ultra", profile
         return (NVIDIA_MODEL, "nvidia-ultra", profile) if nvidia_key_loaded() else (SMART_MODEL, "ultra", profile)
     if mode == "apex":
+        if openrouter_key_loaded():
+            return OR_NEMOTRON_MODEL, "ensemble-apex", profile
         return (NVIDIA_MODEL, "nvidia-apex", profile) if nvidia_key_loaded() else (SMART_MODEL, "apex", profile)
     if mode == "live":
         return LIVE_MODEL, "live", profile
@@ -1623,7 +1632,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
 
     stream_messages = messages
     try:
-        if route in {"apex","nvidia-apex"} and not body.images and not looks_live(body.message):
+        if route in {"apex","nvidia-apex","ensemble-apex"} and not body.images and not looks_live(body.message):
             task_checkpoint(request_id, "Parallel hypotheses", "started", "")
             yield (json.dumps({"stage":"Parallel hypotheses"})+"\n").encode()
             final_messages = apex_council_messages(messages, profile)
@@ -1639,7 +1648,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                     r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", final_messages, 2200, stream=True)
             else:
                 r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", messages, 1500, stream=True)
-        elif route == "ultra" and not body.images and not looks_live(body.message):
+        elif route in {"ultra","ensemble-ultra"} and not body.images and not looks_live(body.message):
             task_checkpoint(request_id, "Specialist draft", "started", "")
             yield (json.dumps({"stage":"Specialist draft"})+"\n").encode()
             final_messages = ultra_council_messages(messages, profile)
@@ -1678,7 +1687,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             retry_messages = stream_messages or messages
             r, used_model, used_route = open_stream_with_fallback(
                 model,
-                "deep" if route in {"review","ultra-final"} else route,
+                "deep" if route in {"review","ultra-final","ensemble-review","ensemble-ultra-final","ensemble-apex-final"} else route,
                 retry_messages,
                 max_tokens,
             )
