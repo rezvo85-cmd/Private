@@ -40,9 +40,17 @@ def _difficulty(message,file_count,has_project):
     score+=sum(1 for x in ("full project","whole project","entire project","production","architecture","multi-step","debug all","root cause","deploy","test and fix","make everything","complete system","whole system") if x in low)
     return max(1,min(score,8))
 
+def _local_intent(message):
+    low=re.sub(r"\s+"," ",(message or "").lower()).strip()
+    return any(x in low for x in (
+        "near me","nearby","closest","around me","close to me","in my area",
+        "restaurant near","restaurants near","food near","places to eat near","coffee near",
+        "gas station near","store near","stores near","pharmacy near","hospital near","open near me"
+    ))
+
 def _needs_live(message,profile):
     low=(message or "").lower()
-    return profile=="research" or any(x in low for x in ("today","right now","currently","latest","this week","weather","forecast","news","score","standings","schedule","price today","stock price","who won","release date","current version","open now"))
+    return profile=="research" or _local_intent(message) or any(x in low for x in ("today","right now","currently","latest","this week","weather","forecast","news","score","standings","schedule","price today","stock price","who won","release date","current version","open now"))
 
 def deterministic_plan(message,history=None,file_names=None,has_images=False,has_project=False,agent_mode=True,explicit_mode="auto"):
     history=history or []; file_names=file_names or []
@@ -95,7 +103,8 @@ def _sdk_refine(base,message,history,file_names,has_images,has_project):
         if str(data.get("depth","")).lower() in DEPTHS:out["depth"]=str(data["depth"]).lower()
         if str(data.get("specialist","")).lower() in SPECIALISTS:out["specialist"]=str(data["specialist"]).lower()
         for k in ("needs_live","verify","second_pass","use_council"):
-            if k in data:out[k]=bool(data[k])
+            if k in data:
+                out[k]=bool(base.get(k) or data[k]) if k=="needs_live" else bool(data[k])
         if has_images:out["specialist"]="vision"
         if out["needs_live"]:out.update({"profile":"research","specialist":"research","tool_mode":"live","needs_tools":True,"use_council":False})
         out.update({"sdk_used":True,"controller_model":model_name,"reason":_clean(data.get("reason"),120) or "sdk-refined"})
