@@ -50,7 +50,7 @@ from r17_computer import status as r17_computer_status, action as r17_computer_a
 from r17_connectors import status as r17_connectors_status
 from r17_jobs import create as r17_job_create, get as r17_job_get, list_jobs as r17_job_list, stats as r17_job_stats
 from r17_agents import messages as r17_agent_messages, status as r17_agent_status
-from r18_monitor import add as r18_monitor_add, list_watches as r18_monitor_list, alerts as r18_monitor_alerts, mark_seen as r18_monitor_mark_seen, start as r18_monitor_start, status as r18_monitor_status, check as r18_monitor_check
+from r18_monitor import add as r18_monitor_add, ensure as r18_monitor_ensure, list_watches as r18_monitor_list, alerts as r18_monitor_alerts, mark_seen as r18_monitor_mark_seen, start as r18_monitor_start, status as r18_monitor_status, check as r18_monitor_check
 from r18_research import extract_urls as r18_extract_urls, collect_pages as r18_collect_pages, prompt as r18_research_prompt
 from r19_tools import create as r19_tool_create, list_tools as r19_tool_list, run as r19_tool_run, remove as r19_tool_remove, status as r19_tool_status
 from r19_router import choose as r19_router_choose, record as r19_router_record, report as r19_router_report
@@ -3378,6 +3378,9 @@ except Exception as _cloud_start_exc:
     R15_CLOUD_SYNC_STATUS = {"configured":False,"durable":False,"error":str(_cloud_start_exc)[:180]}
 try:
     R18_MONITOR_START_STATUS = r18_monitor_start()
+    _render_url=(os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if _render_url:
+        r18_monitor_ensure("ronn_primary","RONN Core Deployment",_render_url+"/health",600)
 except Exception as _monitor_start_exc:
     R18_MONITOR_START_STATUS = {"running":False,"error":str(_monitor_start_exc)[:180]}
 start_routine_scheduler(queue_add)
