@@ -1,4 +1,4 @@
-name: RONN R19 Core Checks
+name: RONN R21 Core Checks
 
 on:
   push:
@@ -77,7 +77,7 @@ jobs:
           python - <<'PY'
           import app
           print("imported:", app.BUILD_ID)
-          assert "R19-AGENT-OS" in app.BUILD_ID
+          assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R21-FINISHLINE"
           PY
 
       - name: Check browser JavaScript
