@@ -1,4 +1,4 @@
-const CACHE="ronn-assets-r12";
+const CACHE="ronn-assets-r13";
 const ASSETS=["/static/ronn_app_icon.png","/manifest.webmanifest"];
 self.addEventListener("install",event=>{
   event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).catch(()=>{}));
