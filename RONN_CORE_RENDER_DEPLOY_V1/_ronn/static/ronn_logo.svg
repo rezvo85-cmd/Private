@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="RONN">
+  <defs>
+    <linearGradient id="r" x1="22" y1="18" x2="105" y2="111" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff4a5f"/>
+      <stop offset=".48" stop-color="#e51d3d"/>
+      <stop offset="1" stop-color="#a90825"/>
+    </linearGradient>
+    <radialGradient id="bg" cx=".34" cy=".22" r=".95">
+      <stop stop-color="#1c1115"/>
+      <stop offset=".55" stop-color="#0d0d10"/>
+      <stop offset="1" stop-color="#070709"/>
+    </radialGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="34" fill="url(#bg)"/>
+  <rect x="4.5" y="4.5" width="119" height="119" rx="33.5" fill="none" stroke="#ffffff" stroke-opacity=".07"/>
+  <g fill="none" stroke="url(#r)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M39 83V45c0-8 6-14 14-14h20c13 0 22 8 22 20 0 13-9 21-23 21H48"/>
+    <path d="M70 72l28 27"/>
+    <path d="M29 64c0-19 15-35 35-35"/>
+    <path d="M99 64c0 19-15 35-35 35"/>
+  </g>
+  <circle cx="64" cy="64" r="5.5" fill="#ff5368"/>
+</svg>
