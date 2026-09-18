@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#08070b">
+  <meta name="theme-color" content="#0b0b0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="RONN">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/ronn_app_icon.png">
+  <link rel="apple-touch-icon" href="/static/ronn_logo.svg">
   <title>RONN</title>
-  <link rel="stylesheet" href="/static/style.css?v=RONN-R14">
+  <link rel="stylesheet" href="/static/style.css?v=RONN-R19">
 </head>
-<body>
+<body class="ronn19">
 <div class="webAuthGate hidden" id="webAuthGate" aria-live="polite">
   <div class="webAuthCard">
-    <div class="webAuthOrb"><img src="/static/ronn_app_icon.png" alt="RONN"></div>
+    <div class="webAuthOrb"><img src="/static/ronn_logo.svg" alt="RONN"></div>
     <span class="eyebrow">RONN OWNER ACCESS</span>
     <h1>Unlock RONN</h1>
     <p>Your Core token stays on the server. Enter your OP access code to create a secure browser session.</p>
@@ -27,8 +27,8 @@
 <div class="appShell">
   <aside class="sidebar">
     <div class="brandRow">
-      <div class="brandMark"><img src="/static/ronn_app_icon.png" alt="RONN"></div>
-      <div class="brandCopy"><b>RONN</b><small>COGNITIVE OS // R14</small></div>
+      <div class="brandMark"><img src="/static/ronn_logo.svg" alt="RONN"></div>
+      <div class="brandCopy"><b>RONN</b><small>YOUR AI</small></div>
       <button class="iconBtn sidebarCollapse" id="sidebarCollapse" title="Collapse sidebar">‹</button>
     </div>
 
@@ -54,7 +54,7 @@
   <main class="main">
     <header class="topbar cinematicTopbar">
       <button class="mobileMenuBtn" id="mobileMenuBtn" type="button" aria-label="Open navigation" title="Menu">☰</button>
-      <div class="cinematicTagline">IDEAS. CLARITY. PROGRESS.</div>
+      <div class="cinematicTagline"><img src="/static/ronn_logo.svg" alt=""><b>RONN</b></div>
       <div class="runtimeMeta" aria-hidden="true">
         <span class="routeBadge" id="routeBadge">Auto</span>
         <span class="stageBadge" id="stageBadge">Ready</span>
@@ -66,7 +66,7 @@
         <span class="providerBadge" id="providerBadge">Checking…</span>
         <button class="ghost compactAction" id="exportBtn" title="Export conversation">Export</button>
         <button class="ghost compactAction dangerGhost" id="clearBtn" title="Clear conversation">Clear</button>
-        <span class="profileOrb" title="RONN">R</span>
+        <span class="profileOrb" title="RONN"><img src="/static/ronn_logo.svg" alt="RONN"></span>
       </div>
     </header>
 
@@ -124,10 +124,11 @@
           <div class="toggleGroup">
             <label class="reviewToggle"><input type="checkbox" id="agentToggle" checked><span>Agent mode</span></label>
             <label class="reviewToggle"><input type="checkbox" id="reviewToggle"><span>Force verification pass</span></label>
-            <button class="voiceMini" id="voiceBtn" type="button" title="Voice input when supported by your browser">◉ Voice</button>
+            <button class="voiceMini" id="screenBtn" type="button" title="Share your screen as live chat context">▣ Screen</button>
+            <button class="voiceMini" id="voiceBtn" type="button" title="Talk to RONN">◉ Voice</button>
           </div>
         </div>
-        <div class="hint"><span>Enter sends</span><span>Shift+Enter newline</span><span>Paste or drop images/files</span><span>RONN separates configured, checked, and verified states</span></div>
+        <div class="hint"><span>RONN can make mistakes. Check important information.</span></div>
       </div>
     </section>
 
@@ -234,7 +235,7 @@
       <div class="panelHeader"><div><span class="eyebrow">SETTINGS</span><h1>RONN controls</h1><p>Core intelligence, privacy, sync, and owner access without crowding the main chat.</p></div></div>
       <div class="settingsGrid compactSettings">
         <div class="settingCard"><b>Adaptive intelligence</b><p>RONN chooses speed, depth, specialists, live research, and verification based on the task.</p></div>
-        <div class="settingCard"><b>R14 Capability Core</b><p>Project knowledge graph, restricted code execution, automatic tool planning, user adaptation, multimodal planning, self-correction, and a safe multi-step agent now work with the R13 four-model ensemble.</p></div>
+        <div class="settingCard"><b>R19 Agent OS</b><p>Durable memory hooks, rollback, execution workspaces, simulation, browser research, multi-agent jobs, monitoring, self-created tools, adaptive routing, and model-training data are built into RONN.</p></div>
         <div class="settingCard"><b>Cloud-ready sync</b><p>Projects, conversations, tasks, settings, handoffs, and device events have a shared sync stream.</p></div>
         <div class="settingCard"><b>Privacy boundaries</b><p>Provider keys remain backend-only. OP secrets are never saved as readable text.</p></div>
       </div>
@@ -270,7 +271,7 @@
   <div class="modalCard"><span class="eyebrow">CONFIRM ACTION</span><h2>Clear this conversation?</h2><p>This removes the messages from this local chat. It does not delete other conversations or project memory.</p><div><button class="ghost" id="cancelClearBtn">Cancel</button><button class="dangerButton" id="confirmClearBtn">Clear conversation</button></div></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="/static/app.js?v=RONN-R14"></script>
+<script src="/static/app.js?v=RONN-R19"></script>
 <script>
 /* RONN_CRITICAL_UI_RESCUE: independent bindings for essential controls.
    This intentionally does not depend on the optional diagnostics/project UI. */
