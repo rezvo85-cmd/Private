@@ -7,7 +7,7 @@ const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stop
 const attachmentsEl = $("attachments"), fileInput = $("fileInput"), jumpLatest = $("jumpLatest");
 const routeBadge = $("routeBadge"), stageBadge = $("stageBadge"), profileBadge = $("profileBadge");
 
-const BUILD_EXPECTED = "RONN-COGNITIVE-OS-2026-R20-CONTROLLER";
+const BUILD_EXPECTED = "RONN-COGNITIVE-OS-2026-R21-FINISHLINE";
 const CORE_API = "/api/v1";
 const CLIENT_KEY = "ronnClient";
 const LEGACY_CLIENT_KEY = "novaUltraClient";
