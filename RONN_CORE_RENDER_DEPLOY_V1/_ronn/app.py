@@ -248,7 +248,7 @@ STOPWORDS = {
     "can","could","would","should","what","how","why","when","where","who","be",
 }
 
-app = FastAPI(title="RONN Core + Cognitive OS", version="R13 ENSEMBLE / Core API v1.3")
+app = FastAPI(title="RONN Core + Cognitive OS", version="R14 CAPABILITY / Core API v1.4")
 _CORS = [x.strip() for x in os.getenv("RONN_CORS_ORIGINS", "").split(",") if x.strip()]
 if _CORS:
     app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
@@ -287,7 +287,7 @@ async def public_guard(request: Request, call_next):
         # Private RONN constantly polls /api/status and /api/studio/status.
         # Those background reads must never consume the user's chat quota.
         # Rate limiting is only for public deployments and only for expensive generation calls.
-        expensive = request.url.path in {"/api/chat", "/api/studio/plan", "/api/v1/chat", "/api/v1/chat/complete", "/api/v1/chat/sse", "/api/v1/research"}
+        expensive = request.url.path in {"/api/chat", "/api/studio/plan", "/api/v1/chat", "/api/v1/chat/complete", "/api/v1/chat/sse", "/api/v1/research", "/api/r14/sandbox", "/api/r14/agent/execute"}
         if PUBLIC_MODE and expensive:
             key = client_key(request)
             now = time.time()
@@ -1721,7 +1721,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             else:
                 r = cloud_request(NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL, "nvidia-deep" if nvidia_key_loaded() else "deep", messages, 1200, stream=True)
         else:
-            do_review = (body.review or _r12_preflight.get("quality_floor") == "high" or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator","ensemble-general","ensemble-reasoning","ensemble-code","ensemble-apex"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
+            do_review = (body.review or any(x.get("tool")=="critic" for x in _r14_tools.get("tools",[])) or _r12_preflight.get("quality_floor") == "high" or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator","ensemble-general","ensemble-reasoning","ensemble-code","ensemble-apex"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
             if do_review:
                 task_checkpoint(request_id, "Drafting", "started", "")
                 yield (json.dumps({"stage":"Drafting"})+"\n").encode()
@@ -2687,6 +2687,43 @@ def status(request: Request):
 def health():
     integrity=verify_package_integrity()
     return {"ok":True,"name":"RONN","build":BUILD_ID,"integrity_ok":integrity.get("verified",False),"integrity":integrity}
+
+def _r14_require_owner(request: Request):
+    try:
+        if ecosystem_is_op(request):
+            return owner_id(request)
+    except Exception:
+        pass
+    raise HTTPException(401,"RONN owner session required.")
+
+@app.post("/api/r14/sandbox")
+def r14_sandbox_api(body: R14SandboxBody, request: Request):
+    _r14_require_owner(request)
+    try:
+        return r14_sandbox_execute(body.source)
+    except (R14SandboxError,SyntaxError,ValueError) as exc:
+        raise HTTPException(400,str(exc)[:500])
+
+@app.post("/api/r14/agent/plan")
+def r14_agent_plan_api(body: R14AgentBody, request: Request):
+    _r14_require_owner(request)
+    profile=body.profile if body.profile!="auto" else task_profile(body.task,[])
+    return r14_agent_plan(body.task,profile,False,False,likely_current_fact(body.task))
+
+@app.post("/api/r14/agent/execute")
+def r14_agent_execute_api(body: R14AgentBody, request: Request):
+    _r14_require_owner(request)
+    return r14_agent_execute(body.task)
+
+@app.post("/api/r14/graph/search")
+def r14_graph_search_api(body: R14GraphBody, request: Request):
+    owner=_r14_require_owner(request)
+    return {"project_id":body.project_id,"context":r14_graph_context(owner,body.project_id,body.query,20),"stats":r14_graph_stats(owner)}
+
+@app.get("/api/r14/user-model")
+def r14_user_model_api(request: Request):
+    owner=_r14_require_owner(request)
+    return {"profile":r14_user_profile(owner),"knowledge_graph":r14_graph_stats(owner)}
 
 @app.post("/api/chat")
 def chat(body: ChatBody, request: Request):
