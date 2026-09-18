@@ -206,7 +206,7 @@ def owner_unlock(body: UnlockBody, request: Request, response: Response):
         max_age=30 * 86400,
         httponly=True,
         samesite="lax",
-        secure=request.url.scheme == "https",
+        secure=(request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"),
         path="/",
     )
     return {
@@ -227,7 +227,7 @@ def recovery_unlock(body: RecoveryUnlockBody, request: Request, response: Respon
     if body.device_id:
         register_device(owner, body.device_id, body.device_name, body.platform, "recovery", True)
     token, expires = create_owner_session(owner, request.headers.get("x-ronn-client", ""), body.device_id, 7)
-    response.set_cookie("ronn_op", token, max_age=7 * 86400, httponly=True, samesite="lax", secure=request.url.scheme == "https", path="/")
+    response.set_cookie("ronn_op", token, max_age=7 * 86400, httponly=True, samesite="lax", secure=(request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"), path="/")
     return {"ok": True, "op_active": True, "expires": expires, "session_token": token if body.return_token else None}
 
 
