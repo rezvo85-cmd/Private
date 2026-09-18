@@ -38,7 +38,7 @@ jobs:
         run: npx expo prebuild --platform ios --clean --no-install
       - name: Install CocoaPods
         run: cd ios && pod install
-      - name: Build unsigned iOS Simulator app
+      - name: Build RONN iOS Simulator app
         run: |
           cd ios
           WORKSPACE="$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)"
@@ -46,17 +46,24 @@ jobs:
             echo "No Xcode workspace generated"
             exit 1
           fi
-          SCHEME="$(xcodebuild -list -workspace "$WORKSPACE" | awk '/Schemes:/{getline; gsub(/^[ \t]+|[ \t]+$/, ""); print; exit}')"
-          if [ -z "$SCHEME" ]; then
-            echo "No Xcode scheme found"
+          if ! xcodebuild -list -workspace "$WORKSPACE" | grep -qE '^[[:space:]]*RONN[[:space:]]*$'; then
+            echo "RONN app scheme not found"
+            xcodebuild -list -workspace "$WORKSPACE"
             exit 1
           fi
-          xcodebuild             -workspace "$WORKSPACE"             -scheme "$SCHEME"             -configuration Release             -sdk iphonesimulator             -derivedDataPath build             CODE_SIGNING_ALLOWED=NO
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme RONN \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
       - name: Package simulator app
         run: |
-          APP="$(find ios/build/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' -print -quit)"
+          APP="$(find ios/build/Build/Products -type d -name 'RONN.app' -print -quit)"
           if [ -z "$APP" ]; then
-            echo "No simulator .app produced"
+            echo "RONN.app was not produced"
+            find ios/build/Build/Products -maxdepth 4 -type d -name '*.app' -print || true
             exit 1
           fi
           ditto -c -k --sequesterRsrc --keepParent "$APP" RONN-iOS-Simulator.zip
