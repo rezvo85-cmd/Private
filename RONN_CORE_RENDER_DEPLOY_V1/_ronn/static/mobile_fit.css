@@ -1,0 +1,55 @@
+/* RONN mobile viewport stabilization */
+html{
+  width:100%;
+  max-width:100%;
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+}
+body,.appShell,.main{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+}
+button,a,[role="button"],.navBtn,.chatRow,.capGrid button{
+  touch-action:manipulation;
+}
+@media(max-width:780px){
+  html,body{
+    height:100%;
+    min-height:100%;
+    overflow:hidden;
+  }
+  .appShell,.main{
+    height:100dvh;
+    min-height:0;
+    overflow:hidden;
+  }
+  input,textarea,select{
+    font-size:16px!important;
+  }
+  .sideSearch input,
+  .field input,
+  .field textarea,
+  .memoryAdd input,
+  .agentInline input,
+  .opUnlockRow input,
+  .vaultComposer input,
+  .vaultComposer textarea,
+  .composer textarea,
+  .composerMeta select,
+  .webAuthCard input{
+    font-size:16px!important;
+  }
+  .composer textarea{
+    line-height:1.42!important;
+    transform:none!important;
+    zoom:1!important;
+  }
+  .composerDock,.composerWrap,.composer,.messages,.panelView{
+    max-width:100%!important;
+  }
+  .panelView,.messages{
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+}
