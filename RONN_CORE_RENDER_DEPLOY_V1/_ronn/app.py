@@ -111,7 +111,8 @@ def verify_package_integrity():
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
-    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY")) else set()
+        "_ronn/r20_controller.py",
+    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
@@ -338,7 +339,7 @@ async def public_guard(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), display-capture=(self), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), display-capture=(self), geolocation=(self)"
     if request.url.path.startswith("/api/v1/"):
         response.headers["X-RONN-Core-Version"] = "1.9.0"
     return response
@@ -578,6 +579,7 @@ class ChatBody(BaseModel):
     review: bool = False
     agent_mode: bool = True
     skill_profile: str = "auto"
+    client_location: dict = Field(default_factory=dict)
 
 
 class StudioPlanBody(BaseModel):
@@ -878,9 +880,17 @@ def looks_studio_build(message: str):
     has_mechanic = any(x in low for x in mechanics)
     return has_build and (has_studio or has_mechanic)
 
+def looks_local(message: str):
+    low = re.sub(r"\s+", " ", (message or "").lower()).strip()
+    return any(x in low for x in (
+        "near me","nearby","closest","around me","close to me","in my area",
+        "restaurant near","restaurants near","food near","places to eat near","coffee near",
+        "gas station near","store near","stores near","pharmacy near","hospital near","open near me"
+    ))
+
 def looks_live(message: str):
     low = message.lower()
-    return any(x in low for x in (
+    return looks_local(message) or any(x in low for x in (
         "today","right now","currently","current ","latest","this week","weather","forecast",
         "news","score","standings","schedule","price today","stock price","who won","release date"
     ))
@@ -1860,9 +1870,26 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "sources": [], "web_research": {}, "errors": []
     }
     _web_research = {}
+    _tool_message = body.message
+    if looks_local(body.message) and isinstance(body.client_location, dict):
+        try:
+            _lat = float(body.client_location.get("latitude"))
+            _lon = float(body.client_location.get("longitude"))
+            _acc = float(body.client_location.get("accuracy") or 0)
+            if -90 <= _lat <= 90 and -180 <= _lon <= 180:
+                _loc_note = (
+                    f"USER-AUTHORIZED DEVICE LOCATION for this local-search request: "
+                    f"latitude {_lat:.5f}, longitude {_lon:.5f}"
+                    + (f", accuracy about {_acc:.0f} meters." if _acc > 0 else ".")
+                    + " Use this only to resolve the user's nearby/local request."
+                )
+                _tool_message = (body.message + "\n\n" + _loc_note).strip()
+                body.project_context = ((body.project_context or "") + "\n\n" + _loc_note).strip()
+        except (TypeError, ValueError):
+            pass
     try:
         _tool_run = r20_tool_execute(
-            body.message,
+            _tool_message,
             depth=str(_r20.get("depth") or "smart"),
             needs_live=bool(_r20.get("needs_live")),
             has_files=bool(body.files),
