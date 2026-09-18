@@ -1,7 +1,9 @@
 /* =========================================================
-   RONN MOBILE UI
-   Single authoritative phone layout. Loaded after style.css.
+   RONN R20 MOBILE
+   Native-style mobile shell: fixed header, one scroll owner,
+   composer in normal layout flow. Loaded after style.css.
    ========================================================= */
+
 html{
   width:100%;
   max-width:100%;
@@ -9,30 +11,36 @@ html{
   text-size-adjust:100%;
 }
 body,.appShell,.main{min-width:0}
+.mobileNewChatBtn{display:none}
 button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulation}
 
 @media(max-width:780px){
   :root{--sidebar:0px}
 
-  html,body{
+  html{
     width:100%;
-    max-width:100%;
     height:100%;
-    min-height:100%;
-    margin:0;
+    max-width:100%;
     overflow:hidden;
-    overscroll-behavior:none;
+    background:#212121;
   }
-
   body.ronn19{
+    position:fixed!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    min-height:0!important;
+    margin:0!important;
+    overflow:hidden!important;
+    overscroll-behavior:none!important;
     background:#212121!important;
   }
 
   .ronn19 .appShell{
+    position:fixed!important;
+    inset:0!important;
     display:block!important;
-    position:relative!important;
     width:100%!important;
-    max-width:100%!important;
     height:var(--ronn-vh,100dvh)!important;
     min-height:0!important;
     overflow:hidden!important;
@@ -40,42 +48,40 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
 
   .ronn19 .main{
+    position:absolute!important;
+    inset:0!important;
     display:grid!important;
-    grid-template-rows:calc(50px + env(safe-area-inset-top)) minmax(0,1fr)!important;
-    position:relative!important;
+    grid-template-rows:calc(48px + env(safe-area-inset-top)) minmax(0,1fr)!important;
     width:100%!important;
-    max-width:100%!important;
-    height:var(--ronn-vh,100dvh)!important;
+    height:100%!important;
     min-width:0!important;
     min-height:0!important;
     overflow:hidden!important;
     background:#212121!important;
   }
 
-  /* ---------- header ---------- */
+  /* ---------- native-style header ---------- */
   .ronn19 .topbar.cinematicTopbar{
     position:relative!important;
-    z-index:40!important;
+    z-index:80!important;
     display:grid!important;
-    grid-template-columns:40px minmax(0,1fr) 40px!important;
+    grid-template-columns:42px minmax(0,1fr) 42px!important;
     align-items:end!important;
     width:100%!important;
-    max-width:100%!important;
-    height:calc(50px + env(safe-area-inset-top))!important;
+    height:calc(48px + env(safe-area-inset-top))!important;
     min-height:0!important;
-    padding:env(safe-area-inset-top) 10px 0!important;
-    gap:4px!important;
+    padding:env(safe-area-inset-top) 8px 0!important;
+    gap:2px!important;
     border:0!important;
     border-bottom:1px solid rgba(255,255,255,.055)!important;
-    background:rgba(33,33,33,.97)!important;
-    -webkit-backdrop-filter:blur(18px);
-    backdrop-filter:blur(18px);
+    background:#212121!important;
+    box-shadow:none!important;
     overflow:hidden!important;
   }
 
-  .ronn19 .mobileMenuBtn{
+  .ronn19 .mobileMenuBtn,
+  .ronn19 .mobileNewChatBtn{
     display:grid!important;
-    grid-column:1!important;
     place-items:center!important;
     align-self:center!important;
     width:36px!important;
@@ -88,15 +94,23 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     border-radius:10px!important;
     background:transparent!important;
     color:#ececec!important;
-    font-size:20px!important;
     line-height:1!important;
   }
+  .ronn19 .mobileMenuBtn{
+    grid-column:1!important;
+    font-size:20px!important;
+  }
+  .ronn19 .mobileNewChatBtn{
+    grid-column:3!important;
+    font-size:25px!important;
+    font-weight:300!important;
+  }
+  .ronn19 .mobileMenuBtn:active,
+  .ronn19 .mobileNewChatBtn:active{background:#2b2b2b!important}
 
   .ronn19 .cinematicTagline{
     grid-column:2!important;
     position:static!important;
-    left:auto!important;
-    transform:none!important;
     align-self:center!important;
     display:flex!important;
     align-items:center!important;
@@ -105,17 +119,13 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     min-width:0!important;
     margin:0!important;
     padding:0!important;
-    gap:0!important;
+    transform:none!important;
     overflow:hidden!important;
     white-space:nowrap!important;
     font-size:0!important;
-    letter-spacing:0!important;
   }
   .ronn19 .cinematicTagline:before,
-  .ronn19 .cinematicTagline:after{
-    content:none!important;
-    display:none!important;
-  }
+  .ronn19 .cinematicTagline:after{content:none!important;display:none!important}
   .ronn19 .cinematicTagline img{display:none!important}
   .ronn19 .cinematicTagline b{
     display:block!important;
@@ -125,46 +135,10 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     font-weight:600!important;
     letter-spacing:0!important;
   }
-
   .ronn19 .runtimeMeta,
-  .ronn19 .projectBadge,
-  .ronn19 .providerBadge,
-  .ronn19 .compactAction{display:none!important}
+  .ronn19 .cinematicTopButtons{display:none!important}
 
-  .ronn19 .cinematicTopButtons{
-    grid-column:3!important;
-    align-self:center!important;
-    display:flex!important;
-    align-items:center!important;
-    justify-content:flex-end!important;
-    width:40px!important;
-    min-width:40px!important;
-    margin:0!important;
-    padding:0!important;
-    gap:0!important;
-  }
-  .ronn19 .cinematicTopButtons>*{display:none!important}
-  .ronn19 .cinematicTopButtons .profileOrb{
-    display:grid!important;
-    place-items:center!important;
-    width:30px!important;
-    height:30px!important;
-    min-width:30px!important;
-    min-height:30px!important;
-    margin:0!important;
-    padding:0!important;
-    border:0!important;
-    border-radius:50%!important;
-    overflow:hidden!important;
-    background:transparent!important;
-  }
-  .ronn19 .profileOrb img{
-    display:block!important;
-    width:30px!important;
-    height:30px!important;
-  }
-
-  /* ---------- sidebar drawer ---------- */
+  /* ---------- drawer ---------- */
   .ronn19 .sidebar{
     display:flex!important;
     position:fixed!important;
@@ -184,10 +158,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     background:#171717!important;
     box-shadow:22px 0 60px rgba(0,0,0,.42)!important;
   }
-  body.mobileNavOpen .ronn19 .sidebar,
-  body.ronn19.mobileNavOpen .sidebar{
-    transform:translate3d(0,0,0)!important;
-  }
+  body.ronn19.mobileNavOpen .sidebar{transform:translate3d(0,0,0)!important}
   .ronn19 .sidebarScrim{
     display:block!important;
     position:fixed!important;
@@ -199,28 +170,12 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     background:rgba(0,0,0,.55)!important;
     transition:opacity .18s ease!important;
   }
-  body.mobileNavOpen .ronn19 .sidebarScrim,
-  body.ronn19.mobileNavOpen .sidebarScrim{
-    opacity:1!important;
-    pointer-events:auto!important;
-  }
+  body.ronn19.mobileNavOpen .sidebarScrim{opacity:1!important;pointer-events:auto!important}
   .ronn19 .sidebarCollapse{display:none!important}
-  .ronn19 .brandRow{
-    flex:0 0 54px!important;
-    height:54px!important;
-    min-height:54px!important;
-    padding:8px 7px!important;
-  }
-  .ronn19 .brandMark,
-  .ronn19 .brandMark img{
-    width:34px!important;
-    height:34px!important;
-  }
+  .ronn19 .brandRow{flex:0 0 54px!important;height:54px!important;min-height:54px!important;padding:8px 7px!important}
+  .ronn19 .brandMark,.ronn19 .brandMark img{width:34px!important;height:34px!important}
   .ronn19 .brandCopy b{font-size:14px!important}
-  .ronn19 .newChat{
-    min-height:42px!important;
-    margin:8px 0!important;
-  }
+  .ronn19 .newChat{min-height:42px!important;margin:8px 0!important}
   .ronn19 .sideSearch{margin:0 0 8px!important}
   .ronn19 .sideSearch input{height:38px!important;font-size:16px!important}
   .ronn19 .chatList{
@@ -230,38 +185,30 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     overflow-y:auto!important;
     -webkit-overflow-scrolling:touch;
   }
-  .ronn19 .chatRow{
-    min-height:40px!important;
-    padding:9px!important;
-  }
+  .ronn19 .chatRow{min-height:40px!important;padding:9px!important}
   .ronn19 .chatRow span{font-size:12px!important}
-  .ronn19 .sidebarBottom{
-    flex:0 0 auto!important;
-    margin-top:auto!important;
-    padding:8px 0 0!important;
-  }
-  .ronn19 .cinematicNav .navBtn{
-    min-height:42px!important;
-    padding:9px!important;
-  }
+  .ronn19 .sidebarBottom{flex:0 0 auto!important;margin-top:auto!important;padding:8px 0 0!important}
+  .ronn19 .cinematicNav .navBtn{min-height:42px!important;padding:9px!important}
 
-  /* ---------- chat ---------- */
+  /* ---------- chat: ONE scroll owner ---------- */
   .ronn19 #chatView.active{
     position:relative!important;
-    display:block!important;
+    display:flex!important;
+    flex-direction:column!important;
     width:100%!important;
+    height:100%!important;
     min-width:0!important;
     min-height:0!important;
-    height:100%!important;
     overflow:hidden!important;
     background:#212121!important;
   }
 
   .ronn19 .chatViewport{
-    position:absolute!important;
-    inset:0!important;
+    position:relative!important;
+    inset:auto!important;
+    flex:1 1 auto!important;
     width:100%!important;
-    height:100%!important;
+    height:auto!important;
     min-width:0!important;
     min-height:0!important;
     overflow:hidden!important;
@@ -269,15 +216,17 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
 
   .ronn19 .messages{
+    display:block!important;
     width:100%!important;
     height:100%!important;
     max-width:none!important;
     margin:0!important;
-    padding:16px 14px calc(112px + env(safe-area-inset-bottom))!important;
+    padding:18px 14px 22px!important;
     overflow-y:auto!important;
     overflow-x:hidden!important;
-    overscroll-behavior:contain;
+    overscroll-behavior-y:contain!important;
     -webkit-overflow-scrolling:touch;
+    scroll-padding-bottom:18px!important;
     scrollbar-width:none!important;
   }
   .ronn19 .messages::-webkit-scrollbar{display:none!important}
@@ -285,7 +234,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .message{
     width:100%!important;
     max-width:760px!important;
-    margin:0 auto 18px!important;
+    margin:0 auto 20px!important;
     padding:0!important;
     gap:0!important;
   }
@@ -303,89 +252,89 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .answer{
     width:100%!important;
     max-width:100%!important;
-    color:#f0f1f4!important;
-    font-size:15px!important;
-    line-height:1.6!important;
+    color:#f1f1f1!important;
+    font-size:15.5px!important;
+    line-height:1.62!important;
     overflow-wrap:anywhere;
   }
-  .ronn19 .answer p{margin:0 0 12px!important}
+  .ronn19 .answer p{margin:0 0 13px!important}
   .ronn19 .userBubble{
     width:auto!important;
-    max-width:88%!important;
+    max-width:84%!important;
     padding:10px 14px!important;
-    border-radius:19px!important;
+    border:0!important;
+    border-radius:20px!important;
+    background:#303030!important;
+    color:#f2f2f2!important;
     font-size:15px!important;
     line-height:1.45!important;
+    box-shadow:none!important;
     overflow-wrap:anywhere;
   }
   .ronn19 .msgTools{
     margin-top:7px!important;
-    opacity:.45!important;
+    opacity:.46!important;
     overflow-x:auto!important;
     white-space:nowrap!important;
     scrollbar-width:none!important;
   }
   .ronn19 .msgTools::-webkit-scrollbar{display:none!important}
 
-  /* ---------- welcome ---------- */
+  /* ---------- empty chat ---------- */
   .ronn19 .welcome{
     width:100%!important;
-    max-width:620px!important;
+    max-width:580px!important;
     min-height:0!important;
     margin:0 auto!important;
-    padding:7vh 8px 96px!important;
-    text-align:left!important;
+    padding:10vh 16px 28px!important;
+    text-align:center!important;
   }
-  .ronn19 .welcomeOrb{
-    width:44px!important;
-    height:44px!important;
-    margin:0 0 16px!important;
-  }
-  .ronn19 .welcomeOrb:before{
-    width:44px!important;
-    height:44px!important;
-  }
+  .ronn19 .welcomeOrb{width:42px!important;height:42px!important;margin:0 auto 15px!important}
+  .ronn19 .welcomeOrb:before{width:42px!important;height:42px!important}
   .ronn19 .welcome h1{
-    margin:0 0 9px!important;
-    font-size:30px!important;
-    line-height:1.1!important;
+    margin:0 0 8px!important;
+    font-size:28px!important;
+    line-height:1.12!important;
     letter-spacing:-.035em!important;
   }
   .ronn19 .welcome p{
-    max-width:500px!important;
-    margin:0 0 22px!important;
+    max-width:430px!important;
+    margin:0 auto 22px!important;
+    color:#b9b9b9!important;
     font-size:14px!important;
     line-height:1.5!important;
   }
   .ronn19 .capGrid{
-    grid-template-columns:1fr!important;
+    grid-template-columns:1fr 1fr!important;
     gap:8px!important;
-    max-width:100%!important;
+    width:100%!important;
+    max-width:520px!important;
+    margin:0 auto!important;
   }
   .ronn19 .capGrid button{
-    min-height:66px!important;
-    padding:12px 14px!important;
-    border-radius:15px!important;
+    min-height:72px!important;
+    padding:12px!important;
+    border-radius:16px!important;
+    text-align:left!important;
   }
   .ronn19 .capGrid button:nth-child(n+3){display:none!important}
   .ronn19 .capGrid b{font-size:13px!important}
   .ronn19 .capGrid span{font-size:11px!important}
 
-  /* ---------- composer ---------- */
+  /* ---------- composer: normal flow, no overlap ---------- */
   .ronn19 .composerDock{
-    position:absolute!important;
-    left:0!important;
-    right:0!important;
-    bottom:0!important;
-    z-index:50!important;
+    position:relative!important;
+    inset:auto!important;
+    flex:0 0 auto!important;
+    z-index:60!important;
     width:100%!important;
     max-width:100%!important;
-    padding:15px 9px calc(9px + env(safe-area-inset-bottom))!important;
+    padding:7px 8px max(8px,env(safe-area-inset-bottom))!important;
     border:0!important;
-    background:linear-gradient(180deg,rgba(33,33,33,0),#212121 25%,#212121 100%)!important;
-    pointer-events:none!important;
+    border-top:1px solid rgba(255,255,255,.035)!important;
+    background:#212121!important;
+    pointer-events:auto!important;
   }
-  .ronn19 .composerDock>*{pointer-events:auto!important}
   .ronn19 .presetRow,
   .ronn19 .composerMeta,
   .ronn19 .hint{display:none!important}
@@ -409,35 +358,37 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     flex-wrap:nowrap!important;
     align-items:flex-end!important;
     width:100%!important;
-    max-width:100%!important;
-    min-height:52px!important;
-    padding:6px 7px!important;
-    gap:5px!important;
+    min-height:50px!important;
+    padding:6px!important;
+    gap:4px!important;
     overflow:hidden!important;
-    border-radius:26px!important;
     border:1px solid #454545!important;
+    border-radius:25px!important;
     background:#2f2f2f!important;
-    box-shadow:0 2px 14px rgba(0,0,0,.18)!important;
+    box-shadow:none!important;
   }
   .ronn19 .composer textarea{
     flex:1 1 auto!important;
     width:auto!important;
     min-width:0!important;
-    min-height:40px!important;
-    max-height:132px!important;
+    min-height:38px!important;
+    max-height:120px!important;
     margin:0!important;
-    padding:10px 4px 7px!important;
+    padding:9px 5px 7px!important;
     border:0!important;
     outline:0!important;
     background:transparent!important;
     color:#f4f4f4!important;
     font-size:16px!important;
-    line-height:1.42!important;
+    line-height:1.4!important;
     resize:none!important;
     transform:none!important;
     zoom:1!important;
-    -webkit-appearance:none;
+    -webkit-appearance:none!important;
+    appearance:none!important;
   }
+  .ronn19 .composer textarea::placeholder{color:#a9a9a9!important}
+
   .ronn19 .composer .attach,
   .ronn19 .composer .composerTool,
   .ronn19 .composer .send,
@@ -451,36 +402,38 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     padding:0!important;
     align-self:flex-end!important;
     border-radius:50%!important;
+    box-shadow:none!important;
   }
   .ronn19 .composer .attach{font-size:22px!important}
+  .ronn19 #screenBtn{display:none!important}
   .ronn19 .composer .composerTool{font-size:15px!important}
   .ronn19 .composer .send,
-  .ronn19 .composer .stop{
-    order:20!important;
-    font-size:17px!important;
-  }
+  .ronn19 .composer .stop{order:20!important;font-size:17px!important}
 
   .ronn19 .plusMenu{
     position:absolute!important;
     left:0!important;
     right:auto!important;
-    bottom:62px!important;
+    bottom:calc(100% + 8px)!important;
     width:min(310px,calc(100vw - 20px))!important;
     max-height:min(58vh,430px)!important;
     overflow-y:auto!important;
     border-radius:18px!important;
   }
+
   .ronn19 .activityDock{
+    position:absolute!important;
     left:10px!important;
     right:10px!important;
-    bottom:82px!important;
+    bottom:72px!important;
     width:auto!important;
     max-width:none!important;
     transform:none!important;
+    z-index:55!important;
   }
-  .ronn19 .jumpLatest{bottom:82px!important}
+  .ronn19 .jumpLatest{bottom:12px!important}
 
-  /* ---------- panels: Library / Tools / Diagnostics / Settings ---------- */
+  /* ---------- panels ---------- */
   .ronn19 .panelView{
     width:100%!important;
     max-width:100%!important;
@@ -490,11 +443,10 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     padding:18px 14px calc(34px + env(safe-area-inset-bottom))!important;
     overflow-y:auto!important;
     overflow-x:hidden!important;
-    overscroll-behavior:contain;
+    overscroll-behavior:contain!important;
     -webkit-overflow-scrolling:touch;
     background:#212121!important;
   }
-
   .ronn19 .sectionTabs{
     position:sticky!important;
     top:0!important;
@@ -508,23 +460,9 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     scrollbar-width:none!important;
   }
   .ronn19 .sectionTabs::-webkit-scrollbar{display:none!important}
-
-  .ronn19 .panelHeader{
-    display:block!important;
-    width:100%!important;
-    max-width:100%!important;
-    margin:0 0 18px!important;
-  }
-  .ronn19 .panelHeader h1{
-    margin:4px 0 6px!important;
-    font-size:28px!important;
-    line-height:1.1!important;
-  }
-  .ronn19 .panelHeader p{
-    max-width:100%!important;
-    font-size:13px!important;
-    line-height:1.5!important;
-  }
+  .ronn19 .panelHeader{display:block!important;width:100%!important;max-width:100%!important;margin:0 0 18px!important}
+  .ronn19 .panelHeader h1{margin:4px 0 6px!important;font-size:28px!important;line-height:1.1!important}
+  .ronn19 .panelHeader p{max-width:100%!important;font-size:13px!important;line-height:1.5!important}
   .ronn19 .panelHeader .primarySmall{margin-top:12px!important}
 
   .ronn19 .projectGrid,
@@ -533,11 +471,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .brainGrid,
   .ronn19 .diagGrid,
   .ronn19 .agentOpsGrid,
-  .ronn19 .r19CapabilityMatrix{
-    grid-template-columns:1fr!important;
-    width:100%!important;
-    max-width:100%!important;
-  }
+  .ronn19 .r19CapabilityMatrix{grid-template-columns:1fr!important;width:100%!important;max-width:100%!important}
 
   .ronn19 .projectCard,
   .ronn19 .settingCard,
@@ -545,17 +479,9 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .diagCard,
   .ronn19 .agentOpsCard,
   .ronn19 .memoryItem,
-  .ronn19 .r19CapRow{
-    width:100%!important;
-    min-width:0!important;
-  }
+  .ronn19 .r19CapRow{width:100%!important;min-width:0!important}
 
-  .ronn19 .projectEditor{
-    width:100%!important;
-    max-width:100%!important;
-    margin:0!important;
-    padding:14px!important;
-  }
+  .ronn19 .projectEditor{width:100%!important;max-width:100%!important;margin:0!important;padding:14px!important}
   .ronn19 .field input,
   .ronn19 .field textarea,
   .ronn19 .memoryAdd input,
@@ -564,44 +490,16 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   .ronn19 .vaultComposer input,
   .ronn19 .vaultComposer textarea,
   .ronn19 .webAuthCard input,
-  .ronn19 select{
-    font-size:16px!important;
-  }
-  .ronn19 .memoryAdd,
-  .ronn19 .agentInline,
-  .ronn19 .opUnlockRow{
-    grid-template-columns:minmax(0,1fr) auto!important;
-    width:100%!important;
-  }
+  .ronn19 select{font-size:16px!important}
 
-  .ronn19 .brainHero{
-    display:block!important;
-    width:100%!important;
-    padding:18px!important;
-  }
+  .ronn19 .memoryAdd,.ronn19 .agentInline,.ronn19 .opUnlockRow{grid-template-columns:minmax(0,1fr) auto!important;width:100%!important}
+  .ronn19 .brainHero{display:block!important;width:100%!important;padding:18px!important}
   .ronn19 .brainHero h1{font-size:27px!important}
   .ronn19 .brainHero p{font-size:12px!important;line-height:1.55!important}
-  .ronn19 .coreOrb{
-    width:68px!important;
-    height:68px!important;
-    margin-top:18px!important;
-  }
-  .ronn19 .brainStats{
-    grid-template-columns:repeat(2,minmax(0,1fr))!important;
-    width:100%!important;
-  }
-
-  .ronn19 .diagnosticActions,
-  .ronn19 .ownerButtons{
-    display:flex!important;
-    flex-wrap:wrap!important;
-    gap:8px!important;
-  }
-  .ronn19 .diagnosticActions button,
-  .ronn19 .ownerButtons button{
-    min-height:38px!important;
-  }
-
+  .ronn19 .coreOrb{width:68px!important;height:68px!important;margin-top:18px!important}
+  .ronn19 .brainStats{grid-template-columns:repeat(2,minmax(0,1fr))!important;width:100%!important}
+  .ronn19 .diagnosticActions,.ronn19 .ownerButtons{display:flex!important;flex-wrap:wrap!important;gap:8px!important}
+  .ronn19 .diagnosticActions button,.ronn19 .ownerButtons button{min-height:38px!important}
   .ronn19 .ownerAccessCard,
   .ronn19 .ecosystemStatusCard,
   .ronn19 .r19CapabilityCard,
@@ -613,29 +511,18 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     padding:14px!important;
     border-radius:16px!important;
   }
-  .ronn19 .ownerAccessHead,
-  .ronn19 .r19CapabilityHead{
-    display:block!important;
-  }
-  .ronn19 .opState{
-    display:inline-block!important;
-    margin-top:10px!important;
-  }
-  .ronn19 .ownerSummary{
-    grid-template-columns:repeat(2,minmax(0,1fr))!important;
-  }
+  .ronn19 .ownerAccessHead,.ronn19 .r19CapabilityHead{display:block!important}
+  .ronn19 .opState{display:inline-block!important;margin-top:10px!important}
+  .ronn19 .ownerSummary{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   .ronn19 .opUnlockRow{grid-template-columns:1fr!important}
-  .ronn19 .ecosystemChips{
-    justify-content:flex-start!important;
-    margin-top:12px!important;
-  }
+  .ronn19 .ecosystemChips{justify-content:flex-start!important;margin-top:12px!important}
   .ronn19 .r19CapabilityHead .ghost{margin-top:12px!important}
 
-  /* ---------- mobile notices ---------- */
+  /* ---------- notices / overlays ---------- */
   .ronn19 .toast{
     left:12px!important;
     right:12px!important;
-    top:calc(env(safe-area-inset-top) + 58px)!important;
+    top:calc(env(safe-area-inset-top) + 56px)!important;
     bottom:auto!important;
     z-index:1300!important;
     width:auto!important;
@@ -647,42 +534,22 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     text-align:center!important;
     transform:translateY(-8px)!important;
   }
-  .ronn19 .toast.show{
-    opacity:1!important;
-    transform:none!important;
-  }
-
-  /* ---------- auth / modal / overlays ---------- */
+  .ronn19 .toast.show{opacity:1!important;transform:none!important}
   .ronn19 .webAuthGate{
     padding:max(18px,env(safe-area-inset-top)) 16px max(18px,env(safe-area-inset-bottom))!important;
     overflow-y:auto!important;
   }
-  .ronn19 .webAuthCard{
-    width:min(100%,420px)!important;
-    padding:22px 18px!important;
-    border-radius:22px!important;
-  }
+  .ronn19 .webAuthCard{width:min(100%,420px)!important;padding:22px 18px!important;border-radius:22px!important}
   .ronn19 .webAuthCard h1{font-size:28px!important}
-
-  .ronn19 .modalBackdrop{
-    z-index:1200!important;
-    padding:16px!important;
-  }
-  .ronn19 .modalCard{
-    width:min(100%,420px)!important;
-    max-width:100%!important;
-    padding:18px!important;
-    border-radius:18px!important;
-  }
-  .ronn19 .dropOverlay{
-    padding:18px!important;
-  }
+  .ronn19 .modalBackdrop{z-index:1200!important;padding:16px!important}
+  .ronn19 .modalCard{width:min(100%,420px)!important;max-width:100%!important;padding:18px!important;border-radius:18px!important}
+  .ronn19 .dropOverlay{padding:18px!important}
 }
 
 @media(max-width:390px){
   .ronn19 .messages{padding-left:11px!important;padding-right:11px!important}
   .ronn19 .composerDock{padding-left:7px!important;padding-right:7px!important}
-  .ronn19 .composer{gap:4px!important}
+  .ronn19 .composer{gap:3px!important}
   .ronn19 .composer .attach,
   .ronn19 .composer .composerTool,
   .ronn19 .composer .send,
@@ -693,14 +560,16 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     min-width:34px!important;
     min-height:34px!important;
   }
-  .ronn19 .welcome h1{font-size:28px!important}
+  .ronn19 .welcome{padding-top:8vh!important}
+  .ronn19 .welcome h1{font-size:27px!important}
+  .ronn19 .capGrid{grid-template-columns:1fr!important;max-width:360px!important}
+  .ronn19 .capGrid button{min-height:58px!important}
   .ronn19 .brainStats{grid-template-columns:1fr!important}
   .ronn19 .ownerSummary{grid-template-columns:1fr 1fr!important}
 }
 
 @media(max-width:780px) and (max-height:700px){
   .ronn19 .welcome{padding-top:4vh!important}
-  .ronn19 .welcomeOrb{margin-bottom:12px!important}
-  .ronn19 .capGrid button{min-height:58px!important}
+  .ronn19 .welcomeOrb{margin-bottom:10px!important}
   .ronn19 .panelView{padding-top:14px!important}
 }
