@@ -7,7 +7,7 @@
     "RONN_R10_30_SYSTEMS_COVERAGE.txt": "ed4c83f64668e413d61a69cf53cb48cafd36725a60ac2d68d05823cf8b6b1238",
     "RONN_R10_ECOSYSTEM_API.txt": "3f98d196ea6660b35add4bf44f4cf6dfe11ff40b52f41e22b947a7e256a2525f",
     "START_RONN.bat": "9339bad01cd9980d8b5c4575b8f47d40988a3d1f98b5a2bf1d9deed0195fd2d1",
-    "_ronn/app.py": "2bbbb60694b620fae90d9033ae33d4b78583fafaece8d33751f87c9a2454a7b8",
+    "_ronn/app.py": "4c8d5ad0f58f95a02b5b247f62ff2eb35489691d6af59a0ccae2a5f4129137fd",
     "_ronn/artifact_engine.py": "3ce9571196fc9a8da7d7991987178dc02bcc4340b68ff2beb0fca69f2ec5a3c3",
     "_ronn/brevity_engine.py": "f822cef343f80b8893b80c723c1cf167bb85c56405259151c5b5652d0daa0651",
     "_ronn/cognition_engine.py": "0bd6cc28e9dae475a90e6dd97bf05d14706911b113f19e697a4a0db6b07df01c",
