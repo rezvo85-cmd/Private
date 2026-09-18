@@ -54,10 +54,24 @@ def _public_host(url):
     return True
 
 def fetch(url,timeout=12):
-    url=normalize_url(url); _public_host(url)
+    url=normalize_url(url)
     started=time.time()
-    r=requests.get(url,headers={"User-Agent":UA,"Accept":"text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2"},
-                   timeout=max(3,min(int(timeout),20)),allow_redirects=True,stream=True)
+    r=None
+    for _hop in range(6):
+        _public_host(url)
+        r=requests.get(url,headers={"User-Agent":UA,"Accept":"text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2"},
+                       timeout=max(3,min(int(timeout),20)),allow_redirects=False,stream=True)
+        if r.status_code in {301,302,303,307,308} and r.headers.get("location"):
+            nxt=urljoin(url,r.headers["location"])
+            r.close()
+            url=normalize_url(nxt)
+            continue
+        break
+    if r is None:
+        raise ValueError("Browser request could not start.")
+    if r.status_code in {301,302,303,307,308}:
+        r.close()
+        raise ValueError("Too many redirects.")
     final=normalize_url(r.url); _public_host(final)
     chunks=[]; total=0
     for chunk in r.iter_content(65536):
@@ -84,9 +98,11 @@ def fetch(url,timeout=12):
     else:
         body=text; links=[]; title=""
     body=re.sub(r"\n{3,}","\n\n",body)[:MAX_TEXT]
-    return {"ok":bool(r.ok),"status_code":r.status_code,"url":final,"title":title,
-            "text":body,"links":links,"bytes":len(raw),"content_type":ctype,
-            "elapsed_ms":round((time.time()-started)*1000,2)}
+    out={"ok":bool(r.ok),"status_code":r.status_code,"url":final,"title":title,
+         "text":body,"links":links,"bytes":len(raw),"content_type":ctype,
+         "elapsed_ms":round((time.time()-started)*1000,2)}
+    r.close()
+    return out
 
 def follow(page,index):
     links=page.get("links") or []
