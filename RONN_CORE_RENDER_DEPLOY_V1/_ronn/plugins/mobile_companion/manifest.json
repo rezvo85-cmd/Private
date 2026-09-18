@@ -1,0 +1,9 @@
+{
+  "id": "mobile_companion",
+  "name": "Mobile Companion",
+  "version": "1.0.0",
+  "description": "Declares handoff, camera, screenshot, clipboard and notification capabilities.",
+  "entrypoint": null,
+  "permissions": [],
+  "enabled_by_default": true
+}

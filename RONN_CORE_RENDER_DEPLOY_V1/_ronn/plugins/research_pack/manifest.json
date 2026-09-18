@@ -1,0 +1,9 @@
+{
+  "id": "research_pack",
+  "name": "Research Pack",
+  "version": "1.0.0",
+  "description": "Adds research workflow metadata and source-freshness hooks.",
+  "entrypoint": null,
+  "permissions": [],
+  "enabled_by_default": true
+}

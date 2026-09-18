@@ -1,0 +1,8 @@
+{
+  "owner_display_name": "Emraan",
+  "algorithm": "pbkdf2_sha256",
+  "iterations": 480000,
+  "salt_b64": "KOl8Pb10CBWVfScGGtrnOw==",
+  "hash_b64": "EzeJ708Q_lWl0T6UEuyRau5qmRyRN0N-M0xsDPTgaD8=",
+  "note": "Contains only a salted password verifier, never the owner password."
+}

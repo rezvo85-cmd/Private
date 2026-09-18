@@ -1,0 +1,9 @@
+{
+  "id": "project_guard",
+  "name": "Project Guard",
+  "version": "1.0.0",
+  "description": "Checks risky project changes against snapshots and known constraints.",
+  "entrypoint": null,
+  "permissions": [],
+  "enabled_by_default": true
+}

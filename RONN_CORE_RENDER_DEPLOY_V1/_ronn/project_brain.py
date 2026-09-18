@@ -1,0 +1,160 @@
+import sqlite3, json, time, hashlib, re
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+DB = BASE / "data" / "project_brain.sqlite3"
+DB.parent.mkdir(parents=True, exist_ok=True)
+
+def _db():
+    c = sqlite3.connect(DB)
+    c.row_factory = sqlite3.Row
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS projects(
+      project_id TEXT PRIMARY KEY, name TEXT, summary TEXT DEFAULT '',
+      created REAL, updated REAL
+    );
+    CREATE TABLE IF NOT EXISTS facts(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, kind TEXT,
+      key TEXT, value TEXT, confidence REAL DEFAULT .8, source TEXT DEFAULT '',
+      created REAL, updated REAL,
+      UNIQUE(project_id,kind,key)
+    );
+    CREATE TABLE IF NOT EXISTS relations(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT,
+      src TEXT, relation TEXT, dst TEXT, evidence TEXT DEFAULT '',
+      updated REAL, UNIQUE(project_id,src,relation,dst)
+    );
+    CREATE TABLE IF NOT EXISTS attempts(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, task_id TEXT,
+      stage TEXT, status TEXT, detail TEXT, created REAL
+    );
+    CREATE TABLE IF NOT EXISTS model_scores(
+      model TEXT, domain TEXT, score REAL, latency REAL DEFAULT 0,
+      samples INTEGER DEFAULT 0, updated REAL,
+      PRIMARY KEY(model,domain)
+    );
+    CREATE TABLE IF NOT EXISTS fact_history(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, kind TEXT, key TEXT,
+      old_value TEXT, new_value TEXT, source TEXT DEFAULT '', changed REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fact_history_project ON fact_history(project_id,changed DESC);
+    """)
+    return c
+
+def project_id(name="default"):
+    return hashlib.sha256((name or "default").encode()).hexdigest()[:16]
+
+def ensure_project(name="default"):
+    pid=project_id(name); now=time.time()
+    with _db() as c:
+        c.execute("INSERT OR IGNORE INTO projects(project_id,name,created,updated) VALUES(?,?,?,?)",(pid,name,now,now))
+        c.execute("UPDATE projects SET updated=? WHERE project_id=?",(now,pid))
+    return pid
+
+def remember(pid, kind, key, value, confidence=.8, source="ronn"):
+    now=time.time(); value=str(value)[:12000]
+    with _db() as c:
+        old=c.execute("SELECT value,source FROM facts WHERE project_id=? AND kind=? AND key=?",(pid,kind,key)).fetchone()
+        if old and old["value"] != value:
+            c.execute("INSERT INTO fact_history(project_id,kind,key,old_value,new_value,source,changed) VALUES(?,?,?,?,?,?,?)",
+                      (pid,kind,key,old["value"][:12000],value,(source or "")[:200],now))
+        c.execute("""INSERT INTO facts(project_id,kind,key,value,confidence,source,created,updated)
+        VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(project_id,kind,key) DO UPDATE SET
+        value=excluded.value,confidence=excluded.confidence,source=excluded.source,updated=excluded.updated""",
+        (pid,kind,key,value,float(confidence),source,now,now))
+
+def relate(pid, src, relation, dst, evidence=""):
+    with _db() as c:
+        c.execute("""INSERT INTO relations(project_id,src,relation,dst,evidence,updated)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,src,relation,dst) DO UPDATE SET evidence=excluded.evidence,updated=excluded.updated""",
+        (pid,src[:300],relation[:100],dst[:300],evidence[:2000],time.time()))
+
+def record_attempt(pid, task_id, stage, status, detail=""):
+    with _db() as c:
+        c.execute("INSERT INTO attempts(project_id,task_id,stage,status,detail,created) VALUES(?,?,?,?,?,?)",
+                  (pid,task_id,stage,status,detail[:8000],time.time()))
+
+def retrieve(pid, query="", limit=24):
+    q=(query or "").lower()
+    words={w for w in re.findall(r"[a-z0-9_]{3,}",q)}
+    now=time.time()
+    with _db() as c:
+        rows=c.execute("SELECT * FROM facts WHERE project_id=? ORDER BY updated DESC LIMIT 220",(pid,)).fetchall()
+        rel=c.execute("SELECT * FROM relations WHERE project_id=? ORDER BY updated DESC LIMIT 160",(pid,)).fetchall()
+        hist=c.execute("SELECT kind,key,old_value,new_value,source,changed FROM fact_history WHERE project_id=? ORDER BY changed DESC LIMIT 30",(pid,)).fetchall()
+    scored=[]
+    for r in rows:
+        hay=(r["key"]+" "+r["value"]+" "+r["kind"]).lower()
+        overlap=sum(1 for w in words if w in hay)
+        kind_bonus=2.5 if r["kind"] in ("decision","constraint","failure") else 0
+        confidence=float(r["confidence"] or .7)
+        age_days=max(0,(now-float(r["updated"] or now))/86400)
+        recency=max(0,1.5-min(1.5,age_days/45))
+        score=overlap*3+kind_bonus+confidence+recency
+        scored.append((score,r))
+    scored.sort(key=lambda x:x[0], reverse=True)
+    return {
+      "facts":[dict(r) for _,r in scored[:limit]],
+      "relations":[dict(r) for r in rel[:limit]],
+      "history":[dict(r) for r in hist[:min(limit,12)]],
+    }
+
+def ingest_project_text(pid, text, source="context"):
+    text=(text or "")[:100000]
+    # Safe heuristic extraction: explicit conventions/decisions/failures and code relationships.
+    for line in text.splitlines():
+        s=line.strip()
+        low=s.lower()
+        if not s or len(s)>1000: continue
+        if any(x in low for x in ("must ","should ","requirement","constraint")):
+            remember(pid,"constraint",hashlib.md5(s.encode()).hexdigest()[:10],s,.75,source)
+        if any(x in low for x in ("decided","architecture","convention","pattern")):
+            remember(pid,"decision",hashlib.md5(s.encode()).hexdigest()[:10],s,.72,source)
+        if any(x in low for x in ("error","failed","broken","bug")):
+            remember(pid,"failure",hashlib.md5(s.encode()).hexdigest()[:10],s,.68,source)
+    for m in re.finditer(r'([A-Za-z_][A-Za-z0-9_]*(?:Service|Controller|Module|Manager|Handler))', text):
+        remember(pid,"symbol",m.group(1),m.group(1),.65,source)
+    for m in re.finditer(r'require\s*\([^)]*?([A-Za-z_][A-Za-z0-9_]*)\s*\)', text):
+        relate(pid,"code","requires",m.group(1),"require() reference")
+
+def brain_context(pid, query):
+    data=retrieve(pid,query)
+    if not data["facts"] and not data["relations"] and not data.get("history"): return ""
+    lines=["PERSISTENT PROJECT BRAIN (retrieved context; do not treat guesses as facts):"]
+    for f in data["facts"]:
+        lines.append(f'- [{f["kind"]}] {f["key"]}: {f["value"]}')
+    for r in data["relations"]:
+        lines.append(f'- [relation] {r["src"]} --{r["relation"]}--> {r["dst"]}')
+    for h in data.get("history",[])[:8]:
+        lines.append(f'- [changed {h["kind"]}] {h["key"]}: previous={h["old_value"]} -> current={h["new_value"]}')
+    return "\n".join(lines)[:18000]
+
+def score_model(model, domain, score, latency=0):
+    now=time.time()
+    with _db() as c:
+        old=c.execute("SELECT * FROM model_scores WHERE model=? AND domain=?",(model,domain)).fetchone()
+        if old:
+            n=old["samples"]+1
+            avg=(old["score"]*old["samples"]+score)/n
+            lat=(old["latency"]*old["samples"]+latency)/n
+            c.execute("UPDATE model_scores SET score=?,latency=?,samples=?,updated=? WHERE model=? AND domain=?",
+                      (avg,lat,n,now,model,domain))
+        else:
+            c.execute("INSERT INTO model_scores VALUES(?,?,?,?,?,?)",(model,domain,score,latency,1,now))
+
+def model_arena(domain=None):
+    with _db() as c:
+        if domain:
+            rows=c.execute("SELECT * FROM model_scores WHERE domain=? ORDER BY score DESC,latency ASC",(domain,)).fetchall()
+        else:
+            rows=c.execute("SELECT * FROM model_scores ORDER BY domain,score DESC,latency ASC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def project_stats(pid):
+    with _db() as c:
+        facts=c.execute("SELECT COUNT(*) n FROM facts WHERE project_id=?",(pid,)).fetchone()["n"]
+        relations=c.execute("SELECT COUNT(*) n FROM relations WHERE project_id=?",(pid,)).fetchone()["n"]
+        changes=c.execute("SELECT COUNT(*) n FROM fact_history WHERE project_id=?",(pid,)).fetchone()["n"]
+        failures=c.execute("SELECT COUNT(*) n FROM facts WHERE project_id=? AND kind='failure'",(pid,)).fetchone()["n"]
+    return {"facts":facts,"relations":relations,"history_changes":changes,"known_failures":failures}

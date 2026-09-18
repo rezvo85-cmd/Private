@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#08070b">
+  <title>RONN // R9 Core</title>
+  <link rel="stylesheet" href="/static/style.css?v=RONN-R9-CORE">
+</head>
+<body>
+<div class="appShell">
+  <aside class="sidebar">
+    <div class="brandRow">
+      <div class="brandMark"><img src="/static/ronn_app_icon.png" alt="RONN"></div>
+      <div class="brandCopy"><b>RONN</b><small>COGNITIVE OS // R10 ECOSYSTEM</small></div>
+      <button class="iconBtn sidebarCollapse" id="sidebarCollapse" title="Collapse sidebar">‹</button>
+    </div>
+
+    <button class="newChat" id="newChat"><span>＋</span><b>New chat</b><kbd>Ctrl N</kbd></button>
+    <label class="sideSearch"><span>⌕</span><input id="chatSearch" placeholder="Search conversations"></label>
+
+    <div class="sideSectionTitle"><span>CONVERSATIONS</span><i id="chatCount">0</i></div>
+    <div class="chatList" id="chatList"></div>
+
+    <div class="sidebarBottom cinematicNav">
+      <button class="navBtn active" data-view="chat"><i>▣</i><span>Chat</span></button>
+      <button class="navBtn" data-view="projects"><i>□</i><span>Library</span><em id="activeProjectDot"></em><b id="memoryCount">0</b></button>
+      <button class="navBtn" data-view="brain"><i>⌘</i><span>Tools</span><em id="diagnosticDot"></em></button>
+      <button class="navBtn" data-view="settings"><i>⚙</i><span>Settings</span></button>
+      <div class="serverLine">
+        <i id="statusDot"></i>
+        <div><span id="buildText">RONN</span><small id="serverStatus">Checking runtime…</small></div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar cinematicTopbar">
+      <div class="cinematicTagline">IDEAS. CLARITY. PROGRESS.</div>
+      <div class="runtimeMeta" aria-hidden="true">
+        <span class="routeBadge" id="routeBadge">Auto</span>
+        <span class="stageBadge" id="stageBadge">Ready</span>
+        <span class="profileBadge" id="profileBadge">General</span>
+        <span class="neuralBadge" id="neuralBadge">Adaptive</span>
+      </div>
+      <div class="topButtons cinematicTopButtons">
+        <span class="projectBadge" id="projectBadge">No project</span>
+        <span class="providerBadge" id="providerBadge">Checking…</span>
+        <button class="ghost compactAction" id="exportBtn" title="Export conversation">Export</button>
+        <button class="ghost compactAction dangerGhost" id="clearBtn" title="Clear conversation">Clear</button>
+        <span class="profileOrb" title="RONN">R</span>
+      </div>
+    </header>
+
+    <section class="view active" id="chatView">
+      <div class="chatViewport" id="chatViewport">
+        <div class="messages" id="messages"></div>
+        <button class="jumpLatest hidden" id="jumpLatest" title="Jump to latest message">↓ Latest</button>
+      </div>
+      <div class="activityDock hidden" id="activityDock">
+        <div><i class="activityPulse"></i><b id="activityTitle">RONN is working</b><span id="activityTime">0s</span></div>
+        <p id="activityDetail">Understanding the request and choosing a reliable route.</p>
+      </div>
+      <div class="composerDock">
+        <div class="presetRow cinematicPresets" id="presetRow">
+          <button data-prompt="Research this deeply. Use current evidence where needed, compare reliable sources, challenge contradictions, and clearly separate verified facts from uncertainty.">✦ Deep research</button>
+          <button data-prompt="Analyze this hard problem with multiple approaches. Check assumptions, test the best solution where possible, and do not claim verification unless it actually happened.">◆ Reliable solve</button>
+          <button data-prompt="Build this software project carefully. Preserve interfaces, implement the solution, run available checks, find integration problems, repair them, and report what was actually verified.">⌘ Software architect</button>
+          <button data-prompt="Inspect these files as one connected project. Trace dependencies, locate root causes, identify contradictions, and give the strongest next action based on evidence.">◎ Project intelligence</button>
+        </div>
+
+        <div class="attachments" id="attachments"></div>
+        <div class="composerWrap">
+          <div class="composer">
+            <button class="attach" id="attachBtn" title="Add files or start something">＋</button>
+            <textarea id="input" rows="1" placeholder="Message RONN…"></textarea>
+            <button class="send" id="sendBtn" title="Send">↑</button>
+            <button class="stop hidden" id="stopBtn" title="Stop">■</button>
+            <input id="fileInput" type="file" multiple hidden accept="image/*,.txt,.md,.py,.js,.ts,.tsx,.jsx,.lua,.luau,.json,.html,.css,.csv,.xml,.yaml,.yml,.pdf,.docx,.xlsx,.pptx">
+          </div>
+          <div class="plusMenu hidden" id="plusMenu">
+            <button id="plusAttach"><span>＋</span><div><b>Attach files</b><small>Images, code, PDFs, documents</small></div></button>
+            <button id="plusNewChat"><span>□</span><div><b>New chat</b><small>Start a clean conversation</small></div></button>
+            <button id="plusProject"><span>◇</span><div><b>Open Library</b><small>Projects and persistent context</small></div></button>
+            <button id="plusMemory"><span>◎</span><div><b>Memory</b><small>View or add saved preferences</small></div></button>
+          </div>
+        </div>
+        <div class="composerMeta">
+          <div class="selectGroup">
+            <select id="modeSelect" title="Reasoning mode">
+              <option value="auto">Auto · Adaptive</option>
+              <option value="fast">Fast</option>
+              <option value="deep">Deep</option>
+              <option value="creator">Creator</option>
+              <option value="max">Research / tools</option>
+              <option value="ultra">ULTRA · Draft + critic</option>
+              <option value="apex">APEX · Parallel council</option>
+              <option value="live">Live web</option>
+            </select>
+            <select id="styleSelect" title="Answer style">
+              <option value="balanced">Auto Length</option>
+              <option value="concise">Short</option>
+              <option value="detailed">Detailed</option>
+            </select>
+          </div>
+          <div class="toggleGroup">
+            <label class="reviewToggle"><input type="checkbox" id="agentToggle" checked><span>Agent mode</span></label>
+            <label class="reviewToggle"><input type="checkbox" id="reviewToggle"><span>Force verification pass</span></label>
+            <button class="voiceMini" id="voiceBtn" type="button" title="Voice input when supported by your browser">◉ Voice</button>
+          </div>
+        </div>
+        <div class="hint"><span>Enter sends</span><span>Shift+Enter newline</span><span>Paste or drop images/files</span><span>RONN separates configured, checked, and verified states</span></div>
+      </div>
+    </section>
+
+    <section class="view panelView" id="projectsView">
+      <div class="sectionTabs"><button class="active" data-view-target="projects">Projects</button><button data-view-target="memory">Memory</button></div>
+      <div class="panelHeader">
+        <div><span class="eyebrow">LIBRARY</span><h1>Projects</h1><p>Keep important context, goals, files, and decisions organized without crowding the chat.</p></div>
+        <button class="primarySmall" id="newProjectBtn">＋ New project</button>
+      </div>
+      <div class="projectGrid" id="projectGrid"></div>
+      <div class="projectEditor hidden" id="projectEditor">
+        <div class="field"><label>Project name</label><input id="projectName" placeholder="My project"></div>
+        <div class="field"><label>Project context</label><textarea id="projectContext" placeholder="Goals, constraints, architecture, important decisions, file names, design language, known failures, and anything RONN must keep consistent."></textarea></div>
+        <div class="editorActions"><button class="dangerText" id="deleteProjectBtn">Delete</button><div><button class="ghost" id="cancelProjectBtn">Cancel</button><button class="primarySmall" id="saveProjectBtn">Save + activate</button></div></div>
+      </div>
+    </section>
+
+    <section class="view panelView" id="memoryView">
+      <div class="sectionTabs"><button data-view-target="projects">Projects</button><button class="active" data-view-target="memory">Memory</button></div>
+      <div class="panelHeader"><div><span class="eyebrow">LOCAL MEMORY</span><h1>Memory</h1><p>Useful long-term preferences and facts. Secrets are rejected.</p></div></div>
+      <div class="memoryAdd"><input id="memoryInput" placeholder="Example: I prefer complete code instead of snippets"><button id="memoryAddBtn">Remember</button></div>
+      <div class="memoryList" id="memoryList"></div>
+      <p class="finePrint">RONN will not intentionally store passwords, API keys, payment details, private keys, or similar secrets here.</p>
+    </section>
+
+    <section class="view panelView" id="brainView">
+      <div class="sectionTabs"><button class="active" data-view-target="brain">Intelligence</button><button data-view-target="diagnostics">Diagnostics</button></div>
+      <div class="brainHero">
+        <div><span class="eyebrow">RONN COGNITION CORE</span><h1>Reliability-first intelligence</h1><p>RONN routes easy work quickly and escalates hard tasks through deeper reasoning, context compilation, evidence discipline, specialist review, and explicit verification boundaries.</p></div>
+        <div class="coreOrb"><span>R</span><i></i></div>
+      </div>
+      <div class="brainStats">
+        <div><span>METACOGNITION</span><b>Adaptive</b><small>Difficulty-aware routing</small></div>
+        <div><span>EVIDENCE</span><b>Disciplined</b><small>Facts ≠ assumptions</small></div>
+        <div><span>PROJECT BRAIN</span><b>Persistent</b><small>Decisions + failures + context</small></div>
+        <div><span>VERIFICATION</span><b>Explicit</b><small>Never fake a test result</small></div>
+      </div>
+      <div class="brainGrid">
+        <article><i>01</i><h3>Requirement ledger</h3><p>Keeps explicit constraints active through complex work so requested features are not quietly dropped.</p></article>
+        <article><i>02</i><h3>Context compiler</h3><p>Ranks relevant project context, files, memory, and prior lessons instead of blindly dumping everything into one prompt.</p></article>
+        <article><i>03</i><h3>Current-fact detector</h3><p>Routes time-sensitive questions toward live research instead of stale model memory.</p></article>
+        <article><i>04</i><h3>Hallucination guard</h3><p>Instructs models not to invent names, sources, URLs, files, APIs, dates, numbers, or completion claims.</p></article>
+        <article><i>05</i><h3>Root-cause debugger</h3><p>Traces dependencies, environment, ports, stale processes, configuration, and integration points before random rewrites.</p></article>
+        <article><i>06</i><h3>APEX council</h3><p>For difficult work, independent candidates are compared by an adversarial evaluator before synthesis.</p></article>
+        <article><i>07</i><h3>Review pass</h3><p>High-difficulty work can be drafted, criticized, repaired, and returned through a stronger final synthesis.</p></article>
+        <article><i>08</i><h3>Provider fallback</h3><p>Recoverable model failures can fall back across configured routes rather than ending at the first error.</p></article>
+        <article><i>09</i><h3>Local deterministic tools</h3><p>Arithmetic, JSON validation, code sanity checks, document extraction, and local regression tests reduce avoidable model errors.</p></article>
+        <article><i>10</i><h3>Evidence states</h3><p>RONN distinguishes configured, inferred, checked, and runtime-verified outcomes instead of treating them as identical.</p></article>
+        <article><i>11</i><h3>Experience feedback</h3><p>Explicit feedback is tied to route, model, domain, and latency so routing can improve from observed usefulness.</p></article>
+        <article><i>12</i><h3>Safe memory</h3><p>Useful context can persist while common secret patterns are rejected and provider keys stay out of the browser UI.</p></article>
+        <article><i>13</i><h3>Persistent task engine</h3><p>Hard requests receive resumable phases and checkpoints, so RONN can track what was understood, attempted, verified, or blocked.</p></article>
+        <article><i>14</i><h3>Answer audit</h3><p>Final responses are scanned for unsupported completion language, dropped requirements, time-sensitive claims, and evidence boundaries.</p></article>
+        <article><i>15</i><h3>Adaptive provider health</h3><p>RONN records observed provider/model failures and can demote repeatedly failing routes instead of retrying the same weak path forever.</p></article>
+        <article><i>16</i><h3>Contradiction signals</h3><p>Current requests, project context, and attached files are compared for direct conflicts before they are silently blended together.</p></article>
+        <article><i>17</i><h3>Versioned project facts</h3><p>When an important project fact changes, RONN keeps a small history instead of erasing the previous state without a trace.</p></article>
+        <article><i>18</i><h3>Package integrity gate</h3><p>The launcher verifies the exact shipped core files before opening the browser, reducing wrong-build and stale-package confusion.</p></article>
+        <article><i>19</i><h3>Agent execution plan</h3><p>Hard tasks are broken into safe phases with checkpoints, verification gates, interruption status, and outcome-focused completion criteria.</p></article>
+        <article><i>20</i><h3>Project snapshots</h3><p>Attached text/code files can be checkpointed before risky changes, compared later, and restored into a non-destructive artifact.</p></article>
+        <article><i>21</i><h3>Knowledge base</h3><p>Project evidence is indexed locally and retrieved by relevance instead of stuffing every old file into each prompt.</p></article>
+        <article><i>22</i><h3>Capability honesty</h3><p>RONN distinguishes real capabilities from future/permissioned ones, so desktop control or external actions are never silently faked.</p></article>
+      </div>
+      <div class="taskHistoryPanel">
+        <div class="taskHistoryHead"><div><span class="eyebrow">R7 AGENT ENGINE</span><h2>Recent intelligence runs</h2></div><span id="taskEngineStats">No runs yet</span></div>
+        <div class="taskHistory" id="taskHistory"><div class="emptyState">RONN will record high-level task checkpoints here after you use it.</div></div>
+      </div>
+      <div class="agentOpsGrid">
+        <div class="agentOpsCard">
+          <span class="eyebrow">TASK QUEUE</span><h3>Queue work for RONN</h3>
+          <div class="agentInline"><input id="queueInput" placeholder="Example: audit the project for broken API routes"><button id="queueAddBtn">Queue</button></div>
+          <div class="agentOpsList" id="queueList"><div class="emptyState">No queued work.</div></div>
+        </div>
+        <div class="agentOpsCard">
+          <span class="eyebrow">KNOWLEDGE BASE</span><h3>Search project evidence</h3>
+          <div class="agentInline"><input id="kbSearchInput" placeholder="Search indexed project files and evidence"><button id="kbSearchBtn">Search</button></div>
+          <div class="agentOpsList" id="kbResults"><div class="emptyState">Attach project files in chat to build local knowledge.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view panelView" id="diagnosticsView">
+      <div class="sectionTabs"><button data-view-target="brain">Intelligence</button><button class="active" data-view-target="diagnostics">Diagnostics</button></div>
+      <div class="panelHeader">
+        <div><span class="eyebrow">SYSTEM HEALTH</span><h1>Diagnostics</h1><p>See what is actually configured, what local checks passed, and what has not been externally verified.</p></div>
+        <button class="primarySmall" id="runDiagnosticsBtn">Run diagnostics</button>
+      </div>
+      <div class="diagnosticSummary" id="diagnosticSummary"><div class="diagSpinner"></div><span>Waiting for diagnostics…</span></div>
+      <div class="diagGrid">
+        <div class="diagCard"><span>BUILD</span><b id="diagBuild">—</b><small id="diagBuildNote">Exact runtime fingerprint</small></div>
+        <div class="diagCard"><span>GROQ</span><b id="diagGroq">—</b><small>Configured is not the same as reachable</small></div>
+        <div class="diagCard"><span>NVIDIA</span><b id="diagNvidia">—</b><small>Optional heavy provider</small></div>
+        <div class="diagCard"><span>LOCAL TESTS</span><b id="diagTests">—</b><small>Deterministic architecture checks</small></div>
+        <div class="diagCard"><span>INTEGRITY</span><b id="diagIntegrity">—</b><small>Shipped core file fingerprint</small></div>
+        <div class="diagCard"><span>TASK ENGINE</span><b id="diagTasks">—</b><small>Persistent plan/checkpoint history</small></div>
+      </div>
+      <div class="diagnosticActions">
+        <button class="ghost" id="testGroqBtn">Test Groq connection</button>
+        <button class="ghost" id="testNvidiaBtn">Test NVIDIA connection</button>
+        <button class="ghost" id="repairPlanBtn">Analyze self-repair</button>
+      </div>
+      <div class="diagnosticDetails" id="diagnosticDetails"></div>
+    </section>
+
+    <section class="view panelView" id="settingsView">
+      <div class="panelHeader"><div><span class="eyebrow">SETTINGS</span><h1>RONN controls</h1><p>Core intelligence, privacy, sync, and owner access without crowding the main chat.</p></div></div>
+      <div class="settingsGrid compactSettings">
+        <div class="settingCard"><b>Adaptive intelligence</b><p>RONN chooses speed, depth, specialists, live research, and verification based on the task.</p></div>
+        <div class="settingCard"><b>Core API v1.1</b><p>Desktop, mobile, and future web clients use the same versioned RONN brain contract.</p></div>
+        <div class="settingCard"><b>Cloud-ready sync</b><p>Projects, conversations, tasks, settings, handoffs, and device events have a shared sync stream.</p></div>
+        <div class="settingCard"><b>Privacy boundaries</b><p>Provider keys remain backend-only. OP secrets are never saved as readable text.</p></div>
+      </div>
+
+      <div class="ownerAccessCard">
+        <div class="ownerAccessHead"><div><span class="eyebrow">ADVANCED</span><h2>OP Access</h2><p>Owner-only access, unlimited RONN credits, admin tools, and future mobile owner sync.</p></div><span class="opState" id="opStatus">Locked</span></div>
+        <div class="opUnlockRow" id="opUnlockRow"><input id="opSecret" type="password" autocomplete="off" placeholder="OP access code"><button class="primarySmall" id="opUnlockBtn">Unlock OP</button></div>
+        <div class="ownerPanel hidden" id="ownerPanel">
+          <div class="ownerSummary">
+            <div><span>ACCESS</span><b id="opPlan">Owner Unlimited</b></div>
+            <div><span>CREDITS</span><b id="opCredits">Unlimited</b></div>
+            <div><span>DEVICES</span><b id="ownerDeviceCount">0</b></div>
+            <div><span>SYNC</span><b id="ownerSyncCursor">0</b></div>
+          </div>
+          <div class="ownerButtons"><button class="ghost" id="ownerRefreshBtn">Refresh</button><button class="ghost" id="ownerRecoveryBtn">Generate recovery codes</button><button class="ghost" id="ownerBackupBtn">Create backup</button><button class="dangerText" id="opLockBtn">Lock OP</button></div>
+          <div class="recoveryBox hidden" id="opRecoveryBox"></div>
+          <details class="ownerAdvanced"><summary>Devices & permissions</summary><div class="ownerList" id="ownerDeviceList"></div></details>
+          <details class="ownerAdvanced"><summary>Encrypted Vault</summary><div class="vaultComposer"><input id="vaultTitle" placeholder="Secure note title"><textarea id="vaultText" placeholder="Private text stored encrypted at rest"></textarea><button class="ghost" id="vaultSaveBtn">Save to Vault</button></div><div class="ownerList" id="vaultList"></div></details>
+          <details class="ownerAdvanced"><summary>Developer console & feature flags</summary><div class="ownerList" id="featureFlagList"></div></details>
+        </div>
+      </div>
+
+      <div class="ecosystemStatusCard">
+        <div><span class="eyebrow">ECOSYSTEM</span><h2>RONN everywhere</h2><p>Mobile sync, device handoff, action history, workflows, routines, plugins, workspaces, backups, and permission controls are now part of the RONN Core architecture.</p></div>
+        <div class="ecosystemChips" id="ecosystemChips"><span>Checking ecosystem…</span></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="dropOverlay" id="dropOverlay"><div><b>Drop files into RONN</b><span>Images · code · PDF · DOCX · XLSX · PPTX</span></div></div>
+<div class="modalBackdrop hidden" id="confirmModal">
+  <div class="modalCard"><span class="eyebrow">CONFIRM ACTION</span><h2>Clear this conversation?</h2><p>This removes the messages from this local chat. It does not delete other conversations or project memory.</p><div><button class="ghost" id="cancelClearBtn">Cancel</button><button class="dangerButton" id="confirmClearBtn">Clear conversation</button></div></div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="/static/app.js?v=RONN-R10-ECOSYSTEM"></script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+RONN R10 ECOSYSTEM / CORE API v1.1
+==================================
+
+Base path: /api/v1
+Client header: X-RONN-Client: <stable-client-id>
+Device header: X-RONN-Device: <stable-device-id>
+Account header (personal R10 sync): X-RONN-Account: ronn_primary
+Optional Core auth: Authorization: Bearer <RONN_CORE_TOKEN>
+Owner mobile session: X-RONN-OP-Session: <owner-session-token>
+
+CORE + CHAT
+GET    /health
+GET    /meta
+GET    /session
+GET    /status
+GET    /capabilities
+POST   /chat                 NDJSON streaming desktop route
+POST   /chat/complete        JSON completion route for mobile/reliable clients
+POST   /chat/sse             SSE streaming route for mobile/web clients
+POST   /research
+GET    /diagnostics
+GET    /repair-plan
+
+OWNER / ACCOUNT
+GET    /owner/status
+POST   /owner/unlock
+POST   /owner/recovery-unlock
+POST   /owner/lock
+POST   /owner/recovery-codes
+GET    /account
+
+DEVICES / PERMISSIONS / SYNC
+GET    /devices
+POST   /devices/register
+DELETE /devices/{device_id}
+GET    /devices/{device_id}/permissions
+PATCH  /devices/{device_id}/permissions/{permission}
+GET    /sync/pull?since=<cursor>
+POST   /sync/push
+
+PROJECT DATA
+GET/POST /projects
+GET/PATCH/DELETE /projects/{project_id}
+GET    /projects/{project_id}/knowledge?q=...
+GET/POST /conversations
+GET/DELETE /conversations/{conversation_id}
+GET/POST /memory
+PATCH/DELETE /memory/{memory_id}
+GET/POST /tasks
+PATCH  /tasks/{task_id}
+POST   /files/index
+GET/PATCH /settings
+
+ECOSYSTEM
+GET    /actions
+POST   /actions/{action_id}/undo
+GET/POST /vault
+GET/DELETE /vault/{item_id}
+GET/POST /handoffs
+POST   /handoffs/{handoff_id}/claim
+GET/POST /clipboard
+GET    /notifications
+POST   /notifications/{notification_id}/read
+GET/POST /workflows
+POST   /workflows/{workflow_id}/run
+GET/POST /routines
+GET/POST /shortcuts
+GET/POST /workspaces
+GET/POST /workspaces/{workspace_id}/collaborators
+GET    /feature-flags
+PATCH  /feature-flags/{flag}
+GET/POST /backups
+GET    /plugins
+GET    /ecosystem/status
+POST   /sandbox/analyze       static analysis only; does not execute code
+POST   /share/intake          share/deep-link draft intake foundation
+GET    /quick-actions         mobile quick-action capability manifest
+
+PROVIDERS
+GET    /providers
+GET    /providers/check?provider=groq
+GET    /providers/check?provider=nvidia
+
+ACCOUNT/SYNC NOTE
+Desktop and the included mobile client use the same personal account id so projects/memory/tasks can sync through one Core. That header is not a security credential. A public multi-user deployment must replace header-trusted account selection with authenticated server-side accounts.
+
+IMPORTANT PRODUCTION BOUNDARY
+Core is cloud-ready, not cloud-hosted by this ZIP. A public deployment still needs HTTPS, account auth, secrets management, rate limiting, production database/backup policy and mobile signing/release infrastructure.
