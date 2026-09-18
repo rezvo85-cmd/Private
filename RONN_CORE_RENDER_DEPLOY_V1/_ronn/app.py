@@ -60,6 +60,7 @@ from r19_training_runtime import status as r19_training_runtime_status, submit a
 from r20_controller import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
+import memory_store_pg as pg_memory
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -422,6 +423,8 @@ def save_message(owner: str, role: str, content: str):
     content = (content or "").strip()
     if not content:
         return
+    if pg_memory.enabled():
+        return pg_memory.save_message(owner, role, content)
     with db() as conn:
         conn.execute(
             "INSERT INTO messages(role,content,created_at,owner) VALUES(?,?,?,?)",
@@ -461,6 +464,8 @@ def add_memory(owner: str, text: str, confidence: float = 0.9, source: str = "us
     text = re.sub(r"\s+", " ", text).strip()
     if not text or not safe_memory_text(text):
         return False
+    if pg_memory.enabled():
+        return pg_memory.add_memory(owner, text, confidence, source, memory_category(text))
     now = int(time.time())
     confidence = max(0.1, min(1.0, float(confidence)))
     with db() as conn:
@@ -480,6 +485,8 @@ def add_memory(owner: str, text: str, confidence: float = 0.9, source: str = "us
     return True
 
 def list_memories(owner: str):
+    if pg_memory.enabled():
+        return pg_memory.list_memories(owner)
     with db() as conn:
         rows = conn.execute(
             "SELECT id,text,created_at,updated_at,confidence,source,category,pinned,use_count,last_used FROM memories WHERE owner=? ORDER BY pinned DESC,updated_at DESC,id DESC LIMIT 100",
@@ -488,6 +495,8 @@ def list_memories(owner: str):
     return [dict(r) for r in rows]
 
 def delete_memory(owner: str, memory_id: int):
+    if pg_memory.enabled():
+        return pg_memory.delete_memory(owner, memory_id)
     with db() as conn:
         cur = conn.execute("DELETE FROM memories WHERE owner=? AND id=?", (owner, memory_id))
         conn.commit()
@@ -497,6 +506,8 @@ def forget_matching(owner: str, query: str):
     q = query.strip().lower()
     if not q:
         return 0
+    if pg_memory.enabled():
+        return pg_memory.forget_matching(owner, q)
     with db() as conn:
         rows = conn.execute("SELECT id,text FROM memories WHERE owner=?", (owner,)).fetchall()
         ids = [r["id"] for r in rows if q in r["text"].lower()]
@@ -529,10 +540,13 @@ def relevant_memories(owner: str, query: str, limit: int = 6):
         picked=scored[:limit]
         now_i=int(now)
         try:
-            with db() as conn:
-                for _,mid,_ in picked:
-                    conn.execute("UPDATE memories SET use_count=use_count+1,last_used=? WHERE owner=? AND id=?",(now_i,owner,mid))
-                conn.commit()
+            if pg_memory.enabled():
+                pg_memory.mark_used(owner,[mid for _,mid,_ in picked])
+            else:
+                with db() as conn:
+                    for _,mid,_ in picked:
+                        conn.execute("UPDATE memories SET use_count=use_count+1,last_used=? WHERE owner=? AND id=?",(now_i,owner,mid))
+                    conn.commit()
         except Exception:
             pass
         return [t for _, _, t in picked]
@@ -3162,6 +3176,7 @@ def r19_capabilities_api(request: Request):
       "central_controller":r20_status(),
       "web_research_tools":r20_web_status(),
       "tool_hub":r20_tool_status(),
+      "memory_storage":pg_memory.status(),
     }
 
 @app.get("/api/r15/cloud")
@@ -3393,6 +3408,9 @@ def memory_update(body: MemoryUpdateBody, request: Request):
     if body.category is not None:
         cat=re.sub(r"[^a-z_-]","",body.category.lower())[:30] or "general"
         fields.append("category=?"); args.append(cat)
+    if pg_memory.enabled():
+        ok=pg_memory.update_memory(owner,body.id,body.pinned,body.confidence,body.category)
+        return {"ok":ok,"memories":list_memories(owner)}
     if not fields: return {"ok":True,"memories":list_memories(owner)}
     fields.append("updated_at=?"); args.append(int(time.time())); args += [owner,body.id]
     with db() as conn:
@@ -3404,6 +3422,9 @@ def memory_update(body: MemoryUpdateBody, request: Request):
 
 def _core_memory_update(request: Request, memory_id: int, patch: dict):
     owner=owner_id(request)
+    if pg_memory.enabled():
+        ok=pg_memory.update_memory(owner,memory_id,patch.get("pinned"),patch.get("confidence"),patch.get("category"))
+        return {"ok":ok,"memories":list_memories(owner)}
     fields=[]; args=[]
     if patch.get("pinned") is not None:
         fields.append("pinned=?"); args.append(1 if patch.get("pinned") else 0)
