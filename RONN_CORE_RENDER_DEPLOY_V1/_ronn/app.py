@@ -31,6 +31,7 @@ from r6_benchmarks import run_r6_benchmarks
 from r7_impact import r7_preflight, r7_directive, response_quality_score, capability_manifest, explanation_trace
 from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNAL_COUNT as R11_SIGNAL_COUNT
 from r12_improvements import r12_preflight, r12_directive, IMPROVEMENT_COUNT as R12_IMPROVEMENT_COUNT
+from r13_ensemble import NEMOTRON_MODEL as OR_NEMOTRON_MODEL, DEEPSEEK_MODEL as OR_DEEPSEEK_MODEL, QWEN_MODEL as OR_QWEN_MODEL, CRITIC_MODEL as OR_CRITIC_MODEL, ENSEMBLE_MODELS as OR_ENSEMBLE_MODELS, choose_primary as r13_choose_primary, council_models as r13_council_models, fallback_models as r13_fallback_models, status as r13_status
 from r7_benchmarks import run_r7_benchmarks
 from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
@@ -48,7 +49,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R12-IMPROVEMENTS")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-APEX-2026-R13-ENSEMBLE")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -78,7 +79,7 @@ def verify_package_integrity():
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
-    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS")) else set()
+    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
@@ -104,6 +105,9 @@ API_KEY = (os.getenv("CLOUD_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "
 NVIDIA_API_BASE = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b").strip()
+OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1").rstrip("/")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+
 
 FAST_MODEL = os.getenv("RONN_FAST_MODEL", "openai/gpt-oss-20b").strip()
 SMART_MODEL = os.getenv("RONN_SMART_MODEL", "openai/gpt-oss-120b").strip()
@@ -243,7 +247,7 @@ STOPWORDS = {
     "can","could","would","should","what","how","why","when","where","who","be",
 }
 
-app = FastAPI(title="RONN Core + Cognitive OS", version="R12 IMPROVEMENTS / Core API v1.2")
+app = FastAPI(title="RONN Core + Cognitive OS", version="R13 ENSEMBLE / Core API v1.3")
 _CORS = [x.strip() for x in os.getenv("RONN_CORS_ORIGINS", "").split(",") if x.strip()]
 if _CORS:
     app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
@@ -304,7 +308,7 @@ async def public_guard(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith("/api/v1/"):
-        response.headers["X-RONN-Core-Version"] = "1.2.0"
+        response.headers["X-RONN-Core-Version"] = "1.3.0"
     return response
 
 @app.middleware("http")
@@ -626,6 +630,7 @@ def provider_config_status():
     return {
         "groq": {"configured": groq_key_loaded(), "base": API_BASE, "key_exposed": False},
         "nvidia": {"configured": nvidia_key_loaded(), "base": NVIDIA_API_BASE, "model": NVIDIA_MODEL, "key_exposed": False},
+        "openrouter": {"configured": openrouter_key_loaded(), "base": OPENROUTER_API_BASE, "ensemble": r13_status(), "key_exposed": False},
     }
 
 
@@ -638,6 +643,7 @@ def provider_config_runtime():
         "provider_key_loaded": key_loaded(),
         "groq_key_loaded": groq_key_loaded(),
         "nvidia_key_loaded": nvidia_key_loaded(),
+        "openrouter_key_loaded": openrouter_key_loaded(),
         "secrets_exposed": False,
     }
 
@@ -652,8 +658,14 @@ def groq_key_loaded():
 def nvidia_key_loaded():
     return _real_key(NVIDIA_API_KEY)
 
+def openrouter_key_loaded():
+    return _real_key(OPENROUTER_API_KEY)
+
+def is_openrouter_model(model: str):
+    return model in OR_ENSEMBLE_MODELS
+
 def key_loaded():
-    return groq_key_loaded() or nvidia_key_loaded()
+    return groq_key_loaded() or nvidia_key_loaded() or openrouter_key_loaded()
 
 def clean_history(history, query: str = "", char_budget: int = 28000):
     """Keep the most recent coherent history inside a bounded context budget.
@@ -817,6 +829,8 @@ def select_model(message: str, images, files, mode: str):
     intent = infer_intent(message)
 
     if images:
+        if openrouter_key_loaded():
+            return OR_QWEN_MODEL, "ensemble-vision", profile
         return VISION_MODEL, "vision", profile
     if mode == "fast":
         return FAST_MODEL, "fast", profile
@@ -838,8 +852,13 @@ def select_model(message: str, images, files, mode: str):
         return RESEARCH_MODEL, "research", "research"
     if looks_live(message) or likely_current_fact(message) or likely_live_ranking(message):
         return LIVE_MODEL, "live", "research"
-    if intent == "mathscience" and difficulty >= 1:
+    if intent == "mathscience" and difficulty >= 1 and groq_key_loaded():
         return RESEARCH_MODEL, "tools", "mathscience"
+
+    # R13 free-model ensemble: pick the best specialist when OpenRouter is configured.
+    if openrouter_key_loaded():
+        ensemble_model, ensemble_route = r13_choose_primary(profile, difficulty, bool(images), False)
+        return ensemble_model, ensemble_route, profile
 
     # Hard tasks escalate automatically.
     # NVIDIA Nemotron is RONN's heavy brain when its key is configured.
@@ -1029,6 +1048,10 @@ class ThinkFilter:
 def request_payload(model, route, messages, max_tokens, stream=True):
     payload = {"model":model,"messages":messages,"stream":stream,"max_tokens":max_tokens}
 
+    if model in OR_ENSEMBLE_MODELS:
+        payload["temperature"] = 0.45 if model != OR_CRITIC_MODEL else 0.3
+        return payload
+
     if model.startswith("openai/gpt-oss"):
         payload["temperature"] = 0.55
         payload["reasoning_effort"] = "low" if route == "fast" else ("high" if route in {"deep","review","ultra","tools"} else "medium")
@@ -1048,6 +1071,10 @@ def request_payload(model, route, messages, max_tokens, stream=True):
     return payload
 
 def provider_for_model(model: str):
+    if model in OR_ENSEMBLE_MODELS:
+        if not openrouter_key_loaded():
+            raise RuntimeError("OpenRouter ensemble is selected but OPENROUTER_API_KEY is not configured.")
+        return OPENROUTER_API_BASE, OPENROUTER_API_KEY, "openrouter"
     if model == NVIDIA_MODEL:
         if not nvidia_key_loaded():
             raise RuntimeError("NVIDIA is selected but NVIDIA_API_KEY is not configured.")
@@ -1061,6 +1088,8 @@ def cloud_request(model, route, messages, max_tokens, stream=True):
     headers = {"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
     if provider == "groq" and model in {"groq/compound","groq/compound-mini"}:
         headers["Groq-Model-Version"] = "latest"
+    if provider == "openrouter":
+        headers["X-Title"] = "RONN"
     started = time.time()
     try:
         r = requests.post(
@@ -1118,6 +1147,10 @@ def model_fallback_order(preferred_model: str, route: str):
     and a few usable current chat models are appended automatically.
     """
     order = [preferred_model]
+    if openrouter_key_loaded():
+        for m in r13_fallback_models("coding" if route in {"creator","ensemble-code"} else "chat"):
+            if m not in order:
+                order.append(m)
     if preferred_model == NVIDIA_MODEL:
         order += [SMART_MODEL, CREATOR_MODEL, FAST_MODEL]
     elif route in {"creator","vision"}:
@@ -1145,7 +1178,7 @@ def model_fallback_order(preferred_model: str, route: str):
             continue
         # NVIDIA_MODEL belongs to its own provider; Groq aliases can be validated
         # against the provider's current catalog when the catalog is reachable.
-        if m != NVIDIA_MODEL and catalog and m not in catalog_set:
+        if m != NVIDIA_MODEL and not is_openrouter_model(m) and catalog and m not in catalog_set:
             continue
         out.append(m)
     if catalog:
@@ -1176,9 +1209,12 @@ def minimal_cloud_request(model, messages, max_tokens, stream=True):
     base_url, api_key, provider = provider_for_model(model)
     started=time.time()
     try:
+        _headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
+        if provider == "openrouter":
+            _headers["X-Title"]="RONN"
         r=requests.post(
             f"{base_url}/chat/completions",
-            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},
+            headers=_headers,
             json=payload,
             stream=stream,
             timeout=600,
@@ -1495,11 +1531,17 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         if ("research" in _r12_preflight.get("active_domains",[]) or _r11_preflight.get("route",{}).get("live_required") or _r7_preflight.get("agent_plan",{}).get("freshness",{}).get("live_required")) and groq_key_loaded():
             model, route, profile = RESEARCH_MODEL, "research", "research"
         elif _r11_tier == "apex":
-            model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
-        elif _r11_tier == "deep" and route not in {"research","live","vision"}:
-            model, route = (NVIDIA_MODEL, "nvidia-deep") if nvidia_key_loaded() else (SMART_MODEL, "deep")
+            if openrouter_key_loaded():
+                model, route = OR_NEMOTRON_MODEL, "ensemble-apex"
+            else:
+                model, route = (NVIDIA_MODEL, "nvidia-apex") if nvidia_key_loaded() else (SMART_MODEL, "apex")
+        elif _r11_tier == "deep" and route not in {"research","live","vision","ensemble-vision"}:
+            if openrouter_key_loaded():
+                model, route = r13_choose_primary(profile, max(_difficulty,4), bool(body.images), False)
+            else:
+                model, route = (NVIDIA_MODEL, "nvidia-deep") if nvidia_key_loaded() else (SMART_MODEL, "deep")
         elif _r11_tier == "smart" and route == "fast":
-            model, route = SMART_MODEL, "knowledge"
+            model, route = (r13_choose_primary(profile, max(_difficulty,2), False, False) if openrouter_key_loaded() else (SMART_MODEL, "knowledge"))
         # Preserve earlier adaptive route signals as a secondary layer.
         elif _auto_tier == "tools":
             model, route = (RESEARCH_MODEL, "research") if groq_key_loaded() else (model, route)
@@ -1578,8 +1620,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 stream_messages = final_messages
                 task_checkpoint(request_id, "Adversarial synthesis", "started", "")
                 yield (json.dumps({"stage":"Adversarial synthesis"})+"\n").encode()
-                model, route = (NVIDIA_MODEL, "nvidia-apex-final") if nvidia_key_loaded() else (SMART_MODEL, "apex-final")
-                r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", final_messages, 2200, stream=True)
+                if openrouter_key_loaded():
+                    model, route = OR_NEMOTRON_MODEL, "ensemble-apex-final"
+                    r = cloud_request(model, route, final_messages, 2200, stream=True)
+                else:
+                    model, route = (NVIDIA_MODEL, "nvidia-apex-final") if nvidia_key_loaded() else (SMART_MODEL, "apex-final")
+                    r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", final_messages, 2200, stream=True)
             else:
                 r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", messages, 1500, stream=True)
         elif route == "ultra" and not body.images and not looks_live(body.message):
@@ -1590,12 +1636,16 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 stream_messages = final_messages
                 task_checkpoint(request_id, "Final synthesis", "started", "")
                 yield (json.dumps({"stage":"Final synthesis"})+"\n").encode()
-                model, route = (NVIDIA_MODEL, "nvidia-ultra-final") if nvidia_key_loaded() else (SMART_MODEL, "ultra-final")
-                r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", final_messages, 1800, stream=True)
+                if openrouter_key_loaded():
+                    model, route = OR_NEMOTRON_MODEL, "ensemble-ultra-final"
+                    r = cloud_request(model, route, final_messages, 1800, stream=True)
+                else:
+                    model, route = (NVIDIA_MODEL, "nvidia-ultra-final") if nvidia_key_loaded() else (SMART_MODEL, "ultra-final")
+                    r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", final_messages, 1800, stream=True)
             else:
                 r = cloud_request(NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL, "nvidia-deep" if nvidia_key_loaded() else "deep", messages, 1200, stream=True)
         else:
-            do_review = (body.review or _r12_preflight.get("quality_floor") == "high" or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
+            do_review = (body.review or _r12_preflight.get("quality_floor") == "high" or _r11_preflight.get("verification",{}).get("second_pass") or _r7_preflight.get("verification",{}).get("second_model_recommended") or _r5_preflight.get("reasoning_policy",{}).get("adversarial_review") or (reliability_flags(body.message, body.files)["needs_verification"] and _difficulty >= 2)) and route in {"deep","creator","max","knowledge","nvidia-deep","nvidia-creator","ensemble-general","ensemble-reasoning","ensemble-code","ensemble-apex"} and not looks_live(body.message) and not looks_research(body.message) and not body.images
             if do_review:
                 task_checkpoint(request_id, "Drafting", "started", "")
                 yield (json.dumps({"stage":"Drafting"})+"\n").encode()
@@ -1604,7 +1654,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                     stream_messages = review_messages
                     task_checkpoint(request_id, "Reviewing", "started", "")
                     yield (json.dumps({"stage":"Reviewing"})+"\n").encode()
-                    model, route = SMART_MODEL, "review"
+                    model, route = (OR_CRITIC_MODEL, "ensemble-review") if openrouter_key_loaded() else (SMART_MODEL, "review")
                     r = cloud_request(model, route, review_messages, 1300, stream=True)
                 else:
                     r = cloud_request(model, route, messages, max_tokens, stream=True)
@@ -2403,6 +2453,7 @@ def diagnostics(request: Request):
         "r11_benchmarks": (BASE / "r11_benchmarks.py").exists(),
         "r12_improvements": (BASE / "r12_improvements.py").exists(),
         "r12_benchmarks": (BASE / "r12_benchmarks.py").exists(),
+        "r13_ensemble": (BASE / "r13_ensemble.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -2477,6 +2528,8 @@ def status(request: Request):
         "vision_model":VISION_MODEL,
         "live_model":LIVE_MODEL,
         "research_model":RESEARCH_MODEL,
+        "openrouter_ensemble":r13_status(),
+        "openrouter_key_loaded":openrouter_key_loaded(),
         "memory_count":len(list_memories(owner)),
         "public_mode":PUBLIC_MODE,
         "cognitive_os":True,
@@ -2585,6 +2638,8 @@ def _core_providers_payload():
         "models":{
             "fast":FAST_MODEL,"smart":SMART_MODEL,"creator":CREATOR_MODEL,
             "vision":VISION_MODEL,"live":LIVE_MODEL,"research":RESEARCH_MODEL,"nvidia":NVIDIA_MODEL,
+            "ensemble_reasoning":OR_NEMOTRON_MODEL,"ensemble_coding":OR_DEEPSEEK_MODEL,
+            "ensemble_general_vision":OR_QWEN_MODEL,"ensemble_critic":OR_CRITIC_MODEL,
         },
     }
 
@@ -2638,6 +2693,7 @@ if __name__ == "__main__":
     print(f"ENV FOUND: {ENV_FILE.exists()}")
     print(f"GROQ KEY LOADED: {groq_key_loaded()}")
     print(f"NVIDIA KEY LOADED: {nvidia_key_loaded()}")
+    print(f"OPENROUTER KEY LOADED: {openrouter_key_loaded()}")
     print(f"NVIDIA HEAVY BRAIN: {NVIDIA_MODEL}")
     print(f"FAST: {FAST_MODEL}")
     print(f"SMART: {SMART_MODEL}")
