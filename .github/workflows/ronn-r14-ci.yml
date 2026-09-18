@@ -1,0 +1,86 @@
+name: RONN R14 Core Checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
+      - ".github/workflows/ronn-r14-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/_ronn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Compile Python
+        run: |
+          python -m py_compile *.py
+
+      - name: Run intelligence benchmarks
+        run: |
+          python - <<'PY'
+          from r11_benchmarks import run_r11_benchmarks
+          from r12_benchmarks import run_r12_benchmarks
+          from r13_benchmarks import run_r13_benchmarks
+          from r14_benchmarks import run_r14_benchmarks
+
+          suites = {
+              "R11": run_r11_benchmarks(),
+              "R12": run_r12_benchmarks(),
+              "R13": run_r13_benchmarks(),
+              "R14": run_r14_benchmarks(),
+          }
+          failed = False
+          for name, result in suites.items():
+              print(name, result)
+              if result.get("score", 0) < 100:
+                  failed = True
+          if failed:
+              raise SystemExit("One or more RONN benchmark suites failed.")
+          PY
+
+      - name: Check browser JavaScript
+        run: |
+          node --check static/app.js
+          node --check static/service-worker.js
+
+      - name: Validate web manifest
+        run: |
+          python - <<'PY'
+          import json
+          with open("static/manifest.webmanifest", "r", encoding="utf-8") as f:
+              json.load(f)
+          print("manifest: ok")
+          PY
+
+      - name: Check for accidentally committed API keys
+        run: |
+          if grep -R -n -E '(sk-or-v1-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,})' .             --exclude-dir=data --exclude='*.db' --exclude='*.sqlite' ; then
+            echo "Potential API key found in repository files."
+            exit 1
+          fi
+          echo "secret-pattern scan: ok"
