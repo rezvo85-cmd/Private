@@ -48,7 +48,7 @@ from r16_autofix import loop as r16_autofix_loop
 from r17_browser import fetch as r17_browser_fetch
 from r17_computer import status as r17_computer_status, action as r17_computer_action
 from r17_connectors import status as r17_connectors_status
-from r17_jobs import create as r17_job_create, get as r17_job_get, list_jobs as r17_job_list, stats as r17_job_stats
+from r17_jobs import create as r17_job_create, get as r17_job_get, list_jobs as r17_job_list, stats as r17_job_stats, resume as r17_job_resume, recover_kind as r17_job_recover_kind
 from r17_agents import messages as r17_agent_messages, status as r17_agent_status
 from r18_monitor import add as r18_monitor_add, ensure as r18_monitor_ensure, list_watches as r18_monitor_list, alerts as r18_monitor_alerts, mark_seen as r18_monitor_mark_seen, start as r18_monitor_start, status as r18_monitor_status, check as r18_monitor_check
 from r18_research import extract_urls as r18_extract_urls, collect_pages as r18_collect_pages, prompt as r18_research_prompt
@@ -3159,6 +3159,14 @@ def r17_job_api(job_id: str, request: Request):
     if not job or job.get("owner")!=owner:raise HTTPException(404,"Job not found.")
     return job
 
+@app.post("/api/r17/jobs/{job_id}/resume")
+def r17_job_resume_api(job_id: str, request: Request):
+    owner=_r14_require_owner(request)
+    job=r17_job_get(job_id)
+    if not job or job.get("owner")!=owner:raise HTTPException(404,"Job not found.")
+    if job.get("kind")!="multi_agent":raise HTTPException(400,"This job type cannot be resumed automatically.")
+    return {"job":r17_job_resume(job_id,_r17_multi_agent_runner)}
+
 @app.get("/api/r17/computer/status")
 def r17_computer_status_api(request: Request):
     _r14_require_owner(request)
@@ -3376,6 +3384,10 @@ try:
     R15_CLOUD_SYNC_STATUS = r15_cloud_start(DATA)
 except Exception as _cloud_start_exc:
     R15_CLOUD_SYNC_STATUS = {"configured":False,"durable":False,"error":str(_cloud_start_exc)[:180]}
+try:
+    R17_RESUMED_JOBS = r17_job_recover_kind("multi_agent",_r17_multi_agent_runner)
+except Exception:
+    R17_RESUMED_JOBS = []
 try:
     R18_MONITOR_START_STATUS = r18_monitor_start()
     _render_url=(os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
