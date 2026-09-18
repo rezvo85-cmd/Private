@@ -31,6 +31,7 @@ from r6_benchmarks import run_r6_benchmarks
 from r7_impact import r7_preflight, r7_directive, response_quality_score, capability_manifest, explanation_trace
 from r11_intelligence import r11_preflight, r11_directive, r11_route_hint, SIGNAL_COUNT as R11_SIGNAL_COUNT
 from r7_benchmarks import run_r7_benchmarks
+from r11_benchmarks import run_r11_benchmarks
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
@@ -2372,6 +2373,8 @@ def diagnostics(request: Request):
         "r6_intelligence": (BASE / "r6_intelligence.py").exists(),
         "brevity_engine": (BASE / "brevity_engine.py").exists(),
         "r7_impact": (BASE / "r7_impact.py").exists(),
+        "r11_intelligence": (BASE / "r11_intelligence.py").exists(),
+        "r11_benchmarks": (BASE / "r11_benchmarks.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -2382,6 +2385,7 @@ def diagnostics(request: Request):
     r5_checks = run_r5_benchmarks()
     r6_checks = run_r6_benchmarks()
     r7_checks = run_r7_benchmarks()
+    r11_checks = run_r11_benchmarks()
     provider = provider_config_status()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"]:
@@ -2394,6 +2398,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R6 adaptive intelligence checks failed.")
     if r7_checks.get("score", 0) < 100:
         warnings.append("One or more R7 impact/agent checks failed.")
+    if r11_checks.get("score", 0) < 100:
+        warnings.append("One or more R11 reliability checks failed.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -2410,6 +2416,8 @@ def diagnostics(request: Request):
         "r5_eval":r5_checks,
         "r6_eval":r6_checks,
         "r7_eval":r7_checks,
+        "r11_eval":r11_checks,
+        "r11_signal_registry":R11_SIGNAL_COUNT,
         "task_engine":task_stats(),
         "task_queue":queue_stats(owner_id(request)),
         "knowledge_base":kb_stats(owner_id(request)),
@@ -2447,6 +2455,8 @@ def status(request: Request):
         "r5_eval_score":run_r5_benchmarks().get("score",0),
         "r6_eval_score":run_r6_benchmarks().get("score",0),
         "r7_eval_score":run_r7_benchmarks().get("score",0),
+        "r11_eval_score":run_r11_benchmarks().get("score",0),
+        "r11_signal_registry":R11_SIGNAL_COUNT,
         "task_engine":task_stats(),
         "task_queue":queue_stats(owner),
         "knowledge_base":kb_stats(owner),
