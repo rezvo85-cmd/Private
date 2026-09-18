@@ -25,8 +25,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     background:#212121;
   }
   body.ronn19{
-    position:fixed!important;
-    inset:0!important;
+    position:static!important;
     width:100%!important;
     height:100%!important;
     min-height:0!important;
@@ -38,13 +37,17 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
 
   .ronn19 .appShell{
     position:fixed!important;
-    inset:0!important;
+    left:var(--ronn-vv-left,0px)!important;
+    top:var(--ronn-vv-top,0px)!important;
+    right:auto!important;
+    bottom:auto!important;
     display:block!important;
-    width:100%!important;
-    height:var(--ronn-vh,100dvh)!important;
+    width:var(--ronn-vv-width,100vw)!important;
+    height:var(--ronn-vv-height,100dvh)!important;
     min-height:0!important;
     overflow:hidden!important;
     background:#212121!important;
+    transform:translateZ(0)!important;
   }
 
   .ronn19 .main{
@@ -148,7 +151,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     z-index:1000!important;
     width:min(86vw,320px)!important;
     max-width:320px!important;
-    height:var(--ronn-vh,100dvh)!important;
+    height:var(--ronn-vv-height,100dvh)!important;
     min-height:0!important;
     padding:env(safe-area-inset-top) 8px max(8px,env(safe-area-inset-bottom))!important;
     overflow:hidden!important;
@@ -432,6 +435,18 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     z-index:55!important;
   }
   .ronn19 .jumpLatest{bottom:12px!important}
+
+  /* iOS Safari keyboard mode: the app shell follows the visual viewport.
+     Remove the home-indicator gap while the software keyboard is visible. */
+  body.ronn19.mobileKeyboardOpen .composerDock{
+    padding-bottom:7px!important;
+  }
+  body.ronn19.mobileKeyboardOpen .messages{
+    scroll-padding-bottom:10px!important;
+  }
+  body.ronn19.mobileKeyboardOpen .activityDock{
+    bottom:64px!important;
+  }
 
   /* ---------- panels ---------- */
   .ronn19 .panelView{
