@@ -6,8 +6,6 @@ separately at runtime.
 """
 from __future__ import annotations
 
-import uuid
-
 from r23_brain import plan, resolve_route, status as brain_status
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_context import compress_history
@@ -15,7 +13,7 @@ from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
 from r16_simulation import project_model
 from project_brain import ensure_project, remember, retrieve
-from r19_context import record_failure, relevant_failures
+from experience_engine import learn_lesson, retrieve_lessons
 
 MODELS={
     "fast":"openai/gpt-oss-20b",
@@ -56,10 +54,9 @@ def run():
                    file_names=["main.py","helper.py"],has_project=True)
     unknown_plan=plan("what does ZXQ_991 mean")
 
-    owner="r23_eval_"+uuid.uuid4().hex[:10]
-    pid=ensure_project("r23-eval-"+owner)
+    pid=ensure_project("r23-eval-project")
     remember(pid,"decision","api_name","Keep the public API name stable.",.95,"r23_eval")
-    fail_id=record_failure(owner,"When a parser test fails, preserve the input contract before changing output.","coding")
+    learn_lesson("coding","r23_parser_contract","When a parser test fails, preserve the input contract before changing output.",.95)
 
     tests=[
         _case("strongest configured model owns normal reasoning","1_stronger_main_brain",
@@ -90,7 +87,8 @@ def run():
               ]).get("edges",[]))),
 
         _case("failure learning stores and retrieves relevant lessons","9_failure_learning",
-              lambda:bool(fail_id and relevant_failures(owner,"parser input contract coding failure",5))),
+              lambda:any("preserve the input contract" in str(x.get("lesson","")).lower()
+                         for x in retrieve_lessons("coding",20))),
 
         _case("autonomous research generates multiple useful search angles","10_autonomous_research",
               lambda:len(subqueries("Fix package ZXQ_991 error",unknown_terms=["ZXQ_991"],depth="deep"))>=3),
