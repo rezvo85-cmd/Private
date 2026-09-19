@@ -147,8 +147,10 @@ def run():
         set_model_score(_m,"coding",66.67,.25,3)
     set_model_score(challenger_models["or_deepseek"],"main",87.5,.32,8)
     set_model_score(challenger_models["or_deepseek"],"coding",100,.27,3)
+    set_model_score(challenger_models["or_deepseek"],"certification",83.3,.31,6)
     set_model_score(challenger_models["or_qwen"],"main",100,.22,8)
-    set_model_score(challenger_models["or_qwen"],"coding",66.67,.18,3)
+    set_model_score(challenger_models["or_qwen"],"coding",100,.18,3)
+    set_model_score(challenger_models["or_qwen"],"certification",66.7,.20,6)
     challenger_plan=plan("Fix this Python bug in my code.")
     challenger_route=resolve_route(challenger_plan,PROVIDERS,challenger_models)
 
@@ -163,6 +165,7 @@ def run():
     arena_memory_restored="arena-memory-eval-restored"
     set_model_score(arena_memory_source,"main",100,.21,8)
     set_model_score(arena_memory_source,"coding",100,.19,3)
+    set_model_score(arena_memory_source,"certification",100,.20,6)
     arena_memory_snapshot=export_model_scores([arena_memory_source],30)
     arena_memory_rows=[]
     for _row in arena_memory_snapshot.get("rows",[]):
@@ -292,9 +295,10 @@ def run():
                   capability_status().get("feature_count")==11
                   and len(capability_status().get("features",{}))==11
                   and arena_memory_restore.get("ok")
-                  and arena_memory_restore.get("imported",0)>=2
+                  and arena_memory_restore.get("imported",0)>=3
                   and arena_routing_signal([arena_memory_restored])["ready"]
                   and arena_domain_signal([arena_memory_restored],"coding")["ready"]
+                  and arena_challenger_signal(arena_memory_restored,"coding")["eligible"]
               )),
 
         _case("very hard work uses R23-primary-owned diverse model competition","7_automatic_model_competition",
