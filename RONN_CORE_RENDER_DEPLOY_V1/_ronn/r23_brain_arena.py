@@ -15,9 +15,11 @@ from typing import Any, Callable
 
 from project_brain import model_arena, set_model_score
 
-VERSION="R23-BRAIN-ARENA-2"
+VERSION="R23-BRAIN-ARENA-3"
 MIN_SAMPLES=8
 DOMAIN_MIN_SAMPLES={"instruction":2,"reasoning":3,"coding":3}
+CERTIFICATION_MIN_SAMPLES=6
+CERTIFICATION_MIN_SCORE=83.3
 MAX_AGE_DAYS=14
 RUN_TTL_SECONDS=7*24*3600
 RETRY_COOLDOWN_SECONDS=6*3600
@@ -91,6 +93,52 @@ CASES=(
         "max_tokens":48,
     },
 )
+
+CERTIFICATION_CASES=(
+    {
+        "id":"cert_instruction_sort",
+        "prompt":"Given red=4, blue=9, green=2, sort the names by numeric value descending. Reply with only the names joined by >.",
+        "expected":"blue>red>green",
+        "kind":"exact",
+        "max_tokens":48,
+    },
+    {
+        "id":"cert_instruction_transform",
+        "prompt":"Transform the three words alpha beta gamma by reversing their order, converting to uppercase, and joining with |. Reply only with the result.",
+        "expected":"GAMMA|BETA|ALPHA",
+        "kind":"exact",
+        "max_tokens":48,
+    },
+    {
+        "id":"cert_reasoning_arrangements",
+        "prompt":"How many distinct arrangements are there of the letters AABC? Reply with only the integer.",
+        "expected":"12",
+        "kind":"exact",
+        "max_tokens":48,
+    },
+    {
+        "id":"cert_reasoning_conditional",
+        "prompt":"Two fair six-sided dice are rolled. Given that their sum is 8, what is the probability that the first die is 3? Reply with only a simplified fraction.",
+        "expected":"1/5",
+        "kind":"exact",
+        "max_tokens":64,
+    },
+    {
+        "id":"cert_code_closure",
+        "prompt":"Python: fs=[lambda: i for i in range(3)]. What are [f() for f in fs]? Reply exactly as comma-separated integers with no brackets.",
+        "expected":"2,2,2",
+        "kind":"code_exact",
+        "max_tokens":64,
+    },
+    {
+        "id":"cert_code_mutable_default",
+        "prompt":"Python: def f(x=[]): x.append(1); return len(x). Then f() is called twice. Reply with only the two returned integers separated by one space.",
+        "expected":"1 2",
+        "kind":"exact",
+        "max_tokens":64,
+    },
+)
+
 
 
 def _clean(text: str) -> str:
@@ -226,17 +274,26 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
     domain=profile_domain(profile)
     main=fresh_score(model,"main")
     domain_row=fresh_score(model,domain) if domain else {}
+    certification=fresh_score(model,"certification")
     main_score=float(main.get("score") or 0)
     domain_score=float(domain_row.get("score") or 0)
+    certification_score=float(certification.get("score") or 0)
+    certification_complete=int(certification.get("samples") or 0)>=CERTIFICATION_MIN_SAMPLES
     if not main:
         eligible=False
         reason="missing_complete_global_window"
+    elif not certification_complete:
+        eligible=False
+        reason="missing_challenger_certification"
+    elif certification_score<CERTIFICATION_MIN_SCORE:
+        eligible=False
+        reason="certification_threshold_not_met"
     elif domain:
         eligible=bool(domain_row and main_score>=62.5 and domain_score>=100.0)
-        reason="complete_domain_proof" if eligible else "domain_threshold_not_met"
+        reason="complete_domain_and_certification_proof" if eligible else "domain_threshold_not_met"
     else:
-        # Do not promote a challenger into casual/creative chat from a tiny
-        # objective benchmark that does not measure conversation quality.
+        # Do not promote a challenger into casual/creative chat from objective
+        # tests that do not measure conversational/creative quality.
         eligible=False
         reason="no_matching_objective_domain"
     return {
@@ -247,11 +304,14 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
         "reason":reason,
         "main":main,
         "domain_score":domain_row,
+        "certification":certification,
         "requirements":{
             "global_samples":MIN_SAMPLES,
             "global_min_score":62.5 if domain else None,
             "domain_samples":DOMAIN_MIN_SAMPLES.get(domain,0) if domain else 0,
             "domain_min_score":100.0 if domain else None,
+            "certification_samples":CERTIFICATION_MIN_SAMPLES,
+            "certification_min_score":CERTIFICATION_MIN_SCORE,
         },
     }
 
@@ -318,16 +378,74 @@ def _run_one(model: str, ask_fn: Callable[[str,str,int],str]) -> dict[str,Any]:
     }
 
 
-def run(models, ask_fn: Callable[[str,str,int],str], *, force=False) -> dict[str,Any]:
+def _run_certification(model: str, ask_fn: Callable[[str,str,int],str]) -> dict[str,Any]:
+    rows=[]
+    completed=0
+    passed=0
+    latencies=[]
+    for case in CERTIFICATION_CASES:
+        started=time.time()
+        try:
+            answer=ask_fn(model,case["prompt"],int(case.get("max_tokens") or 64))
+            latency=max(0.0,time.time()-started)
+            ok=grade(case,answer)
+            completed+=1
+            passed+=int(ok)
+            latencies.append(latency)
+            rows.append({
+                "id":case["id"],
+                "passed":ok,
+                "latency":round(latency,3),
+                "answer":_clean(answer)[:120],
+            })
+        except Exception as exc:
+            rows.append({
+                "id":case["id"],
+                "passed":False,
+                "transport_error":exc.__class__.__name__,
+            })
+    score=round(100*passed/max(1,completed),1) if completed else None
+    if completed:
+        set_model_score(
+            model,
+            "certification",
+            score,
+            sum(latencies)/max(1,len(latencies)),
+            completed,
+        )
+    return {
+        "model":model,
+        "completed":completed,
+        "passed":passed,
+        "score":score,
+        "cases":rows,
+    }
+
+
+def run(models, ask_fn: Callable[[str,str,int],str], *, force=False, challenger_models=None) -> dict[str,Any]:
     global _LAST_ATTEMPT
     models=list(dict.fromkeys(str(x) for x in models if x))
+    challengers=[str(x) for x in (challenger_models or []) if str(x) in models]
     if not models:
         return {"ok":False,"version":VERSION,"reason":"no_configured_main_models","results":[],"routing":routing_signal([])}
 
     current=routing_signal(models)
     now=time.time()
-    if not force and current.get("ready") and current.get("oldest") and now-float(current["oldest"]) < RUN_TTL_SECONDS:
-        return {"ok":True,"version":VERSION,"skipped":"fresh","results":[],"routing":current}
+    cert_scores=_fresh_row_map(
+        challengers,
+        domain="certification",
+        min_samples=CERTIFICATION_MIN_SAMPLES,
+    ) if challengers else {}
+    cert_ready=not challengers or all(m in cert_scores for m in challengers)
+    if not force and current.get("ready") and current.get("oldest") and now-float(current["oldest"]) < RUN_TTL_SECONDS and cert_ready:
+        return {
+            "ok":True,
+            "version":VERSION,
+            "skipped":"fresh",
+            "results":[],
+            "routing":current,
+            "certification":{"ready":cert_ready,"scores":cert_scores},
+        }
 
     if not force and _LAST_ATTEMPT and now-_LAST_ATTEMPT < RETRY_COOLDOWN_SECONDS:
         return {"ok":True,"version":VERSION,"skipped":"cooldown","results":[],"routing":current}
@@ -339,7 +457,17 @@ def run(models, ask_fn: Callable[[str,str,int],str], *, force=False) -> dict[str
     try:
         with ThreadPoolExecutor(max_workers=min(3,len(models))) as ex:
             results=list(ex.map(lambda m:_run_one(m,ask_fn),models))
+        certification_results=[]
+        if challengers:
+            with ThreadPoolExecutor(max_workers=min(2,len(challengers))) as ex:
+                certification_results=list(ex.map(lambda m:_run_certification(m,ask_fn),challengers))
         signal=routing_signal(models)
+        cert_scores=_fresh_row_map(
+            challengers,
+            domain="certification",
+            min_samples=CERTIFICATION_MIN_SAMPLES,
+        ) if challengers else {}
+        cert_ready=not challengers or all(m in cert_scores for m in challengers)
         return {
             "ok":True,
             "version":VERSION,
@@ -347,27 +475,48 @@ def run(models, ask_fn: Callable[[str,str,int],str], *, force=False) -> dict[str
             "cases_per_model":len(CASES),
             "results":results,
             "routing":signal,
+            "certification":{
+                "ready":cert_ready,
+                "required_models":challengers,
+                "scores":cert_scores,
+                "results":certification_results,
+            },
         }
     finally:
         _LOCK.release()
 
 
-def status(models=None) -> dict[str,Any]:
+def status(models=None, challenger_models=None) -> dict[str,Any]:
     models=list(models or [])
+    challengers=[str(x) for x in (challenger_models or []) if str(x) in models]
     signal=routing_signal(models) if models else {
         "ready":False,
         "candidate_count":0,
         "measured_count":0,
         "scores":{},
     }
+    certification_scores=_fresh_row_map(
+        challengers,
+        domain="certification",
+        min_samples=CERTIFICATION_MIN_SAMPLES,
+    ) if challengers else {}
+    certification_ready=not challengers or all(m in certification_scores for m in challengers)
     return {
         "version":VERSION,
         "objective_cases":len(CASES),
+        "certification_cases":len(CERTIFICATION_CASES),
         "min_samples":MIN_SAMPLES,
         "domain_min_samples":DOMAIN_MIN_SAMPLES,
         "max_age_days":MAX_AGE_DAYS,
         "routing":signal,
         "domain_scores":{d:model_arena(d) for d in DOMAIN_MIN_SAMPLES},
+        "certification":{
+            "ready":certification_ready,
+            "required_models":challengers,
+            "scores":certification_scores,
+            "min_samples":CERTIFICATION_MIN_SAMPLES,
+            "min_score":CERTIFICATION_MIN_SCORE,
+        },
         "portable_snapshot":True,
         "portable_snapshot_version":"R23-ARENA-SNAPSHOT-1",
         "challenger_gate":{
