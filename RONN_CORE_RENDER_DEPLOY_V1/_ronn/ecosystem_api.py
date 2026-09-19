@@ -194,7 +194,7 @@ def owner_status(request: Request):
 @router.post("/owner/unlock")
 def owner_unlock(body: UnlockBody, request: Request, response: Response):
     if not verify_secret(body.secret):
-        raise HTTPException(401, "Invalid OP access code.")
+        raise HTTPException(401, "Invalid access code.")
     owner = _owner(request)
     device_id = body.device_id or request.headers.get("x-ronn-device") or ""
     if device_id:
