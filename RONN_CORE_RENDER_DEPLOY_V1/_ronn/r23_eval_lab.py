@@ -190,7 +190,9 @@ def run():
                   and "Precedence: newest explicit user instruction wins" in correction_digest.get("text","")
                   and "[turn " in correction_digest.get("text","")
                   and correction_digest.get("superseded_duplicates",0)>=1
+                  and correction_digest.get("superseded_conflicts",0)>=1
                   and correction_digest.get("text","").count("Remember build target R23.")==1
+                  and "10 seconds" not in correction_digest.get("text","")
               )),
 
         _case("evaluation lab declares all eleven capabilities","6_real_evaluation_lab",
