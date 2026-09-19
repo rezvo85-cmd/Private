@@ -8,7 +8,7 @@ from __future__ import annotations
 from r22_lean_core import plan as r22_plan
 from r23_capabilities import capability_plan, status as capability_status
 from provider_engine import model_penalty
-from experience_engine import model_feedback_penalty
+from experience_engine import model_feedback_penalty, profile_feedback_signal
 from r23_brain_arena import routing_signal as arena_routing_signal
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
@@ -91,7 +91,7 @@ def _main_brain_candidates(providers,models):
     return out
 
 
-def _pick_main_brain(providers,models):
+def _pick_main_brain(providers,models,profile="chat"):
     """Pick the strongest healthy configured brain.
 
     Default quality order is Nemotron Ultra -> NVIDIA Nemotron -> GPT-OSS 120B.
@@ -102,9 +102,13 @@ def _pick_main_brain(providers,models):
     if not candidates:
         return models["smart"],"unknown",0
 
-    arena=arena_routing_signal([m for m,_,_ in candidates])
+    candidate_models=[m for m,_,_ in candidates]
+    arena=arena_routing_signal(candidate_models)
     arena_ready=bool(arena.get("ready"))
     arena_scores=arena.get("scores") or {}
+    outcomes=profile_feedback_signal(candidate_models,profile,3)
+    outcome_ready=bool(outcomes.get("ready"))
+    outcome_scores=outcomes.get("scores") or {}
 
     scored=[]
     for model,provider,quality_rank in candidates:
@@ -113,14 +117,19 @@ def _pick_main_brain(providers,models):
         row=arena_scores.get(model) or {}
         arena_score=float(row.get("score") or 0)
         arena_latency=float(row.get("latency") or 999)
-        # Reliability and repeated user feedback remain the strongest guardrails.
-        # When every candidate has enough fresh objective samples, arena score can
-        # distinguish models inside the same healthy pool. Five-point score bands
-        # prevent tiny/noisy benchmark differences from constantly flipping routes.
+        outcome_row=outcome_scores.get(model) or {}
+        outcome_avg=float(outcome_row.get("avg_rating") or 0)
+        outcome_penalty=int(outcome_row.get("penalty") or 0)
+
+        # Reliability is the hard guardrail. Repeated negative feedback for this
+        # specific task profile can independently demote a model. Positive outcome
+        # ranking activates only when every candidate has enough fair coverage.
+        profile_band=-int(round(outcome_avg*4)) if outcome_ready else 0
         arena_band=-(int(arena_score)//5) if arena_ready else 0
         latency_key=round(arena_latency,2) if arena_ready else 999
         scored.append((
-            health+feedback,
+            health+feedback+outcome_penalty,
+            profile_band,
             arena_band,
             quality_rank,
             latency_key,
@@ -129,13 +138,13 @@ def _pick_main_brain(providers,models):
             health,
             feedback,
             arena_score,
+            outcome_avg,
         ))
     scored.sort()
-    _,_,_,_,model,provider,health,feedback,arena_score=scored[0]
+    _,_,_,_,_,model,provider,health,feedback,arena_score,outcome_avg=scored[0]
     return model,provider,health+feedback,{
-        "ready":arena_ready,
-        "score":arena_score if arena_ready else None,
-        "scores":arena_scores if arena_ready else {},
+        "arena":{"ready":arena_ready,"score":arena_score if arena_ready else None,"scores":arena_scores if arena_ready else {}},
+        "outcomes":{"profile":profile,"ready":outcome_ready,"score":outcome_avg if model in outcome_scores else None,"scores":outcome_scores},
     }
 
 
@@ -153,12 +162,14 @@ def resolve_route(decision,providers,models):
         return selected,"vision"
 
     depth=str(decision.get("depth") or "smart")
-    selected,provider,penalty,arena=_pick_main_brain(providers,models)
+    profile=str(decision.get("profile") or "chat")
+    selected,provider,penalty,signals=_pick_main_brain(providers,models,profile)
     decision["main_brain_selected"]=selected
     decision["main_brain_provider"]=provider
     decision["main_brain_penalty"]=penalty
-    decision["main_brain_arena"]=arena
-    decision["main_brain_policy"]="quality-first + health-aware + objective-arena-aware"
+    decision["main_brain_arena"]=signals.get("arena") or {}
+    decision["main_brain_outcomes"]=signals.get("outcomes") or {}
+    decision["main_brain_policy"]="quality-first + health-aware + objective-arena-aware + profile-outcome-aware"
 
     if depth=="apex":
         return selected,"apex"
@@ -205,6 +216,7 @@ def status():
         "policy":"strongest-main-brain + health-aware failover + objective Brain Arena + selective capability plane",
         "main_brain_health_aware":True,
         "brain_arena_aware":True,
+        "profile_outcome_learning":True,
         "council_default":False,
         "competition_threshold":"difficulty>=6 only",
     }
