@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from r23_brain import plan, resolve_route, status as brain_status
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
-from r23_context import compress_history
+from r23_context import compress_history, project_scope_active, project_scope_key
 from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
 from r16_simulation import project_model
@@ -68,8 +68,13 @@ def run():
         _case("code test fix retest activates for attached repair work","3_code_test_fix_retest",
               lambda:bool(code_plan["capabilities"]["code_fix_loop"] and code_plan["capabilities"]["agent_runtime"])),
 
-        _case("project brain writes and retrieves durable project facts","4_permanent_project_brain",
-              lambda:any(x.get("key")=="api_name" for x in retrieve(pid,"API name",10).get("facts",[]))),
+        _case("project brain scopes and retrieves durable project facts","4_permanent_project_brain",
+              lambda:bool(
+                  project_scope_active("core-project-123","")
+                  and project_scope_key("core-project-123","").startswith("core:")
+                  and plan("Continue this project.",has_project=True)["capabilities"]["project_brain"]
+                  and any(x.get("key")=="api_name" for x in retrieve(pid,"API name",10).get("facts",[]))
+              )),
 
         _case("long context compresses old decisions without dumping all turns","5_long_context_compression",
               lambda:(lambda x:x["items"]>0 and x["source_turns"]>20 and len(x["text"])<=11000)(compress_history(long_history))),
