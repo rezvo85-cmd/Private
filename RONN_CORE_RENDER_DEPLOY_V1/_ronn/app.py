@@ -3223,7 +3223,7 @@ def r23_capabilities_api():
         "capabilities":r23_capability_status(),
         "agent_runtime":r23_agent_status(),
         "context":r23_context_status(),
-        "brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "cloud_brain":r15_cloud_status(),
     }
 
@@ -3281,6 +3281,14 @@ def _brain_arena_candidates():
     return list(dict.fromkeys(x for x in models if x))
 
 
+def _brain_arena_challengers(models=None):
+    active=set(models or _brain_arena_candidates())
+    return [
+        model for model in (OR_DEEPSEEK_MODEL,OR_QWEN_MODEL)
+        if model and model in active
+    ]
+
+
 def _brain_arena_ask(model: str, prompt: str, max_tokens: int=64):
     messages=[
         {"role":"system","content":"You are being evaluated on a tiny objective task. Follow the requested output format exactly. Return final answer text only."},
@@ -3301,7 +3309,7 @@ def _brain_arena_ask(model: str, prompt: str, max_tokens: int=64):
 @app.get("/api/r23/brain-arena")
 def r23_brain_arena_status_api(request: Request):
     _r14_require_owner(request)
-    return r23_arena_status(_brain_arena_candidates())
+    return r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates()))
 
 
 @app.get("/api/r23/brain-arena/export")
@@ -3322,7 +3330,13 @@ def r23_brain_arena_restore_api(body: ArenaSnapshotBody, request: Request):
 def r23_brain_arena_run_api(request: Request, force: bool=False):
     _r14_require_owner(request)
     models=_brain_arena_candidates()
-    result=r23_arena_run(models,_brain_arena_ask,force=bool(force))
+    challengers=_brain_arena_challengers(models)
+    result=r23_arena_run(
+        models,
+        _brain_arena_ask,
+        force=bool(force),
+        challenger_models=challengers,
+    )
     result["snapshot"]=export_arena_scores(models,30)
     return result
 
@@ -3535,7 +3549,7 @@ def diagnostics(request: Request):
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
-        "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
         "r21_release_gate":R21_RELEASE_STATUS,
@@ -3603,7 +3617,7 @@ def status(request: Request):
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
-        "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
         "r13_ensemble":r13_status(),
