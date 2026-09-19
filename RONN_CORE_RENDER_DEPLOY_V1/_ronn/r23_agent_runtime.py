@@ -49,6 +49,76 @@ def _runnable(files):
     return rows
 
 
+def _http_status_ok(value) -> bool:
+    if value is None:
+        return True
+    try:
+        code=int(value)
+    except (TypeError,ValueError):
+        return False
+    return 200 <= code < 400
+
+
+def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
+    """Summarize what this turn actually observed versus merely retrieved."""
+    out=out or {}
+    research=out.get("research") or {}
+    sources=list(research.get("sources") or [])
+    read_sources=sum(1 for x in sources if isinstance(x,dict) and x.get("read"))
+    snippet_only=sum(1 for x in sources if isinstance(x,dict) and not x.get("read"))
+
+    browser_pages=list(out.get("browser_pages") or [])
+    browser_read=sum(
+        1 for x in browser_pages
+        if isinstance(x,dict)
+        and not x.get("error")
+        and bool(x.get("text"))
+        and _http_status_ok(x.get("status"))
+    )
+
+    executed=set(str(x) for x in (out.get("executed") or []))
+    code=out.get("code_loop") or {}
+    autofix=code.get("autofix") or {}
+    final_runtime_verified=bool(
+        code.get("ok")
+        and (
+            code.get("verified")
+            or autofix.get("verified")
+            or autofix.get("runtime_verified")
+            or autofix.get("final_verified")
+        )
+    )
+
+    return {
+        "version":"R23-EVIDENCE-CONTRACT-1",
+        "retrieval":{
+            "source_count":len(sources),
+            "read_page_count":read_sources,
+            "snippet_only_count":snippet_only,
+            "explicit_browser_pages_read":browser_read,
+        },
+        "structured_live_data":bool("weather" in executed),
+        "computed_static_analysis":bool("world_model" in executed or "change_simulation" in executed),
+        "runtime_execution":{
+            "attempted":bool("code_test_fix_retest" in executed or code),
+            "reported_ok":bool(code.get("ok")) if code else False,
+            "verified_success":final_runtime_verified,
+        },
+        "computer_observation_verified":bool(
+            "computer_runtime_inspect" in executed and (out.get("computer") or {}).get("verified")
+        ),
+        "errors":[str(x)[:180] for x in (out.get("errors") or [])[:8]],
+        "rules":[
+            "SEARCH SNIPPET ONLY is discovery evidence, not proof of page contents.",
+            "READ PAGE means content was retrieved from that URL; it is source evidence, not runtime verification.",
+            "Structured live data supports only the fields actually returned by that tool/API.",
+            "Computed static analysis is derived evidence, not proof that changed code executed successfully.",
+            "Use the word verified for execution success only when runtime_execution.verified_success is true or another explicit verified tool result proves the claim.",
+            "If evidence is incomplete or conflicting, state the limitation instead of filling the gap from confidence.",
+        ],
+    }
+
+
 def execute(owner: str, request_id: str, message: str, files, decision: dict,
             *, depth="smart", repair_fn=None) -> dict[str,Any]:
     caps=(decision or {}).get("capabilities") or {}
@@ -66,6 +136,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "code_loop":{},
         "learning":{},
         "computer":{},
+        "evidence_contract":{},
     }
     evidence=[]
 
@@ -239,13 +310,14 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
 
     out["evidence"]="\n\n".join(x for x in evidence if x)[:110000]
     out["sources"]=out["sources"][:16]
+    out["evidence_contract"]=evidence_contract(out)
     return out
 
 
 def status():
     cs=computer_status()
     return {
-        "version":"R23-AGENT-1",
+        "version":"R23-AGENT-2",
         "browser":True,
         "research":True,
         "controlled_code_execution":True,
@@ -255,4 +327,5 @@ def status():
         "verified_failure_learning":True,
         "computer_adapter":True,
         "computer_verified":bool(cs.get("verified")),
+        "evidence_contract":True,
     }
