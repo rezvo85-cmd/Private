@@ -57,7 +57,11 @@ from r19_router import choose as r19_router_choose, record as r19_router_record,
 from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
 from r19_training_data import add as r19_training_add, stage as r19_training_stage, promote as r19_training_promote, discard as r19_training_discard, pending_example as r19_training_pending, export as r19_training_export, stats as r19_training_stats
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
-from r22_lean_core import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
+from r23_brain import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
+from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
+from r23_context import compress_history as r23_compress_history, status as r23_context_status
+from r23_eval_lab import run as r23_eval_run
+from r23_capabilities import status as r23_capability_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 import memory_store_pg as pg_memory
@@ -82,7 +86,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-2026-R22-LEAN-CORE")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-2026-R23-ALL-11")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -118,7 +122,13 @@ def verify_package_integrity():
         "_ronn/r20_controller.py",
         "_ronn/r22_lean_core.py",
         "_ronn/r22_benchmarks.py",
-    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE")) else set()
+        "_ronn/r23_brain.py",
+        "_ronn/r23_capabilities.py",
+        "_ronn/r23_context.py",
+        "_ronn/r23_research.py",
+        "_ronn/r23_agent_runtime.py",
+        "_ronn/r23_eval_lab.py",
+    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE","R23-ALL-11")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
