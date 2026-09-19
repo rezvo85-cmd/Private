@@ -116,6 +116,8 @@ def verify_package_integrity():
         "_ronn/static/style.css",
         "_ronn/static/mobile_fit.css",
         "_ronn/r20_controller.py",
+        "_ronn/r22_lean_core.py",
+        "_ronn/r22_benchmarks.py",
     } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
@@ -1052,12 +1054,13 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     skill_context, active_skills = build_skill_context(body.message, profile)
     if controller:
         system += "\n\n" + r20_directive(controller)
-    system += "\n\n" + reliability_directive(body.message, profile, body.files)
+    _rel = reliability_flags(body.message, body.files)
+    if not lean_core or controller.get("verify") or _rel.get("current") or _rel.get("coding") or _rel.get("high_stakes"):
+        system += "\n\n" + reliability_directive(body.message, profile, body.files)
     meta_os = metacognition_state(
         body.message, profile, difficulty,
         has_files=bool(body.files), has_project=bool(body.project_context)
     )
-    _r6 = r6_preflight(body.message, profile, difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
     _brevity = response_length_policy(body.message, body.style, difficulty, bool(body.files), bool(body.images), bool(body.project_context))
     system += "\n\n" + brevity_directive(_brevity)
     _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
@@ -1137,7 +1140,7 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
                 system += "\nContinue from the latest meaningful unfinished checkpoint instead of restarting from scratch."
     except Exception:
         pass
-    _contextual_turn = bool(body.project_context or body.files or body.history or controller.get("followup"))
+    _contextual_turn = bool(body.project_context or body.files or controller.get("followup"))
     retrieved = brain_context(pid, body.message) if (not lean_core or _contextual_turn) else ""
     lesson_rows = retrieve_lessons(profile, 4) if (not lean_core or prompt_policy.get("include_failure_lessons")) else []
     lesson_block = "\n".join(f"- {x.get('lesson','')}" for x in lesson_rows if x.get("lesson"))
@@ -1154,7 +1157,8 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     )
     if compiled["text"]:
         system += "\n\nCOMPILED HIGH-VALUE CONTEXT:\n" + compiled["text"]
-    system += "\n\nCONTEXT MANIFEST:\n" + json.dumps(compiled["manifest"], ensure_ascii=False)[:5000]
+    if not lean_core or _contextual_turn:
+        system += "\n\nCONTEXT MANIFEST:\n" + json.dumps(compiled["manifest"], ensure_ascii=False)[:3500]
     if not lean_core or prompt_policy.get("include_verification_directive"):
         ledger = requirement_ledger(body.message)
         checks = verification_plan(body.message, profile, False)
@@ -1800,18 +1804,30 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         model = r19_adapt_model(profile, model)
     request_id = new_task_id()
     started_at = time.time()
-    _difficulty = task_difficulty(body.message)
-    _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
-    _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
-    _r7_preflight = r7_preflight(body.message, profile, _difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
-    _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
-    _r11_tier = r11_route_hint(_r11_preflight)
-    _r12_preflight = r12_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
-    _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode))
-    _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files)
-    _r14_agent = r14_agent_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message)) if body.agent_mode else {"version":"R14","steps":[],"tool_plan":_r14_tools}
-    _auto_tier = route_override(_r5_preflight, body.mode)  # legacy diagnostic signal only; R20 owns routing
-    _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
+    _difficulty = int(_r20.get("difficulty") or task_difficulty(body.message))
+    _legacy_diag = bool(
+        (not _r20.get("lean_core"))
+        or body.files or body.images or body.project_context
+        or _difficulty >= 4 or _r20.get("verify")
+    )
+    if _legacy_diag:
+        _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
+        _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
+        _r7_preflight = r7_preflight(body.message, profile, _difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
+        _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
+        _r12_preflight = r12_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
+    else:
+        _r5_preflight = {"lean_skipped":True}
+        _r6_preflight = {"lean_skipped":True}
+        _r7_preflight = {"lean_skipped":True,"agent_plan":{"risk":{"proactive_warnings":[]}}}
+        _r11_preflight = {"lean_skipped":True,"matched_signal_count":0}
+        _r12_preflight = {"lean_skipped":True,"active_policy_count":0}
+    _r11_tier = r11_route_hint(_r11_preflight) if _legacy_diag else {"tier":str(_r20.get("depth") or "smart")}
+    _r14_tools = r14_tool_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message), bool(body.agent_mode)) if (_r20.get("needs_tools") or body.files or body.images) else {"version":"R14","tools":[]}
+    _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files) if (body.images or body.files) else {"version":"R14","images":0,"files":0}
+    _r14_agent = r14_agent_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message)) if body.agent_mode and (_r20.get("needs_tools") or _difficulty >= 4) else {"version":"R14","steps":[],"tool_plan":_r14_tools}
+    _auto_tier = str(_r20.get("depth") or "smart")
+    _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context)) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
     _project_id = ensure_project((body.project_context[:180] if body.project_context else "default"))
     _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
@@ -1959,8 +1975,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "difficulty":int(_r20.get("difficulty") or _difficulty),
         "controller":_r20,
         "intent":infer_intent(body.message),
-        "cognition":cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile),
-        "stages":task_stages(cognitive_profile(body.message, task_difficulty(body.message), infer_intent(body.message), profile)),
+        "cognition":{"core":"R22","depth":str(_r20.get("depth") or "smart"),"main_brain_first":True},
+        "stages":["understand","tool" if _r20.get("needs_tools") else "reason","verify" if _r20.get("verify") else "answer"],
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
         "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0)},
         "tool_hub":{
@@ -1992,12 +2008,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r14_tool_plan":_r14_tools,
         "r14_multimodal":_r14_mm,
         "r14_agent_plan":_r14_agent,
-        "r14_user_model":r14_user_profile(owner),
-        "r14_knowledge_graph":r14_graph_stats(owner),
+        "r14_user_model":r14_user_profile(owner) if _legacy_diag else {"lean_skipped":True},
+        "r14_knowledge_graph":r14_graph_stats(owner) if _legacy_diag else {"lean_skipped":True},
         "adaptive_tier":str(_r20.get("depth") or "smart"),
         "agent_mode":bool(body.agent_mode),
-        "decision_summary":explanation_trace(body.message,_r7_preflight.get("agent_plan",{}),route,model),
-        "capabilities":capability_manifest()
+        "decision_summary":{"core":"R22","route":route,"model":model,"reason":_r20.get("reason")},
+        "capabilities":{"lean_core":True,"tools":bool(_r20.get("needs_tools")),"live":bool(_r20.get("needs_live")),"verification":bool(_r20.get("verify"))}
     }})+"\n").encode()
 
     stream_messages = messages
