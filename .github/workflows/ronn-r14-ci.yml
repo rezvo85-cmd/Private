@@ -1,4 +1,4 @@
-name: RONN R22 Lean Core Checks
+name: RONN R23 All 11 Checks
 
 on:
   push:
@@ -54,6 +54,7 @@ jobs:
           from r14_benchmarks import run_r14_benchmarks
           from r15_eval_lab import run as run_r15_eval
           from r22_benchmarks import run as run_r22_eval
+          from r23_eval_lab import run as run_r23_eval
 
           suites = {
               "R11": run_r11_benchmarks(),
@@ -62,6 +63,7 @@ jobs:
               "R14": run_r14_benchmarks(),
               "R15-R19": run_r15_eval(),
               "R22-LEAN": run_r22_eval(),
+              "R23-ALL-11": run_r23_eval(),
           }
           failed = False
           for name, result in suites.items():
@@ -79,7 +81,11 @@ jobs:
           python - <<'PY'
           import app
           print("imported:", app.BUILD_ID)
-          assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R22-LEAN-CORE"
+          assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
+          r23 = app.r23_eval_run()
+          print("r23:", r23)
+          assert r23.get("all_11_ready") is True
+          assert r23.get("score") == 100.0
           PY
 
       - name: Check browser JavaScript

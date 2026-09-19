@@ -57,7 +57,11 @@ from r19_router import choose as r19_router_choose, record as r19_router_record,
 from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
 from r19_training_data import add as r19_training_add, stage as r19_training_stage, promote as r19_training_promote, discard as r19_training_discard, pending_example as r19_training_pending, export as r19_training_export, stats as r19_training_stats
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
-from r22_lean_core import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
+from r23_brain import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
+from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
+from r23_context import compress_history as r23_compress_history, status as r23_context_status
+from r23_eval_lab import run as r23_eval_run
+from r23_capabilities import status as r23_capability_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 import memory_store_pg as pg_memory
@@ -82,7 +86,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-2026-R22-LEAN-CORE")
+BUILD_ID = os.getenv("RONN_BUILD_ID", "RONN-COGNITIVE-OS-2026-R23-ALL-11")
 PORT = int(os.getenv("PORT", "8030"))
 
 BASE = Path(__file__).resolve().parent
@@ -118,7 +122,13 @@ def verify_package_integrity():
         "_ronn/r20_controller.py",
         "_ronn/r22_lean_core.py",
         "_ronn/r22_benchmarks.py",
-    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE")) else set()
+        "_ronn/r23_brain.py",
+        "_ronn/r23_capabilities.py",
+        "_ronn/r23_context.py",
+        "_ronn/r23_research.py",
+        "_ronn/r23_agent_runtime.py",
+        "_ronn/r23_eval_lab.py",
+    } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE","R23-ALL-11")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
@@ -534,6 +544,7 @@ class TextFile(BaseModel):
 
 class ChatBody(BaseModel):
     message: str = ""
+    project_id: str = "default"
     history: list[dict] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
     files: list[TextFile] = Field(default_factory=list)
@@ -1074,9 +1085,10 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
         _r14_user = r14_user_directive(owner)
         if _r14_user:
             system += "\n\n" + _r14_user
-    _r19_digest = r19_conversation_digest(body.history, 9000) if (not lean_core or prompt_policy.get("include_long_context_digest")) else ""
+    _r23_context = r23_compress_history(body.history, 11000, 8) if (controller.get("r23") and prompt_policy.get("include_long_context_digest")) else {"text":"","items":0}
+    _r19_digest = (_r23_context.get("text") or "") if controller.get("r23") else (r19_conversation_digest(body.history, 9000) if (not lean_core or prompt_policy.get("include_long_context_digest")) else "")
     if _r19_digest:
-        system += "\n\nLONG-CONTEXT DIGEST (older constraints and decisions):\n" + _r19_digest
+        system += "\n\n" + _r19_digest
     if not lean_core or prompt_policy.get("include_evidence_plan"):
         _r19_evidence = r19_evidence_plan(body.message, bool(body.files), bool(body.images))
         system += "\n\nEVIDENCE PLAN:\n" + json.dumps(_r19_evidence, ensure_ascii=False)
@@ -1104,7 +1116,7 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
             system += "\n\nCONTRADICTION SIGNALS TO RESOLVE CONSERVATIVELY:\n" + json.dumps(_conflicts,ensure_ascii=False)[:5000]
             system += "\nPrefer the newest explicit user instruction; mention a conflict only when it changes the result."
     # Persistent project intelligence: scoped to the active project/context name.
-    project_name = (body.project_context[:180] if body.project_context else "default")
+    project_name = (body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default")
     pid = ensure_project(project_name)
     _use_project_graph = (not lean_core or prompt_policy.get("include_project_graph"))
     try:
@@ -1591,7 +1603,7 @@ def looks_like_internal_tool_payload(text: str) -> bool:
     named=any(name in low for name in tool_names) and ("query" in low or "url" in low or "args" in low)
     return bool((jsonish and protocol) or named)
 
-def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None):
+def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None, project_id: str=""):
     filt = ThinkFilter()
     full = ""
     _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} or model in {"groq/compound","groq/compound-mini"}
@@ -1683,6 +1695,26 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
 
     save_message(owner, "user", original_message or "[attachment]")
     save_message(owner, "assistant", full)
+
+    # R23 permanent project brain: learn the completed turn only when this turn
+    # was explicitly scoped to project memory. ingest_project_text is selective:
+    # it extracts constraints, decisions, failures and named code relationships
+    # rather than storing the whole response as an indiscriminate transcript.
+    if project_id:
+        try:
+            ingest_project_text(project_id, original_message or "", "completed_user_turn")
+            if profile in {"coding","analysis","creative","research"}:
+                ingest_project_text(project_id, full, "completed_assistant_turn")
+            record_attempt(
+                project_id,
+                request_id or ("turn_"+uuid.uuid4().hex[:12]),
+                "answer",
+                "complete",
+                ("Completed R23 project turn via " + str(route) + "/" + str(model))[:1000],
+            )
+        except Exception:
+            pass
+
     if request_id and safe_memory_text(original_message or "") and safe_memory_text(full):
         try:
             r19_training_stage(request_id, owner, original_message or "[attachment]", full, profile or "general", model)
@@ -1829,7 +1861,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _auto_tier = str(_r20.get("depth") or "smart")
     _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context)) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
-    _project_id = ensure_project((body.project_context[:180] if body.project_context else "default"))
+    _project_id = ensure_project((body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default"))
     _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
     try:
         start_task(request_id, owner, _project_id, body.message, profile, _difficulty, _preflight["plan"]["signature"], _preflight["plan"])
@@ -1844,7 +1876,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     except Exception:
         pass
     _real_tool_evidence=[]
-    if body.agent_mode:
+    if body.agent_mode and not _r20.get("r23"):
         # R19 tool controller: automatically use safe real tools only when the request
         # clearly calls for them. Results are injected as evidence, never invented.
         try:
@@ -1908,14 +1940,26 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         except (TypeError, ValueError):
             pass
     try:
-        _tool_run = r20_tool_execute(
-            _tool_message,
-            depth=str(_r20.get("depth") or "smart"),
-            needs_live=bool(_r20.get("needs_live")),
-            has_files=bool(body.files),
-            has_images=bool(body.images),
-        )
-        _web_research = _tool_run.get("web_research") or {}
+        if _r20.get("r23"):
+            _tool_run = r23_agent_execute(
+                owner,
+                request_id,
+                _tool_message,
+                body.files or [],
+                _r20,
+                depth=str(_r20.get("depth") or "smart"),
+                repair_fn=_r16_repair_model,
+            )
+            _web_research = _tool_run.get("research") or {}
+        else:
+            _tool_run = r20_tool_execute(
+                _tool_message,
+                depth=str(_r20.get("depth") or "smart"),
+                needs_live=bool(_r20.get("needs_live")),
+                has_files=bool(body.files),
+                has_images=bool(body.images),
+            )
+            _web_research = _tool_run.get("web_research") or {}
         if _tool_run.get("evidence"):
             yield (json.dumps({"stage":"Using tools"})+"\n").encode()
             body.project_context = ((body.project_context or "") + "\n\n" + _tool_run["evidence"]).strip()
@@ -1933,18 +1977,48 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             except Exception:
                 pass
 
-    # R20 execution boundary: tools gather evidence; an answer model writes the answer.
-    # This prevents a model from printing a pseudo tool call such as {"tool":"groq_web_search",...}.
+    # R23 failure learning records verified execution failures as reusable lessons.
+    if _r20.get("r23"):
+        try:
+            _code_result = _tool_run.get("code_loop") or {}
+            if _code_result and not _code_result.get("ok"):
+                _err = ((_code_result.get("autofix") or {}).get("error")
+                        or (_code_result.get("initial_run") or {}).get("stderr")
+                        or (_code_result.get("initial_run") or {}).get("error")
+                        or "Controlled code execution did not pass.")
+                r19_record_failure(
+                    owner,
+                    "Verified code/runtime failure for a similar task: " + re.sub(r"\s+"," ",str(_err))[:900],
+                    profile or "coding",
+                )
+        except Exception:
+            pass
+        try:
+            if (_r20.get("capabilities") or {}).get("project_brain"):
+                r15_cloud_event(owner,"r23_project_turn",json.dumps({
+                    "project_id":body.project_id,
+                    "request_id":request_id,
+                    "profile":profile,
+                    "world_model":bool(_tool_run.get("world_model")),
+                    "code_verified":bool((_tool_run.get("code_loop") or {}).get("ok")),
+                },ensure_ascii=False))
+        except Exception:
+            pass
+
+    # Tools gather evidence; the R23 main brain keeps ownership of synthesis.
+    # Only if retrieval completely fails do we fall back to Compound's built-in web tools.
     if _r20.get("needs_live"):
         if _tool_run.get("evidence"):
-            if groq_key_loaded():
-                model, route = SMART_MODEL, "web-synthesis"
-            elif openrouter_key_loaded():
-                model, route = OR_QWEN_MODEL, "web-synthesis"
-            elif nvidia_key_loaded():
-                model, route = NVIDIA_MODEL, "web-synthesis"
+            if not _r20.get("r23"):
+                if groq_key_loaded():
+                    model, route = SMART_MODEL, "web-synthesis"
+                elif openrouter_key_loaded():
+                    model, route = OR_QWEN_MODEL, "web-synthesis"
+                elif nvidia_key_loaded():
+                    model, route = NVIDIA_MODEL, "web-synthesis"
+            else:
+                route = "web-synthesis"
         elif groq_key_loaded():
-            # Full Compound supports multiple server-side web_search / visit_website calls.
             model, route = RESEARCH_MODEL, "research"
 
     messages = build_messages(owner, body, profile, _r20)
@@ -1975,7 +2049,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "difficulty":int(_r20.get("difficulty") or _difficulty),
         "controller":_r20,
         "intent":infer_intent(body.message),
-        "cognition":{"core":"R22","depth":str(_r20.get("depth") or "smart"),"main_brain_first":True},
+        "cognition":{"core":"R23","depth":str(_r20.get("depth") or "smart"),"main_brain_first":True,"features":11},
         "stages":["understand","tool" if _r20.get("needs_tools") else "reason","verify" if _r20.get("verify") else "answer"],
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
         "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0)},
@@ -2012,8 +2086,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r14_knowledge_graph":r14_graph_stats(owner) if _legacy_diag else {"lean_skipped":True},
         "adaptive_tier":str(_r20.get("depth") or "smart"),
         "agent_mode":bool(body.agent_mode),
-        "decision_summary":{"core":"R22","route":route,"model":model,"reason":_r20.get("reason")},
-        "capabilities":{"lean_core":True,"tools":bool(_r20.get("needs_tools")),"live":bool(_r20.get("needs_live")),"verification":bool(_r20.get("verify"))}
+        "decision_summary":{"core":"R23","route":route,"model":model,"reason":_r20.get("reason")},
+        "capabilities":_r20.get("capabilities") or {"lean_core":True,"tools":bool(_r20.get("needs_tools")),"live":bool(_r20.get("needs_live")),"verification":bool(_r20.get("verify"))}
     }})+"\n").encode()
 
     stream_messages = messages
@@ -2081,7 +2155,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 model, route = used_model, "backup"
                 yield (json.dumps({"meta":{"route":"backup","model":model,"profile":profile}})+"\n").encode()
 
-        for line in stream_response(r, owner, body.message, route, model, request_id, started_at, profile, retry_messages=stream_messages, brevity_policy=_length_policy, r7_report=_r7_preflight):
+        _r23_project_memory = _project_id if ((_r20.get("capabilities") or {}).get("project_brain")) else ""
+        for line in stream_response(r, owner, body.message, route, model, request_id, started_at, profile, retry_messages=stream_messages, brevity_policy=_length_policy, r7_report=_r7_preflight, project_id=_r23_project_memory):
             yield line.encode()
         try:
             task_checkpoint(request_id, "Verify", "complete", "Local answer audit completed; runtime claims remain unverified unless a real execution tool supplied evidence.")
@@ -2576,6 +2651,11 @@ def capabilities():
         "r19_failure_memory": True,
         "r19_long_context": True,
         "r19_training_dataset": r19_training_stats(),
+        "r23_unified_brain": r20_status(),
+        "r23_all_11": r23_capability_status(),
+        "r23_agent_runtime": r23_agent_status(),
+        "r23_long_context": r23_context_status(),
+        "r23_release_ready": r23_eval_run().get("all_11_ready",False),
         "r7_capability_manifest": capability_manifest(),
         "core_api_v1": True,
         "core_conversation_store": True,
@@ -2601,29 +2681,40 @@ def capabilities():
 
 @app.post("/api/brain/inspect")
 def brain_inspect(body: ChatBody, request: Request):
-    profile = task_profile(body.message, body.files)
-    difficulty = task_difficulty(body.message)
-    intent = infer_intent(body.message)
-    cognition = cognitive_profile(body.message, difficulty, intent, profile)
-    model, route, _ = select_model(body.message, body.images, body.files, body.mode)
-    graph = extract_project_graph(body.project_context, body.files, None)
-    skills = build_skill_context(body.message, profile)[1]
-    r5 = preflight_v5(body.message, profile, difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
-    r7 = r7_preflight(body.message, profile, difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
-    project_index = index_files(body.files or [])
+    file_names=[str(getattr(x,"name","file")) for x in (body.files or [])]
+    decision=r20_plan(
+        body.message,
+        history=body.history,
+        file_names=file_names,
+        has_images=bool(body.images),
+        has_project=bool(body.project_context or (body.project_id and body.project_id!="default")),
+        agent_mode=bool(body.agent_mode),
+        explicit_mode=body.mode,
+    )
+    profile=str(decision.get("profile") or task_profile(body.message,body.files))
+    model,route=r20_resolve_route(
+        decision,
+        providers={"groq":groq_key_loaded(),"nvidia":nvidia_key_loaded(),"openrouter":openrouter_key_loaded()},
+        models={
+            "fast":FAST_MODEL,"smart":SMART_MODEL,"creator":CREATOR_MODEL,"vision":VISION_MODEL,
+            "live":LIVE_MODEL,"research":RESEARCH_MODEL,"nvidia":NVIDIA_MODEL,
+            "or_nemotron":OR_NEMOTRON_MODEL,"or_deepseek":OR_DEEPSEEK_MODEL,"or_qwen":OR_QWEN_MODEL,
+        },
+    )
+    pid=ensure_project((body.project_id or "").strip() or "default")
     return {
-        "profile": profile,
-        "intent": intent,
-        "difficulty": difficulty,
-        "route": route,
-        "model": model,
-        "cognition": cognition,
-        "stages": task_stages(cognition),
-        "skills": skills,
-        "project_graph": graph,
-        "r5_preflight": r5,
-        "r7_preflight": r7,
-        "project_index": project_index,
+        "core":"R23",
+        "profile":profile,
+        "difficulty":int(decision.get("difficulty") or 1),
+        "depth":decision.get("depth"),
+        "route":route,
+        "model":model,
+        "controller":decision,
+        "capabilities":decision.get("capabilities") or {},
+        "project_id":pid,
+        "project_brain":project_stats(pid),
+        "project_index":index_files(body.files or []),
+        "skills":build_skill_context(body.message,profile)[1],
     }
 
 
@@ -2856,7 +2947,24 @@ def artifacts_api(workspace: str="default"):
 
 @app.get("/api/evaluation")
 def evaluation_api():
-    return run_internal_eval()
+    base=run_internal_eval()
+    base["r23"]=r23_eval_run()
+    base["r23_all_11_ready"]=bool(base["r23"].get("all_11_ready"))
+    return base
+
+@app.get("/api/r23/evaluation")
+def r23_evaluation_api():
+    return r23_eval_run()
+
+@app.get("/api/r23/capabilities")
+def r23_capabilities_api():
+    return {
+        "brain":r20_status(),
+        "capabilities":r23_capability_status(),
+        "agent_runtime":r23_agent_status(),
+        "context":r23_context_status(),
+        "cloud_brain":r15_cloud_status(),
+    }
 
 @app.get("/api/provider-check")
 def provider_check(provider: str = "groq"):
@@ -2966,6 +3074,12 @@ def diagnostics(request: Request):
         "r20_controller": (BASE / "r20_controller.py").exists(),
         "r22_lean_core": (BASE / "r22_lean_core.py").exists(),
         "r22_benchmarks": (BASE / "r22_benchmarks.py").exists(),
+        "r23_brain": (BASE / "r23_brain.py").exists(),
+        "r23_capabilities": (BASE / "r23_capabilities.py").exists(),
+        "r23_context": (BASE / "r23_context.py").exists(),
+        "r23_research": (BASE / "r23_research.py").exists(),
+        "r23_agent_runtime": (BASE / "r23_agent_runtime.py").exists(),
+        "r23_eval_lab": (BASE / "r23_eval_lab.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -2986,6 +3100,7 @@ def diagnostics(request: Request):
     r14_checks = run_r14_benchmarks()
     r15_checks = r15_eval_run()
     r22_checks = r22_eval_run()
+    r23_checks = r23_eval_run()
     provider = provider_config_status()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
@@ -3010,6 +3125,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R15-R19 capability checks failed.")
     if r22_checks.get("score", 0) < 100:
         warnings.append("One or more R22 lean-intelligence checks failed.")
+    if not r23_checks.get("all_11_ready"):
+        warnings.append("R23 did not pass all 11 major-capability checks.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -3032,6 +3149,10 @@ def diagnostics(request: Request):
         "r14_eval":r14_checks,
         "r15_eval":r15_checks,
         "r22_eval":r22_checks,
+        "r23_eval":r23_checks,
+        "r23_brain":r20_status(),
+        "r23_agent_runtime":r23_agent_status(),
+        "r23_context":r23_context_status(),
         "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
@@ -3092,6 +3213,11 @@ def status(request: Request):
         "r13_eval_score":run_r13_benchmarks().get("score",0),
         "r14_eval_score":run_r14_benchmarks().get("score",0),
         "r15_eval_score":r15_eval_run().get("score",0),
+        "r23_eval_score":r23_eval_run().get("score",0),
+        "r23_all_11_ready":r23_eval_run().get("all_11_ready",False),
+        "r23_brain":r20_status(),
+        "r23_agent_runtime":r23_agent_status(),
+        "r23_context":r23_context_status(),
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner),
