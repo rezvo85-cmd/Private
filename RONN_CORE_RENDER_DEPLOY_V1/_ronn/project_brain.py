@@ -164,11 +164,25 @@ def export_project(pid, fact_limit=80, relation_limit=80):
             "SELECT src,relation,dst,evidence,updated FROM relations WHERE project_id=? ORDER BY updated DESC LIMIT ?",
             (pid,max(1,min(int(relation_limit),200))),
         ).fetchall()
+    portable_facts=[]
+    for x in facts:
+        d=dict(x)
+        d["value"]=str(d.get("value") or "")[:1600]
+        d["source"]=str(d.get("source") or "")[:160]
+        portable_facts.append(d)
+    portable_relations=[]
+    for x in relations:
+        d=dict(x)
+        d["src"]=str(d.get("src") or "")[:220]
+        d["relation"]=str(d.get("relation") or "")[:80]
+        d["dst"]=str(d.get("dst") or "")[:220]
+        d["evidence"]=str(d.get("evidence") or "")[:600]
+        portable_relations.append(d)
     return {
         "version":"R23-PROJECT-SNAPSHOT-1",
-        "project":{"name":project["name"] if project else "","summary":project["summary"] if project else ""},
-        "facts":[dict(x) for x in facts],
-        "relations":[dict(x) for x in relations],
+        "project":{"name":(project["name"] if project else "")[:180],"summary":(project["summary"] if project else "")[:1200]},
+        "facts":portable_facts,
+        "relations":portable_relations,
         "exported_at":int(time.time()),
     }
 
