@@ -130,6 +130,7 @@ def verify_package_integrity():
         "_ronn/static/index.html",
         "_ronn/static/style.css",
         "_ronn/static/mobile_fit.css",
+        "_ronn/static/service-worker.js",
         "_ronn/r20_controller.py",
         "_ronn/r22_lean_core.py",
         "_ronn/r22_benchmarks.py",
