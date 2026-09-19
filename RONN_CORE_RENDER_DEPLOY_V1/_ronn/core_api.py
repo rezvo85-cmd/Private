@@ -244,6 +244,7 @@ def chat(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)):
     effective_style = body.style if body.style != "auto" else settings.get("response_style", "auto")
     effective_mode = body.mode if body.mode != "auto" else settings.get("reasoning_mode", "auto")
     payload = body.dict()
+    payload["project_id"] = actual_project_id
     payload["style"] = effective_style
     payload["mode"] = effective_mode
     payload["agent_mode"] = bool(body.agent_mode if body.agent_mode is not None else settings.get("agent_mode", True))
@@ -305,6 +306,7 @@ def chat_complete(body: CoreChatBody, request: Request, _: bool = Depends(_chat_
     actual_project_id = conversation.get("project_id") or "default"
     settings = get_settings(owner)
     payload = body.dict()
+    payload["project_id"] = actual_project_id
     payload["style"] = body.style if body.style != "auto" else settings.get("response_style", "auto")
     payload["mode"] = body.mode if body.mode != "auto" else settings.get("reasoning_mode", "auto")
     add_message(owner, cid, "user", body.message, {"project_id":actual_project_id})
@@ -343,6 +345,7 @@ def chat_sse(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)
     conversation=ensure_conversation(owner,body.conversation_id,body.project_id,"New chat")
     cid=conversation["conversation_id"]; project_id=conversation.get("project_id") or "default"
     settings=get_settings(owner); payload=body.dict()
+    payload["project_id"]=project_id
     payload["style"]=body.style if body.style!="auto" else settings.get("response_style","auto")
     payload["mode"]=body.mode if body.mode!="auto" else settings.get("reasoning_mode","auto")
     add_message(owner,cid,"user",body.message,{"project_id":project_id})
