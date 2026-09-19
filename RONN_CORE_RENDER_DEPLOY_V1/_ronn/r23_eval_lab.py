@@ -78,6 +78,9 @@ def run():
             {"model":arena_models["or_nemotron"],"profile":"analysis","good":0,"bad":4,"updated":9999999999999},
             {"model":arena_models["nvidia"],"profile":"analysis","good":0,"bad":4,"updated":9999999999999},
             {"model":arena_models["smart"],"profile":"analysis","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["or_nemotron"],"profile":"chat","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["nvidia"],"profile":"chat","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["smart"],"profile":"chat","good":0,"bad":4,"updated":9999999999999},
         ],
     })
     adaptive_auto=plan("Analyze this production architecture and compare reliability, scaling, cost, and failure modes.")
@@ -87,6 +90,10 @@ def run():
         explicit_mode="fast",
     )
     adaptive_fast_route=resolve_route(adaptive_fast,PROVIDERS,arena_models)
+    adaptive_verify=plan("Analyze this production architecture, deploy strategy, migration, and failure recovery.")
+    adaptive_verify_route=resolve_route(adaptive_verify,PROVIDERS,arena_models)
+    adaptive_simple=plan("hi")
+    adaptive_simple_route=resolve_route(adaptive_simple,PROVIDERS,arena_models)
 
     tests=[
         _case("main brain combines objective arena and profile outcomes","1_stronger_main_brain",
@@ -110,6 +117,11 @@ def run():
                   and adaptive_fast_route[1]=="knowledge"
                   and adaptive_fast.get("depth")=="fast"
                   and adaptive_fast.get("adaptive_effort",{}).get("reason")=="explicit_mode_preserved"
+                  and adaptive_verify_route[1]=="deep"
+                  and adaptive_verify.get("verify") is True
+                  and adaptive_verify.get("prompt_policy",{}).get("include_verification_directive") is True
+                  and adaptive_simple.get("depth")=="fast"
+                  and adaptive_simple.get("adaptive_effort",{}).get("applied") is False
               )),
 
         _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",
