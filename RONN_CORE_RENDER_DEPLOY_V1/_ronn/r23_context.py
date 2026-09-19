@@ -12,7 +12,14 @@ from typing import Any
 IMPORTANT = (
     "must","don't","do not","keep","remember","decided","decision","constraint",
     "requirement","error","failed","broken","works","doesn't","cannot","project",
-    "name","rename","goal","next","continue","still","fixed","prefer","want","need"
+    "name","rename","goal","next","continue","still","fixed","prefer","want","need",
+    "instead","actually","change that","replace","correction","from now on"
+)
+
+CORRECTION_HINTS = (
+    "actually","instead","change that","replace ","correction","from now on",
+    "scratch that","ignore that","forget that","not anymore","use this instead",
+    "rename ","switch to ","no, ","no - ","no — "
 )
 
 
@@ -26,13 +33,25 @@ def _key(text: str) -> str:
     return " ".join(words[:18])
 
 
+def _is_correction(low: str) -> bool:
+    return any(x in low for x in CORRECTION_HINTS)
+
+
 def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> dict[str, Any]:
     rows = list(history or [])
-    older = rows[:-max(1, int(keep_recent))] if len(rows) > keep_recent else []
+    keep_recent=max(1,int(keep_recent))
+    older = rows[:-keep_recent] if len(rows) > keep_recent else []
     if not older:
-        return {"text":"","items":0,"source_turns":0,"kept_recent":min(len(rows),keep_recent)}
+        return {
+            "text":"",
+            "items":0,
+            "source_turns":0,
+            "kept_recent":min(len(rows),keep_recent),
+            "superseded_duplicates":0,
+        }
 
     buckets = {
+        "corrections": [],
         "constraints": [],
         "decisions": [],
         "failures": [],
@@ -40,8 +59,12 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
         "context": [],
     }
     seen = set()
+    superseded_duplicates=0
 
-    for row in older:
+    # Scan newest -> oldest so when two near-duplicate durable facts exist, the
+    # newer one survives and the stale duplicate is discarded.
+    for idx in range(len(older)-1,-1,-1):
+        row=older[idx]
         if not isinstance(row, dict):
             continue
         role = str(row.get("role") or "")
@@ -52,17 +75,22 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
             continue
         low = content.lower()
 
-        # User statements get priority because they define the goal.
-        important = role == "user" or any(x in low for x in IMPORTANT)
+        correction = role=="user" and _is_correction(low)
+        important = correction or role == "user" or any(x in low for x in IMPORTANT)
         if not important:
             continue
 
         key = _key(content)
-        if not key or key in seen:
+        if not key:
+            continue
+        if key in seen:
+            superseded_duplicates+=1
             continue
         seen.add(key)
 
-        if any(x in low for x in ("must","don't","do not","constraint","requirement","keep ","prefer")):
+        if correction:
+            bucket = "corrections"
+        elif any(x in low for x in ("must","don't","do not","constraint","requirement","keep ","prefer")):
             bucket = "constraints"
         elif any(x in low for x in ("decided","decision","architecture","rename","use ","switch to")):
             bucket = "decisions"
@@ -73,41 +101,61 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
         else:
             bucket = "context"
 
-        buckets[bucket].append(f"{role}: {content}")
+        # Human-readable history turn number. Higher means newer.
+        buckets[bucket].append({
+            "turn":idx+1,
+            "role":role,
+            "content":content,
+        })
 
-    lines = ["RONN COMPRESSED LONG-TERM CONVERSATION CONTEXT:"]
+    lines = [
+        "RONN COMPRESSED LONG-TERM CONVERSATION CONTEXT:",
+        "Precedence: newest explicit user instruction wins. Higher [turn N] is newer.",
+        "Items under Latest corrections / superseding instructions override conflicting older compressed items.",
+        "Assistant entries are context, not authority over explicit user instructions.",
+    ]
     labels = (
-        ("constraints","Constraints"),
-        ("decisions","Decisions"),
-        ("failures","Known failures"),
-        ("goals","Goals / unfinished work"),
-        ("context","Other useful context"),
+        ("corrections","Latest corrections / superseding instructions",12),
+        ("constraints","Current constraints / preferences",12),
+        ("decisions","Decisions / architecture",10),
+        ("failures","Known failures / unresolved bugs",10),
+        ("goals","Goals / unfinished work",10),
+        ("context","Other useful context",6),
     )
-    count = 0
-    for key, label in labels:
-        vals = buckets[key][-10:]
+
+    count=0
+    clipped=0
+    current_len=sum(len(x)+1 for x in lines)
+    for key,label,limit in labels:
+        vals=buckets[key][:limit]  # already newest-first
         if not vals:
             continue
-        lines.append(label + ":")
-        for val in vals:
-            lines.append("- " + val)
-            count += 1
+        section_added=False
+        for item in vals:
+            prefix=f"[turn {item['turn']} {item['role']}] "
+            line="- "+prefix+item["content"]
+            extra=(len(label)+2 if not section_added else 0)+len(line)+1
+            if current_len+extra > int(max_chars):
+                clipped+=1
+                continue
+            if not section_added:
+                lines.append(label+":")
+                current_len+=len(label)+2
+                section_added=True
+            lines.append(line)
+            current_len+=len(line)+1
+            count+=1
 
-    text = "\n".join(lines)
-    if len(text) > max_chars:
-        text = text[-max_chars:]
-        # Avoid starting in the middle of a line if clipped.
-        first = text.find("\n")
-        if first >= 0:
-            text = "RONN COMPRESSED LONG-TERM CONVERSATION CONTEXT:\n" + text[first+1:]
-
+    text="\n".join(lines) if count else ""
     return {
-        "text": text if count else "",
-        "items": count,
-        "source_turns": len(older),
-        "kept_recent": min(len(rows),keep_recent),
+        "text":text,
+        "items":count,
+        "source_turns":len(older),
+        "kept_recent":min(len(rows),keep_recent),
+        "superseded_duplicates":superseded_duplicates,
+        "clipped_items":clipped,
+        "ordering":"newest-first within priority sections",
     }
-
 
 
 
@@ -133,8 +181,9 @@ def project_scope_key(project_id: str = "default", project_context: str = "") ->
 
 def status():
     return {
-        "version":"R23-CONTEXT-1",
-        "mode":"structured compression + recent-turn preservation",
-        "categories":["constraints","decisions","failures","goals","context"],
+        "version":"R23-CONTEXT-2",
+        "mode":"current-state compression + recent-turn preservation",
+        "categories":["corrections","constraints","decisions","failures","goals","context"],
+        "precedence":"newest explicit user instruction wins; corrections first",
         "project_scope":"core project id first; ad-hoc context fallback",
     }
