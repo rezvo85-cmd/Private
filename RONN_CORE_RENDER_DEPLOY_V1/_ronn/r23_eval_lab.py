@@ -75,8 +75,25 @@ def run():
             {"model":arena_models["or_nemotron"],"profile":"coding","good":3,"bad":0,"updated":9999999999999},
             {"model":arena_models["nvidia"],"profile":"coding","good":0,"bad":3,"updated":9999999999999},
             {"model":arena_models["smart"],"profile":"coding","good":1,"bad":2,"updated":9999999999999},
+            {"model":arena_models["or_nemotron"],"profile":"analysis","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["nvidia"],"profile":"analysis","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["smart"],"profile":"analysis","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["or_nemotron"],"profile":"chat","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["nvidia"],"profile":"chat","good":0,"bad":4,"updated":9999999999999},
+            {"model":arena_models["smart"],"profile":"chat","good":0,"bad":4,"updated":9999999999999},
         ],
     })
+    adaptive_auto=plan("Analyze this production architecture and compare reliability, scaling, cost, and failure modes.")
+    adaptive_auto_route=resolve_route(adaptive_auto,PROVIDERS,arena_models)
+    adaptive_fast=plan(
+        "Analyze this production architecture and compare reliability, scaling, cost, and failure modes.",
+        explicit_mode="fast",
+    )
+    adaptive_fast_route=resolve_route(adaptive_fast,PROVIDERS,arena_models)
+    adaptive_verify=plan("Analyze this production architecture, deploy strategy, migration, and failure recovery.")
+    adaptive_verify_route=resolve_route(adaptive_verify,PROVIDERS,arena_models)
+    adaptive_simple=plan("hi")
+    adaptive_simple_route=resolve_route(adaptive_simple,PROVIDERS,arena_models)
 
     tests=[
         _case("main brain combines objective arena and profile outcomes","1_stronger_main_brain",
@@ -94,6 +111,17 @@ def run():
                   and resolve_route(
                       plan("Fix this Python bug in my code."),PROVIDERS,arena_models
                   )[0]==arena_models["or_nemotron"]
+                  and adaptive_auto_route[1]=="deep"
+                  and adaptive_auto.get("adaptive_effort",{}).get("applied")
+                  and adaptive_auto.get("depth")=="deep"
+                  and adaptive_fast_route[1]=="knowledge"
+                  and adaptive_fast.get("depth")=="fast"
+                  and adaptive_fast.get("adaptive_effort",{}).get("reason")=="explicit_mode_preserved"
+                  and adaptive_verify_route[1]=="deep"
+                  and adaptive_verify.get("verify") is True
+                  and adaptive_verify.get("prompt_policy",{}).get("include_verification_directive") is True
+                  and adaptive_simple.get("depth")=="fast"
+                  and adaptive_simple.get("adaptive_effort",{}).get("applied") is False
               )),
 
         _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",

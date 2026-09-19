@@ -40,6 +40,7 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         "r23":True,
         "lean_core":True,
         "main_brain_first":True,
+        "explicit_mode":str(explicit_mode or "auto").strip().lower(),
         "capabilities":caps,
     })
 
@@ -100,7 +101,10 @@ def _pick_main_brain(providers,models,profile="chat"):
     """
     candidates=_main_brain_candidates(providers,models)
     if not candidates:
-        return models["smart"],"unknown",0
+        return models["smart"],"unknown",0,{
+            "arena":{"ready":False,"scores":{}},
+            "outcomes":{"profile":str(profile or "chat"),"ready":False,"scores":{}},
+        }
 
     candidate_models=[m for m,_,_ in candidates]
     arena=arena_routing_signal(candidate_models)
@@ -148,6 +152,75 @@ def _pick_main_brain(providers,models,profile="chat"):
     }
 
 
+def _apply_adaptive_effort(decision,selected,outcome_signal):
+    """Raise effort only when repeated profile outcomes justify it.
+
+    User-selected modes always win. Easy tasks are never escalated by feedback.
+    """
+    mode=str(decision.get("explicit_mode") or "auto").strip().lower()
+    difficulty=int(decision.get("difficulty") or 1)
+    before=str(decision.get("depth") or "smart")
+    scores=(outcome_signal or {}).get("scores") or {}
+    row=scores.get(selected) or {}
+    ratings=int(row.get("ratings") or 0)
+    avg=float(row.get("avg_rating") or 0)
+
+    result={
+        "applied":False,
+        "profile":str(decision.get("profile") or "chat"),
+        "model":selected,
+        "ratings":ratings,
+        "avg_rating":avg if ratings else None,
+        "depth_before":before,
+        "depth_after":before,
+        "verification_added":False,
+        "reason":"insufficient_or_inapplicable_evidence",
+    }
+    if mode!="auto":
+        result["reason"]="explicit_mode_preserved"
+        decision["adaptive_effort"]=result
+        return result
+    if difficulty<3 or ratings<3:
+        decision["adaptive_effort"]=result
+        return result
+    if avg>=0:
+        result["reason"]="outcomes_not_negative"
+        decision["adaptive_effort"]=result
+        return result
+
+    after=before
+    if avg<=-.5:
+        if before in {"fast","smart"}:
+            after="deep"
+        elif before=="deep" and difficulty>=6:
+            after="apex"
+    elif avg<0 and difficulty>=4 and before=="smart":
+        after="deep"
+
+    verify_added=False
+    if avg<=-.5 and difficulty>=4 and not bool(decision.get("verify")):
+        decision["verify"]=True
+        verify_added=True
+        policy=dict(decision.get("prompt_policy") or {})
+        policy["include_verification_directive"]=True
+        policy["include_failure_lessons"]=True
+        policy["include_evidence_plan"]=True
+        decision["prompt_policy"]=policy
+
+    if after!=before:
+        decision["depth"]=after
+
+    applied=bool(after!=before or verify_added)
+    result.update({
+        "applied":applied,
+        "depth_after":after,
+        "verification_added":verify_added,
+        "reason":"repeated_negative_profile_outcomes" if applied else "negative_but_below_escalation_threshold",
+    })
+    decision["adaptive_effort"]=result
+    return result
+
+
 def resolve_route(decision,providers,models):
     """Select one strong main brain; tools/support models stay underneath it."""
     openrouter=bool(providers.get("openrouter"))
@@ -161,7 +234,6 @@ def resolve_route(decision,providers,models):
         decision["main_brain_policy"]="vision-capability-boundary"
         return selected,"vision"
 
-    depth=str(decision.get("depth") or "smart")
     profile=str(decision.get("profile") or "chat")
     selected,provider,penalty,signals=_pick_main_brain(providers,models,profile)
     decision["main_brain_selected"]=selected
@@ -169,8 +241,10 @@ def resolve_route(decision,providers,models):
     decision["main_brain_penalty"]=penalty
     decision["main_brain_arena"]=signals.get("arena") or {}
     decision["main_brain_outcomes"]=signals.get("outcomes") or {}
-    decision["main_brain_policy"]="quality-first + health-aware + objective-arena-aware + profile-outcome-aware"
+    _apply_adaptive_effort(decision,selected,decision["main_brain_outcomes"])
+    decision["main_brain_policy"]="quality-first + health-aware + objective-arena-aware + profile-outcome-aware + adaptive-effort"
 
+    depth=str(decision.get("depth") or "smart")
     if depth=="apex":
         return selected,"apex"
     if depth=="deep":
@@ -217,6 +291,8 @@ def status():
         "main_brain_health_aware":True,
         "brain_arena_aware":True,
         "profile_outcome_learning":True,
+        "adaptive_outcome_effort":True,
+        "adaptive_effort_guardrails":"auto mode only; difficulty>=3; ratings>=3",
         "council_default":False,
         "competition_threshold":"difficulty>=6 only",
     }
