@@ -13,6 +13,7 @@ from r23_brain_arena import (
     domain_signal as arena_domain_signal,
 )
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
+from r23_knowledge_rescue import gap_signal as knowledge_gap_signal, should_buffer as knowledge_gap_should_buffer
 from r23_context import compress_history, project_scope_active, project_scope_key
 from r23_agent_runtime import status as agent_status, evidence_contract as agent_evidence_contract
 from r23_research import subqueries
@@ -271,11 +272,22 @@ def run():
                   and verified_evidence_sample["runtime_execution"]["verified_success"] is True
               )),
 
-        _case("unknown terms automatically trigger universal retrieval","11_universal_retrieval",
+        _case("unknown terms and admitted knowledge gaps trigger retrieval rescue","11_universal_retrieval",
               lambda:bool("ZXQ_991" in unknown_candidates("what does ZXQ_991 mean")
                           and retrieval_reason("what does ZXQ_991 mean")["required"]
                           and unknown_plan["needs_live"]
-                          and unknown_plan["capabilities"]["universal_retrieval"])),
+                          and unknown_plan["capabilities"]["universal_retrieval"]
+                          and knowledge_gap_should_buffer("What is VexaRuntime?","knowledge")
+                          and knowledge_gap_signal(
+                              "I'm not familiar with VexaRuntime, so I can't identify it reliably.",
+                              "What is VexaRuntime?",
+                              "knowledge",
+                          )["required"]
+                          and not knowledge_gap_signal(
+                              "I'm not sure which color you would prefer.",
+                              "Which color should I use for this fictional logo?",
+                              "creative",
+                          )["required"])),
     ]
 
     passed=sum(1 for x in tests if x["passed"])
