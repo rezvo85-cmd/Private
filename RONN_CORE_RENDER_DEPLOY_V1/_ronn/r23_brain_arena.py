@@ -268,7 +268,7 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
 
     A challenger must first complete the entire global arena. For task profiles
     with a domain benchmark it must also be perfect on that complete domain set.
-    Profiles without a domain benchmark require at least 7/8 global checks.
+    Profiles without a matching objective domain are never challenger-promoted.
     """
     model=str(model or "")
     domain=profile_domain(profile)
@@ -431,13 +431,18 @@ def run(models, ask_fn: Callable[[str,str,int],str], *, force=False, challenger_
 
     current=routing_signal(models)
     now=time.time()
+    base_fresh=bool(
+        current.get("ready")
+        and current.get("oldest")
+        and now-float(current["oldest"]) < RUN_TTL_SECONDS
+    )
     cert_scores=_fresh_row_map(
         challengers,
         domain="certification",
         min_samples=CERTIFICATION_MIN_SAMPLES,
     ) if challengers else {}
     cert_ready=not challengers or all(m in cert_scores for m in challengers)
-    if not force and current.get("ready") and current.get("oldest") and now-float(current["oldest"]) < RUN_TTL_SECONDS and cert_ready:
+    if not force and base_fresh and cert_ready:
         return {
             "ok":True,
             "version":VERSION,
@@ -455,12 +460,17 @@ def run(models, ask_fn: Callable[[str,str,int],str], *, force=False, challenger_
 
     _LAST_ATTEMPT=now
     try:
-        with ThreadPoolExecutor(max_workers=min(3,len(models))) as ex:
-            results=list(ex.map(lambda m:_run_one(m,ask_fn),models))
+        results=[]
+        base_ran=bool(force or not base_fresh)
+        if base_ran:
+            with ThreadPoolExecutor(max_workers=min(3,len(models))) as ex:
+                results=list(ex.map(lambda m:_run_one(m,ask_fn),models))
+
         certification_results=[]
-        if challengers:
-            with ThreadPoolExecutor(max_workers=min(2,len(challengers))) as ex:
-                certification_results=list(ex.map(lambda m:_run_certification(m,ask_fn),challengers))
+        cert_targets=challengers if force else [m for m in challengers if m not in cert_scores]
+        if cert_targets:
+            with ThreadPoolExecutor(max_workers=min(2,len(cert_targets))) as ex:
+                certification_results=list(ex.map(lambda m:_run_certification(m,ask_fn),cert_targets))
         signal=routing_signal(models)
         cert_scores=_fresh_row_map(
             challengers,
@@ -471,7 +481,8 @@ def run(models, ask_fn: Callable[[str,str,int],str], *, force=False, challenger_
         return {
             "ok":True,
             "version":VERSION,
-            "models_tested":len(models),
+            "models_tested":len(models) if base_ran else 0,
+            "base_arena_ran":base_ran,
             "cases_per_model":len(CASES),
             "results":results,
             "routing":signal,
@@ -523,6 +534,8 @@ def status(models=None, challenger_models=None) -> dict[str,Any]:
             "no_domain_promotion":False,
             "global_with_domain_min_score":62.5,
             "domain_min_score":100.0,
+            "certification_samples":CERTIFICATION_MIN_SAMPLES,
+            "certification_min_score":CERTIFICATION_MIN_SCORE,
             "freshness_days":MAX_AGE_DAYS,
         },
         "all_scores":model_arena("main"),
