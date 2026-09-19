@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from project_brain import model_arena, score_model
+from project_brain import model_arena, score_model, set_model_score
 
 VERSION="R23-BRAIN-ARENA-1"
 MIN_SAMPLES=4
@@ -133,7 +133,6 @@ def _run_one(model: str, ask_fn: Callable[[str,str,int],str]) -> dict[str,Any]:
             latency=max(0.0,time.time()-started)
             ok=grade(case,answer)
             numeric=100.0 if ok else 0.0
-            score_model(model,"main",numeric,latency)
             score_model(model,str(case["domain"]),numeric,latency)
             completed+=1
             passed+=int(ok)
@@ -151,11 +150,16 @@ def _run_one(model: str, ask_fn: Callable[[str,str,int],str]) -> dict[str,Any]:
                 "passed":False,
                 "transport_error":exc.__class__.__name__,
             })
+    score=round(100*passed/max(1,completed),1) if completed else None
+    if completed:
+        latencies=[float(x.get("latency") or 0) for x in rows if "latency" in x]
+        avg_latency=sum(latencies)/max(1,len(latencies))
+        set_model_score(model,"main",score,avg_latency,completed)
     return {
         "model":model,
         "completed":completed,
         "passed":passed,
-        "score":round(100*passed/max(1,completed),1) if completed else None,
+        "score":score,
         "cases":rows,
     }
 
