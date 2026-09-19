@@ -48,9 +48,9 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     min-height:0!important;
     overflow:hidden!important;
     background:#212121!important;
-    transform:translate3d(0,var(--ronn-vv-top,0px),0)!important;
+    transform:none!important;
     transform-origin:top left!important;
-    will-change:transform,height!important;
+    will-change:height!important;
   }
 
   .ronn19 .main{
@@ -232,6 +232,8 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     overflow-x:hidden!important;
     overscroll-behavior-y:contain!important;
     -webkit-overflow-scrolling:touch;
+    scroll-behavior:auto!important;
+    overflow-anchor:none!important;
     scroll-padding-bottom:18px!important;
     scrollbar-width:none!important;
   }
@@ -339,6 +341,8 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     border:0!important;
     background:#212121!important;
     pointer-events:auto!important;
+    transform:translateZ(0)!important;
+    -webkit-transform:translateZ(0)!important;
   }
   .ronn19 .presetRow,
   .ronn19 .composerMeta,
@@ -399,6 +403,7 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
     -webkit-appearance:none!important;
     appearance:none!important;
     overflow-y:auto!important;
+    touch-action:manipulation!important;
   }
   .ronn19 .composer textarea::placeholder{
     color:#b7b7b7!important;
@@ -491,8 +496,8 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
   .ronn19 .jumpLatest{bottom:12px!important}
 
-  /* iOS Safari keyboard mode: the shell stays anchored.
-     Safari may pan the visual viewport, but RONN always fills to its visible bottom. */
+  /* iPhone keyboard mode: only the visible viewport height changes.
+     The shell is never translated, so Safari cannot create a layout/pan feedback loop. */
   body.ronn19.mobileKeyboardOpen .appShell{
     height:var(--ronn-vv-height,100dvh)!important;
   }
@@ -507,6 +512,13 @@ button,a,[role="button"],.navBtn,.chatRow,.capGrid button{touch-action:manipulat
   }
   body.ronn19.mobileInputFocused .main{
     scroll-behavior:auto!important;
+  }
+  body.ronn19.mobileKeyboardOpen .chatViewport,
+  body.ronn19.mobileKeyboardOpen .messages{
+    scroll-behavior:auto!important;
+  }
+  body.ronn19.mobileKeyboardOpen .composer{
+    transform:none!important;
   }
 
   /* ---------- panels ---------- */
