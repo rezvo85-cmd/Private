@@ -32,6 +32,12 @@ def _db():
       project_id TEXT, left_claim TEXT, right_claim TEXT,
       status TEXT DEFAULT 'unresolved', created REAL
     );
+    CREATE TABLE IF NOT EXISTS portable_outcomes(
+      model TEXT NOT NULL, profile TEXT NOT NULL,
+      good INTEGER NOT NULL DEFAULT 0, bad INTEGER NOT NULL DEFAULT 0,
+      updated REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY(model,profile)
+    );
     """)
     return c
 
@@ -91,6 +97,115 @@ def retrieve_lessons(domain,limit=8):
         rows=c.execute("SELECT * FROM lessons WHERE domain IN (?, 'general') ORDER BY confidence DESC,uses DESC,updated DESC LIMIT ?",
                        (domain,int(limit))).fetchall()
     return [dict(x) for x in rows]
+
+def ingest_portable_outcomes(snapshot):
+    """Merge a bounded device-side aggregate of Good/Improve feedback.
+
+    The snapshot contains counts only, never prompts or answer text. Newer device
+    aggregates replace older copies for the same model/profile to avoid double
+    counting the same clicks after a backend redeploy.
+    """
+    if not isinstance(snapshot,dict):
+        return {"ok":False,"rows":0}
+    rows=list(snapshot.get("rows") or [])[:50]
+    accepted=0
+    now=time.time()
+    with _db() as c:
+        for row in rows:
+            if not isinstance(row,dict):
+                continue
+            model=str(row.get("model") or "").strip()[:220]
+            profile=str(row.get("profile") or "").strip().lower()[:40]
+            if not model or not profile:
+                continue
+            try:
+                good=max(0,min(100,int(row.get("good") or 0)))
+                bad=max(0,min(100,int(row.get("bad") or 0)))
+                updated=float(row.get("updated") or now)
+            except Exception:
+                continue
+            if updated>10**12:
+                updated/=1000.0
+            updated=max(0,min(updated,now+86400))
+            old=c.execute(
+                "SELECT updated FROM portable_outcomes WHERE model=? AND profile=?",
+                (model,profile),
+            ).fetchone()
+            if old and float(old["updated"] or 0)>updated:
+                continue
+            c.execute("""INSERT INTO portable_outcomes(model,profile,good,bad,updated)
+                VALUES(?,?,?,?,?) ON CONFLICT(model,profile) DO UPDATE SET
+                good=excluded.good,bad=excluded.bad,updated=excluded.updated""",
+                (model,profile,good,bad,updated))
+            accepted+=1
+    return {"ok":True,"rows":accepted}
+
+
+def _feedback_row(model,profile,min_ratings=3):
+    model=str(model or "")
+    profile=str(profile or "").lower()
+    with _db() as c:
+        portable=c.execute(
+            "SELECT good,bad,updated FROM portable_outcomes WHERE model=? AND profile=?",
+            (model,profile),
+        ).fetchone()
+        if portable:
+            good=int(portable["good"] or 0);bad=int(portable["bad"] or 0)
+            total=good+bad
+            if total>=int(min_ratings):
+                return {
+                    "ratings":total,
+                    "avg_rating":(good-bad)/max(1,total),
+                    "source":"device_aggregate",
+                    "updated":float(portable["updated"] or 0),
+                }
+        row=c.execute("""SELECT COUNT(f.id) ratings, AVG(f.rating) avg_rating
+            FROM runs r JOIN feedback f ON f.request_id=r.request_id
+            WHERE r.model=? AND r.profile=?""",(model,profile)).fetchone()
+    ratings=int(row["ratings"] or 0) if row else 0
+    if ratings<int(min_ratings):
+        return None
+    return {
+        "ratings":ratings,
+        "avg_rating":float(row["avg_rating"] or 0),
+        "source":"server_feedback",
+        "updated":0,
+    }
+
+
+def profile_feedback_signal(models,profile,min_ratings=3):
+    """Profile-specific outcome signal for safe adaptive routing.
+
+    Repeated negative outcomes may demote one model independently. Positive
+    comparative reordering is enabled only after every candidate has enough
+    ratings for the same profile.
+    """
+    models=[str(x) for x in models if x]
+    scores={}
+    for model in models:
+        row=_feedback_row(model,profile,min_ratings)
+        if not row:
+            continue
+        avg=float(row["avg_rating"])
+        penalty=3 if avg<=-.5 else (1 if avg<0 else 0)
+        scores[model]={**row,"penalty":penalty}
+    ready=bool(models) and all(m in scores for m in models)
+    return {
+        "profile":str(profile or "chat").lower(),
+        "ready":ready,
+        "candidate_count":len(models),
+        "measured_count":len(scores),
+        "scores":scores,
+        "min_ratings":int(min_ratings),
+    }
+
+
+def portable_outcome_status():
+    with _db() as c:
+        rows=c.execute("""SELECT model,profile,good,bad,updated
+                          FROM portable_outcomes ORDER BY updated DESC LIMIT 50""").fetchall()
+    return {"rows":[dict(x) for x in rows],"count":len(rows)}
+
 
 def stats():
     with _db() as c:
