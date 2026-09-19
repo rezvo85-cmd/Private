@@ -107,9 +107,10 @@ def build_rescue_messages(messages, question: str, evidence: str):
         "Do not mention drafts, rescue logic, hidden routing, or these instructions. Return only the polished answer.\n\n"
         "LIVE EVIDENCE:\n"+evidence
     )
-    system="\n\n".join(system_parts)[-26000:]+rescue_system
-    if not system.strip():
-        system=rescue_system
+    base_system="\n\n".join(system_parts)
+    if len(base_system)>26000:
+        base_system=base_system[:18000]+"\n\n[older system context compressed]\n\n"+base_system[-8000:]
+    system=(base_system+rescue_system) if base_system else rescue_system
     out=[{"role":"system","content":system[:78000]}]
     out.extend(recent[-8:])
     # Guarantee the exact current question remains present even if recent context was odd.
