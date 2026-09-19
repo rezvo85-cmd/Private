@@ -139,5 +139,5 @@ def status():
         "features":caps.get("features",{}),
         "policy":"strongest-main-brain + selective capability plane",
         "council_default":False,
-        "competition_threshold":"difficulty>=7 only",
+        "competition_threshold":"difficulty>=6 only",
     }
