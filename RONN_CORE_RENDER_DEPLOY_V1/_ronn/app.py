@@ -84,6 +84,15 @@ from r23_context import (
 from r23_eval_lab import run as r23_eval_run
 from r23_capabilities import status as r23_capability_status
 from r23_brain_arena import run as r23_arena_run, status as r23_arena_status
+from r23_research import research as r23_research_run
+from r23_capabilities import unknown_candidates as r23_unknown_candidates
+from r23_knowledge_rescue import (
+    should_buffer as r23_gap_should_buffer,
+    gap_signal as r23_gap_signal,
+    prefix_ready as r23_gap_prefix_ready,
+    build_rescue_messages as r23_gap_build_messages,
+    status as r23_gap_status,
+)
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 import memory_store_pg as pg_memory
@@ -1664,6 +1673,10 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
     filt = ThinkFilter()
     full = ""
     _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} or model in {"groq/compound","groq/compound-mini"}
+    _gap_buffer = r23_gap_should_buffer(original_message, profile, already_live=_guard_live, has_images=False)
+    _gap_prefix = ""
+    _gap_released = not _gap_buffer
+    _gap_detected = False
     with r:
         if not r.ok:
             if r.status_code == 429:
@@ -1686,16 +1699,93 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                 if clean:
                     full += clean
                     if not _guard_live:
-                        yield json.dumps({"token":clean}) + "\n"
+                        if _gap_buffer and not _gap_released:
+                            _gap_prefix += clean
+                            if r23_gap_signal(_gap_prefix, original_message, profile).get("required"):
+                                _gap_detected = True
+                            elif not _gap_detected and r23_gap_prefix_ready(_gap_prefix):
+                                yield json.dumps({"token":_gap_prefix}) + "\n"
+                                _gap_prefix = ""
+                                _gap_released = True
+                        elif not _gap_detected:
+                            yield json.dumps({"token":clean}) + "\n"
             except Exception:
                 continue
         tail = filt.flush()
         if tail:
             full += tail
             if not _guard_live:
-                yield json.dumps({"token":tail}) + "\n"
+                if _gap_buffer and not _gap_released:
+                    _gap_prefix += tail
+                    if r23_gap_signal(_gap_prefix, original_message, profile).get("required"):
+                        _gap_detected = True
+                    elif not _gap_detected and r23_gap_prefix_ready(_gap_prefix):
+                        yield json.dumps({"token":_gap_prefix}) + "\n"
+                        _gap_prefix = ""
+                        _gap_released = True
+                elif not _gap_detected:
+                    yield json.dumps({"token":tail}) + "\n"
 
     full = full.strip()
+
+    # If the first short sentence admitted a factual knowledge gap, do not show it.
+    # Retrieve evidence and let the same selected main brain answer again.
+    if _gap_buffer and not _gap_released:
+        _final_gap = r23_gap_signal(full, original_message, profile)
+        _gap_detected = bool(_gap_detected or _final_gap.get("required"))
+
+    if _gap_detected and retry_messages and not _guard_live:
+        _gap_original = full
+        try:
+            _gap_depth = "deep" if profile in {"coding","analysis","research","mathscience"} else "smart"
+            _gap_research = r23_research_run(
+                original_message,
+                unknown_terms=r23_unknown_candidates(original_message),
+                depth=_gap_depth,
+            )
+            if _gap_research.get("ok") and _gap_research.get("evidence"):
+                _gap_messages = r23_gap_build_messages(
+                    retry_messages,
+                    original_message,
+                    _gap_research.get("evidence") or "",
+                )
+                _gap_answer, _gap_model = nonstream_with_fallback(
+                    model,
+                    "deep" if _gap_depth=="deep" else "knowledge",
+                    _gap_messages,
+                    1300,
+                )
+                _gap_answer = (_gap_answer or "").strip()
+                if _gap_answer and not looks_like_internal_tool_payload(_gap_answer):
+                    full = _gap_answer
+                    model = _gap_model
+                    route = "knowledge-gap-rescue"
+                    yield json.dumps({
+                        "meta":{
+                            "route":route,
+                            "model":model,
+                            "profile":profile,
+                            "reason":"model_knowledge_gap_researched",
+                            "research":{
+                                "source_count":int(_gap_research.get("source_count") or 0),
+                                "read_count":int(_gap_research.get("read_count") or 0),
+                                "snippet_only_count":int(_gap_research.get("snippet_only_count") or 0),
+                            },
+                        }
+                    }) + "\n"
+                    yield json.dumps({"token":full}) + "\n"
+                    _gap_released = True
+        except Exception:
+            pass
+
+        if not _gap_released:
+            full = _gap_original
+            yield json.dumps({"token":full}) + "\n"
+            _gap_released = True
+    elif _gap_buffer and not _gap_released and full:
+        # Ordinary short answer: release the held prefix once the model is finished.
+        yield json.dumps({"token":full}) + "\n"
+        _gap_released = True
 
     # Never surface model-generated tool protocol. Recover with a real full Compound
     # completion when live evidence/tool execution was requested.
@@ -3342,6 +3432,7 @@ def diagnostics(request: Request):
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
         "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
@@ -3409,6 +3500,7 @@ def status(request: Request):
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
