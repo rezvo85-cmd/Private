@@ -19,7 +19,10 @@ from r23_context import compress_history, project_scope_active, project_scope_ke
 from r23_agent_runtime import status as agent_status, evidence_contract as agent_evidence_contract
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
-from project_brain import ensure_project, remember, retrieve, export_project, import_project, set_model_score
+from project_brain import (
+    ensure_project, remember, retrieve, export_project, import_project, set_model_score,
+    export_model_scores, import_model_scores,
+)
 from experience_engine import learn_lesson, retrieve_lessons, ingest_portable_outcomes, profile_feedback_signal
 
 MODELS={
@@ -156,6 +159,22 @@ def run():
         arena_models,
     )
 
+    arena_memory_source="arena-memory-eval-source"
+    arena_memory_restored="arena-memory-eval-restored"
+    set_model_score(arena_memory_source,"main",100,.21,8)
+    set_model_score(arena_memory_source,"coding",100,.19,3)
+    arena_memory_snapshot=export_model_scores([arena_memory_source],30)
+    arena_memory_rows=[]
+    for _row in arena_memory_snapshot.get("rows",[]):
+        _copy=dict(_row)
+        _copy["model"]=arena_memory_restored
+        arena_memory_rows.append(_copy)
+    arena_memory_restore=import_model_scores(
+        {"version":"R23-ARENA-SNAPSHOT-1","rows":arena_memory_rows},
+        [arena_memory_restored],
+        30,
+    )
+
     evidence_sample=agent_evidence_contract({
         "research":{"sources":[
             {"id":"R1","url":"https://example.com/read","read":True},
@@ -256,8 +275,15 @@ def run():
                   and "10 seconds" not in correction_digest.get("text","")
               )),
 
-        _case("evaluation lab declares all eleven capabilities","6_real_evaluation_lab",
-              lambda:capability_status().get("feature_count")==11 and len(capability_status().get("features",{}))==11),
+        _case("evaluation lab and Arena evidence survive portable restore","6_real_evaluation_lab",
+              lambda:bool(
+                  capability_status().get("feature_count")==11
+                  and len(capability_status().get("features",{}))==11
+                  and arena_memory_restore.get("ok")
+                  and arena_memory_restore.get("imported",0)>=2
+                  and arena_routing_signal([arena_memory_restored])["ready"]
+                  and arena_domain_signal([arena_memory_restored],"coding")["ready"]
+              )),
 
         _case("very hard work uses R23-primary-owned diverse model competition","7_automatic_model_competition",
               lambda:bool(
