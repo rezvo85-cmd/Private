@@ -177,7 +177,7 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
 
     if mode == "fast":
         depth = "fast"
-    elif mode in {"deep","ultra"}:
+    elif mode in {"deep","ultra","creator"}:
         depth = "deep"
     elif mode == "apex":
         depth = "apex"
