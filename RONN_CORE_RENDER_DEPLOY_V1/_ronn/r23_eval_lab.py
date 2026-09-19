@@ -11,6 +11,7 @@ from r23_brain_arena import (
     grade as arena_grade,
     routing_signal as arena_routing_signal,
     domain_signal as arena_domain_signal,
+    challenger_signal as arena_challenger_signal,
 )
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_knowledge_rescue import gap_signal as knowledge_gap_signal, should_buffer as knowledge_gap_should_buffer
@@ -127,6 +128,27 @@ def run():
     set_model_score(domain_models["smart"],"coding",60,.18,3)
     domain_code_plan=plan("Fix this Python bug in my code.")
     domain_code_route=resolve_route(domain_code_plan,PROVIDERS,domain_models)
+
+    challenger_models=dict(MODELS)
+    challenger_models["or_nemotron"]="challenger-eval-incumbent"
+    challenger_models["nvidia"]="challenger-eval-nvidia"
+    challenger_models["smart"]="challenger-eval-groq"
+    challenger_models["or_deepseek"]="challenger-eval-deepseek"
+    challenger_models["or_qwen"]="challenger-eval-qwen"
+    for _m in (
+        challenger_models["or_nemotron"],
+        challenger_models["nvidia"],
+        challenger_models["smart"],
+    ):
+        set_model_score(_m,"main",100,.30,8)
+        set_model_score(_m,"coding",66.67,.25,3)
+    set_model_score(challenger_models["or_deepseek"],"main",87.5,.32,8)
+    set_model_score(challenger_models["or_deepseek"],"coding",100,.27,3)
+    set_model_score(challenger_models["or_qwen"],"main",100,.22,8)
+    set_model_score(challenger_models["or_qwen"],"coding",66.67,.18,3)
+    challenger_plan=plan("Fix this Python bug in my code.")
+    challenger_route=resolve_route(challenger_plan,PROVIDERS,challenger_models)
+
     apex_pair=competition_pair(
         arena_models["nvidia"],
         "coding",
@@ -190,6 +212,19 @@ def run():
                   ],"coding")["ready"]
                   and domain_code_route[0]==domain_models["or_nemotron"]
                   and domain_code_plan.get("main_brain_domain_arena",{}).get("domain")=="coding"
+                  and arena_challenger_signal(
+                      challenger_models["or_deepseek"],"coding"
+                  )["eligible"]
+                  and not arena_challenger_signal(
+                      challenger_models["or_qwen"],"coding"
+                  )["eligible"]
+                  and challenger_route[0]==challenger_models["or_deepseek"]
+                  and challenger_plan.get("main_brain_challengers",{}).get(
+                      challenger_models["or_deepseek"],{}
+                  ).get("eligible") is True
+                  and challenger_plan.get("main_brain_challengers",{}).get(
+                      challenger_models["or_qwen"],{}
+                  ).get("eligible") is False
               )),
 
         _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",

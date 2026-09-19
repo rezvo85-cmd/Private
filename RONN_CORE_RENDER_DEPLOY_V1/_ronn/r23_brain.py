@@ -12,6 +12,7 @@ from experience_engine import model_feedback_penalty, profile_feedback_signal
 from r23_brain_arena import (
     routing_signal as arena_routing_signal,
     domain_signal as arena_domain_signal,
+    challenger_signal as arena_challenger_signal,
 )
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
@@ -153,11 +154,22 @@ def _pick_main_brain(providers,models,profile="chat"):
     demote a model so RONN does not keep paying a failed first-attempt penalty.
     """
     candidates=_main_brain_candidates(providers,models)
+    challenger_signals={}
+    if providers.get("openrouter"):
+        for key,rank in (("or_deepseek",3),("or_qwen",4)):
+            challenger=str(models.get(key) or "")
+            if not challenger or any(challenger==x[0] for x in candidates):
+                continue
+            signal=arena_challenger_signal(challenger,profile)
+            challenger_signals[challenger]=signal
+            if signal.get("eligible"):
+                candidates.append((challenger,"openrouter",rank))
     if not candidates:
         return models["smart"],"unknown",0,{
             "arena":{"ready":False,"scores":{}},
             "domain_arena":{"domain":"","ready":False,"scores":{}},
             "outcomes":{"profile":str(profile or "chat"),"ready":False,"scores":{}},
+            "challengers":challenger_signals,
         }
 
     candidate_models=[m for m,_,_ in candidates]
@@ -218,6 +230,7 @@ def _pick_main_brain(providers,models,profile="chat"):
             "scores":domain_scores if domain_ready else {},
         },
         "outcomes":{"profile":profile,"ready":outcome_ready,"score":outcome_avg if model in outcome_scores else None,"scores":outcome_scores},
+        "challengers":challenger_signals,
     }
 
 
@@ -322,8 +335,9 @@ def resolve_route(decision,providers,models):
     decision["main_brain_arena"]=signals.get("arena") or {}
     decision["main_brain_domain_arena"]=signals.get("domain_arena") or {}
     decision["main_brain_outcomes"]=signals.get("outcomes") or {}
+    decision["main_brain_challengers"]=signals.get("challengers") or {}
     _apply_adaptive_effort(decision,selected,decision["main_brain_outcomes"])
-    decision["main_brain_policy"]="quality-first + health-aware + domain-arena-aware + objective-arena-aware + profile-outcome-aware + adaptive-effort"
+    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + objective-arena-aware + profile-outcome-aware + adaptive-effort"
 
     depth=str(decision.get("depth") or "smart")
     if depth=="apex":
@@ -372,6 +386,7 @@ def status():
         "main_brain_health_aware":True,
         "brain_arena_aware":True,
         "domain_brain_arena":True,
+        "proven_main_brain_challengers":True,
         "profile_outcome_learning":True,
         "adaptive_outcome_effort":True,
         "adaptive_effort_guardrails":"auto mode only; difficulty>=3; ratings>=3",

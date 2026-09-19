@@ -163,7 +163,7 @@ def profile_domain(profile: str) -> str:
     p=str(profile or "").strip().lower()
     if p=="coding":
         return "coding"
-    if p in {"mathscience","analysis","knowledge"}:
+    if p in {"mathscience","analysis","knowledge","research"}:
         return "reasoning"
     if p=="writing":
         return "instruction"
@@ -199,6 +199,60 @@ def domain_signal(models, profile: str) -> dict[str,Any]:
         "scores":scores,
         "newest":max((v.get("updated",0) for v in scores.values()),default=0),
         "oldest":min((v.get("updated",0) for v in scores.values()),default=0),
+    }
+
+
+def fresh_score(model: str, domain: str="main") -> dict[str,Any]:
+    """Return one complete, fresh objective score window or an empty dict."""
+    model=str(model or "")
+    if not model:
+        return {}
+    rows=_fresh_row_map(
+        [model],
+        domain=domain,
+        min_samples=MIN_SAMPLES if domain=="main" else DOMAIN_MIN_SAMPLES.get(domain,1),
+    )
+    return dict(rows.get(model) or {})
+
+
+def challenger_signal(model: str, profile: str) -> dict[str,Any]:
+    """Conservative proof gate before a non-incumbent can enter main-brain routing.
+
+    A challenger must first complete the entire global arena. For task profiles
+    with a domain benchmark it must also be perfect on that complete domain set.
+    Profiles without a domain benchmark require at least 7/8 global checks.
+    """
+    model=str(model or "")
+    domain=profile_domain(profile)
+    main=fresh_score(model,"main")
+    domain_row=fresh_score(model,domain) if domain else {}
+    main_score=float(main.get("score") or 0)
+    domain_score=float(domain_row.get("score") or 0)
+    if not main:
+        eligible=False
+        reason="missing_complete_global_window"
+    elif domain:
+        eligible=bool(domain_row and main_score>=62.5 and domain_score>=100.0)
+        reason="complete_domain_proof" if eligible else "domain_threshold_not_met"
+    else:
+        # Do not promote a challenger into casual/creative chat from a tiny
+        # objective benchmark that does not measure conversation quality.
+        eligible=False
+        reason="no_matching_objective_domain"
+    return {
+        "model":model,
+        "profile":str(profile or "chat").lower(),
+        "domain":domain,
+        "eligible":eligible,
+        "reason":reason,
+        "main":main,
+        "domain_score":domain_row,
+        "requirements":{
+            "global_samples":MIN_SAMPLES,
+            "global_min_score":62.5 if domain else None,
+            "domain_samples":DOMAIN_MIN_SAMPLES.get(domain,0) if domain else 0,
+            "domain_min_score":100.0 if domain else None,
+        },
     }
 
 
@@ -314,6 +368,12 @@ def status(models=None) -> dict[str,Any]:
         "max_age_days":MAX_AGE_DAYS,
         "routing":signal,
         "domain_scores":{d:model_arena(d) for d in DOMAIN_MIN_SAMPLES},
+        "challenger_gate":{
+            "no_domain_promotion":False,
+            "global_with_domain_min_score":62.5,
+            "domain_min_score":100.0,
+            "freshness_days":MAX_AGE_DAYS,
+        },
         "all_scores":model_arena("main"),
         "running":_LOCK.locked(),
         "last_attempt":_LAST_ATTEMPT,

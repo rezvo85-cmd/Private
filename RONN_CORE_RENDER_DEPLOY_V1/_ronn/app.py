@@ -3184,10 +3184,53 @@ def r23_capabilities_api():
         "cloud_brain":r15_cloud_status(),
     }
 
+_R23_ARENA_CATALOG_CACHE={"at":0.0,"ok":False,"openrouter_ids":set()}
+
+
+def _openrouter_arena_candidates():
+    """Return currently available configured OpenRouter brains/challengers.
+
+    Catalog discovery is cached so Diagnostics polling does not repeatedly hit the
+    provider. If discovery is unavailable, keep only the established incumbent;
+    challengers are never assumed to exist.
+    """
+    if not openrouter_key_loaded():
+        return []
+    configured=[OR_NEMOTRON_MODEL,OR_DEEPSEEK_MODEL,OR_QWEN_MODEL]
+    now=time.time()
+    age=now-float(_R23_ARENA_CATALOG_CACHE.get("at") or 0)
+    ttl=21600 if _R23_ARENA_CATALOG_CACHE.get("ok") else 900
+    if age>ttl:
+        ids=set()
+        ok=False
+        try:
+            rr=requests.get(
+                OPENROUTER_API_BASE+"/models",
+                headers={"Authorization":f"Bearer {OPENROUTER_API_KEY}"},
+                timeout=8,
+            )
+            if rr.ok:
+                ids={
+                    str(x.get("id") or "")
+                    for x in (rr.json().get("data") or [])
+                    if isinstance(x,dict) and x.get("id")
+                }
+                ok=bool(ids)
+            rr.close()
+        except Exception:
+            ok=False
+        _R23_ARENA_CATALOG_CACHE["at"]=now
+        _R23_ARENA_CATALOG_CACHE["ok"]=ok
+        _R23_ARENA_CATALOG_CACHE["openrouter_ids"]=ids
+    ids=set(_R23_ARENA_CATALOG_CACHE.get("openrouter_ids") or set())
+    if ids:
+        return [m for m in configured if m in ids]
+    return [OR_NEMOTRON_MODEL]
+
+
 def _brain_arena_candidates():
     models=[]
-    if openrouter_key_loaded():
-        models.append(OR_NEMOTRON_MODEL)
+    models.extend(_openrouter_arena_candidates())
     if nvidia_key_loaded():
         models.append(NVIDIA_MODEL)
     if groq_key_loaded():
