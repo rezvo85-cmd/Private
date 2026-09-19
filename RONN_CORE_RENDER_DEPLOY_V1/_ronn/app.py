@@ -67,6 +67,7 @@ from r11_benchmarks import run_r11_benchmarks
 from r12_benchmarks import run_r12_benchmarks
 from r13_benchmarks import run_r13_benchmarks
 from r14_benchmarks import run_r14_benchmarks
+from r22_benchmarks import run as r22_eval_run
 from knowledge_base import ingest_files as kb_ingest_files, context_block as kb_context_block, search as kb_search, stats as kb_stats
 from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, compare_snapshot, restore_bundle
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
@@ -2947,6 +2948,8 @@ def diagnostics(request: Request):
         "r19_training_data": (BASE / "r19_training_data.py").exists(),
         "r19_training_runtime": (BASE / "r19_training_runtime.py").exists(),
         "r20_controller": (BASE / "r20_controller.py").exists(),
+        "r22_lean_core": (BASE / "r22_lean_core.py").exists(),
+        "r22_benchmarks": (BASE / "r22_benchmarks.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -2966,6 +2969,7 @@ def diagnostics(request: Request):
     r13_checks = run_r13_benchmarks()
     r14_checks = run_r14_benchmarks()
     r15_checks = r15_eval_run()
+    r22_checks = r22_eval_run()
     provider = provider_config_status()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
@@ -2988,6 +2992,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R14 capability checks failed.")
     if r15_checks.get("score", 0) < 100:
         warnings.append("One or more R15-R19 capability checks failed.")
+    if r22_checks.get("score", 0) < 100:
+        warnings.append("One or more R22 lean-intelligence checks failed.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -3009,6 +3015,7 @@ def diagnostics(request: Request):
         "r13_eval":r13_checks,
         "r14_eval":r14_checks,
         "r15_eval":r15_checks,
+        "r22_eval":r22_checks,
         "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
