@@ -68,7 +68,7 @@ function migrateLocalStorage(){
 }
 migrateLocalStorage();
 
-let pending=[],busy=false,controller=null,currentView="chat",startedAt=0,activityTimer=null,currentRequestId="";
+let pending=[],busy=false,controller=null,currentView="chat",startedAt=0,activityTimer=null,currentRequestId="",streamFollowLatest=true;
 let screenStream=null,screenVideo=null,voiceMode=false,voiceSpeaking=false;
 let chats=loadJSON(CHAT_KEY,[]),currentChatId=safeGet(CURRENT_KEY)||"",projects=loadJSON(PROJECT_KEY,[]),editingProjectId=null;
 
@@ -206,7 +206,7 @@ async function getRONNLocation(text){
 async function sendMessage(regenerate=false,overrideText=null){
   if(busy)return;
   const text=overrideText??(regenerate?(currentChat().messages.filter(m=>m.role==="user").at(-1)?.content||""):input.value.trim());if(!text&&!pending.length)return;
-  busy=true;controller=new AbortController();sendBtn.classList.add("hidden");stopBtn.classList.remove("hidden");setStage("Planning");startActivity();
+  busy=true;streamFollowLatest=true;controller=new AbortController();sendBtn.classList.add("hidden");stopBtn.classList.remove("hidden");setStage("Planning");startActivity();
   const atts=[...pending];const sharedFrame=await currentScreenFrame();if(sharedFrame)atts.push({kind:"image",name:"Live screen",data:sharedFrame,screen:true});if(!regenerate&&overrideText==null){pending=[];renderAttachments();input.value="";autoSize()}
   const c=currentChat(),history=c.messages.slice(-36).map(m=>({role:m.role,content:m.content}));if(!regenerate&&overrideText==null){pushMessage("user",text||"[Attachment]");addMessageNode("user",text||"[Attachment]")}
   const ai=addMessageNode("assistant","");const answerEl=ai.querySelector(".answer");answerEl.innerHTML='<span class="thinkingDots"><i></i><i></i><i></i></span>';scrollToLatest(true);
@@ -216,8 +216,8 @@ async function sendMessage(regenerate=false,overrideText=null){
     const res=await fetch(CORE_API+"/chat",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),signal:controller.signal,body:JSON.stringify({message:text,conversation_id:currentChat().coreConversationId||null,project_id:activeProject()?.coreProjectId||"default",history,images:atts.filter(a=>a.kind==="image").map(a=>a.data),files:atts.filter(a=>a.kind==="text").map(a=>({name:a.name,content:a.content})),mode:$("modeSelect").value,style:$("styleSelect").value,project_context:composeActiveProjectContext(),review:$("reviewToggle").checked,agent_mode:$("agentToggle")?.checked!==false,skill_profile:"auto",client_location:clientLocation||{}})});
     if(!res.ok){const d=await res.json().catch(()=>({}));if(res.status===401){setWebAuthGate(true,"Your secure owner session expired. Unlock RONN again.");throw new Error("RONN is locked.")}throw new Error(d.detail||`RONN server returned HTTP ${res.status}.`)}
     const reader=res.body.getReader(),decoder=new TextDecoder();let buffer="";
-    while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split("\n");buffer=lines.pop();for(const line of lines){if(!line.trim())continue;let d;try{d=JSON.parse(line)}catch{continue}if(d.core?.conversation_id){const cc=currentChat();cc.coreConversationId=d.core.conversation_id;saveChats();continue}if(d.meta){responseMeta=d.meta;responseRequestId=d.meta.request_id||responseRequestId;currentRequestId=responseRequestId||currentRequestId;routeBadge.textContent=routeLabel(d.meta.route);profileBadge.textContent=profileLabel(d.meta.profile);setNeuralMeta(d.meta);if(d.meta.r11_preflight){const rr=d.meta.r11_preflight.route||{};const n=$("neuralBadge");if(n)n.textContent=`R11 · ${String(rr.tier||"adaptive").toUpperCase()}`;}if(d.meta.task_plan?.checkpoint_count){$("activityTitle").textContent=`RONN · ${d.meta.task_plan.checkpoint_count} checkpoints`}if(d.meta.adaptive_tier){$("activityDetail").textContent=`Adaptive tier: ${d.meta.adaptive_tier} · verifying requirements and evidence boundaries.`}const warnings=d.meta.r7_preflight?.agent_plan?.risk?.proactive_warnings||[];if(warnings.length)$("activityDetail").textContent=warnings[0];const stage=["live","research","max","tools"].includes(d.meta.route)?"Researching":String(d.meta.route||"").includes("ultra")?"Council":String(d.meta.route||"").startsWith("nvidia")?"Deep reasoning":d.meta.route==="knowledge"?"Thinking":d.meta.route==="vision"?"Analyzing":"Building";setStage(stage)}if(d.stage)setStage(d.stage);if(d.done&&d.audit)responseAudit=d.audit;if(d.error)throw new Error(d.error);if(d.token){if(first)first=false;answer=sanitizeVisible(answer+d.token);if(looksInternalToolPayload(answer)){answerEl.innerHTML='<span class="thinkingDots"><i></i><i></i><i></i></span>';continue}answerEl.innerHTML=renderMarkdown(answer)+'<span class="cursor">▌</span>';scrollToLatest(true)}}}
-    answer=sanitizeVisible(answer).trim();if(looksInternalToolPayload(answer))throw new Error("RONN blocked an internal tool command instead of showing it. Retry the question.");if(!answer)throw new Error("The provider returned no usable answer. RONN did not fabricate one.");answerEl.innerHTML=renderMarkdown(answer);applyMetaCards(ai,responseMeta);scrollToLatest(true);if(responseAudit)applyAudit(ai,responseAudit);pushMessage("assistant",answer,responseRequestId,responseAudit,responseMeta);if(voiceMode)speakRONN(answer);ai.dataset.requestId=responseRequestId||"";if(responseRequestId){const tools=ai.querySelector(".msgTools");if(tools&&!tools.querySelector(".rateMsg"))tools.insertAdjacentHTML("beforeend",'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>')}setStage("Complete");refreshMemory()
+    while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split("\n");buffer=lines.pop();for(const line of lines){if(!line.trim())continue;let d;try{d=JSON.parse(line)}catch{continue}if(d.core?.conversation_id){const cc=currentChat();cc.coreConversationId=d.core.conversation_id;saveChats();continue}if(d.meta){responseMeta=d.meta;responseRequestId=d.meta.request_id||responseRequestId;currentRequestId=responseRequestId||currentRequestId;routeBadge.textContent=routeLabel(d.meta.route);profileBadge.textContent=profileLabel(d.meta.profile);setNeuralMeta(d.meta);if(d.meta.r11_preflight){const rr=d.meta.r11_preflight.route||{};const n=$("neuralBadge");if(n)n.textContent=`R11 · ${String(rr.tier||"adaptive").toUpperCase()}`;}if(d.meta.task_plan?.checkpoint_count){$("activityTitle").textContent=`RONN · ${d.meta.task_plan.checkpoint_count} checkpoints`}if(d.meta.adaptive_tier){$("activityDetail").textContent=`Adaptive tier: ${d.meta.adaptive_tier} · verifying requirements and evidence boundaries.`}const warnings=d.meta.r7_preflight?.agent_plan?.risk?.proactive_warnings||[];if(warnings.length)$("activityDetail").textContent=warnings[0];const stage=["live","research","max","tools"].includes(d.meta.route)?"Researching":String(d.meta.route||"").includes("ultra")?"Council":String(d.meta.route||"").startsWith("nvidia")?"Deep reasoning":d.meta.route==="knowledge"?"Thinking":d.meta.route==="vision"?"Analyzing":"Building";setStage(stage)}if(d.stage)setStage(d.stage);if(d.done&&d.audit)responseAudit=d.audit;if(d.error)throw new Error(d.error);if(d.token){if(first)first=false;answer=sanitizeVisible(answer+d.token);if(looksInternalToolPayload(answer)){answerEl.innerHTML='<span class="thinkingDots"><i></i><i></i><i></i></span>';continue}answerEl.innerHTML=renderMarkdown(answer)+'<span class="cursor">▌</span>';scrollToLatest(streamFollowLatest)}}}
+    answer=sanitizeVisible(answer).trim();if(looksInternalToolPayload(answer))throw new Error("RONN blocked an internal tool command instead of showing it. Retry the question.");if(!answer)throw new Error("The provider returned no usable answer. RONN did not fabricate one.");answerEl.innerHTML=renderMarkdown(answer);applyMetaCards(ai,responseMeta);scrollToLatest(streamFollowLatest);if(responseAudit)applyAudit(ai,responseAudit);pushMessage("assistant",answer,responseRequestId,responseAudit,responseMeta);if(voiceMode)speakRONN(answer);ai.dataset.requestId=responseRequestId||"";if(responseRequestId){const tools=ai.querySelector(".msgTools");if(tools&&!tools.querySelector(".rateMsg"))tools.insertAdjacentHTML("beforeend",'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>')}setStage("Complete");refreshMemory()
   }catch(e){if(e.name==="AbortError"){answerEl.innerHTML=renderMarkdown(answer||"Stopped.");setStage("Stopped")}else{answerEl.innerHTML=`<p><strong>Error:</strong> ${escapeHTML(e.message)}</p><p>Open <strong>Diagnostics</strong> if this keeps happening.</p>`;setStage("Error")}}
   finally{busy=false;controller=null;currentRequestId="";stopBtn.classList.add("hidden");sendBtn.classList.remove("hidden");stopActivity();setTimeout(()=>setStage("Ready"),1500);if(window.innerWidth>780)input.focus()}
 }
@@ -325,7 +325,7 @@ $("exportBtn").onclick=()=>{const c=currentChat(),md=`# ${c.title}\n\n`+c.messag
 $("chatSearch").addEventListener("input",renderChatList);qsa(".navBtn").forEach(b=>b.onclick=()=>showView(b.dataset.view));qsa("[data-view-target]").forEach(b=>b.onclick=()=>showView(b.dataset.viewTarget));const plusMenu=$("plusMenu");$("attachBtn").onclick=e=>{e.stopPropagation();plusMenu?.classList.toggle("hidden")};$("plusAttach").onclick=()=>{plusMenu?.classList.add("hidden");fileInput.click()};$("plusNewChat").onclick=()=>{plusMenu?.classList.add("hidden");$("newChat").click()};$("plusProject").onclick=()=>showView("projects");$("plusMemory").onclick=()=>showView("memory");fileInput.onchange=e=>{addFiles(e.target.files);fileInput.value=""};sendBtn.onclick=()=>sendMessage(false);stopBtn.onclick=async()=>{const id=currentRequestId;controller?.abort();if(id){try{await fetch(`/api/tasks/${encodeURIComponent(id)}/cancel`,{method:"POST",headers:apiHeaders()})}catch{}}};input.addEventListener("input",autoSize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage(false)}});$("presetRow").addEventListener("click",e=>{const b=e.target.closest("[data-prompt]");if(b){input.value=b.dataset.prompt;autoSize();input.focus()}});$("runDiagnosticsBtn").onclick=runDiagnostics;$("testGroqBtn").onclick=()=>testProvider("groq");$("testNvidiaBtn").onclick=()=>testProvider("nvidia");if($("testOpenRouterBtn"))$("testOpenRouterBtn").onclick=()=>testProvider("openrouter");$("repairPlanBtn").onclick=showRepairPlan;$("queueAddBtn").onclick=addQueueItem;$("kbSearchBtn").onclick=searchKnowledge;$("queueInput").addEventListener("keydown",e=>{if(e.key==="Enter")addQueueItem()});$("kbSearchInput").addEventListener("keydown",e=>{if(e.key==="Enter")searchKnowledge()});$("queueList").addEventListener("click",async e=>{const id=e.target.dataset.queueDone;if(id){await fetch(CORE_API+`/tasks/${encodeURIComponent(id)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({status:"complete"})});refreshAgentOps()}});
 messages.addEventListener("click",e=>{if(e.target.classList.contains("rateMsg")){const wrap=e.target.closest(".message"),request_id=wrap?.dataset.requestId||"",rating=Number(e.target.dataset.rating||0);if(request_id&&(rating===1||rating===-1)){fetch("/api/feedback",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({request_id,rating,note:""})}).then(r=>r.json()).then(()=>showToast(rating===1?"Feedback saved.":"Feedback saved — RONN will treat this route as weaker for similar work."));wrap.querySelectorAll(".rateMsg").forEach(b=>b.disabled=true)}return}const copy=e.target.closest(".copyCode");if(copy){navigator.clipboard.writeText(copy.closest(".codeWrap").querySelector("code").innerText);copy.textContent="Copied";setTimeout(()=>copy.textContent="Copy",1000);return}const cm=e.target.closest(".copyMsg");if(cm){navigator.clipboard.writeText(cm.closest(".aiBubble").querySelector(".answer").innerText);cm.textContent="Copied";setTimeout(()=>cm.textContent="Copy",1000);return}const why=e.target.closest(".whyMsg");if(why){const text=e.target.closest(".message")?.dataset.decision||"RONN selected the route based on task type, freshness, risk, and verification needs.";showToast(text);return}const retry=e.target.closest(".retryMsg");if(retry){sendMessage(true);return}const verify=e.target.closest(".verifyMsg");if(verify){const c=currentChat(),lastUser=[...c.messages].reverse().find(m=>m.role==="user")?.content||"";input.value=`Verify your previous answer to this request: ${lastUser}\n\nCheck factual claims, assumptions, missing requirements, and anything you claimed was tested or completed. Correct the answer if needed.`;$("reviewToggle").checked=true;autoSize();input.focus();return}const p=e.target.closest("[data-prompt]");if(p){input.value=p.dataset.prompt;autoSize();input.focus()}});
 document.addEventListener("click",e=>{if(plusMenu&&!e.target.closest(".composerWrap"))plusMenu.classList.add("hidden");const b=e.target.closest(".downloadCode");if(!b)return;const wrap=b.closest(".codeWrap"),code=wrap?.querySelector("pre code")?.innerText||"",lang=(wrap?.querySelector(".codeHead span")?.textContent||"code").toLowerCase(),ext=({lua:"lua",luau:"luau",python:"py",py:"py",javascript:"js",js:"js",typescript:"ts",ts:"ts",html:"html",css:"css",json:"json",markdown:"md",md:"md"})[lang]||"txt",blob=new Blob([code],{type:"text/plain"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`ronn_code.${ext}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
-messages.addEventListener("scroll",()=>updateJumpLatest(),{passive:true});
+messages.addEventListener("scroll",()=>{updateJumpLatest();if(busy)streamFollowLatest=nearBottom()},{passive:true});
 if(jumpLatest)jumpLatest.onclick=()=>scrollToLatest(true);
 window.addEventListener("resize",()=>updateJumpLatest(),{passive:true});
 document.addEventListener("paste",e=>{const files=[...e.clipboardData.files];if(files.length){e.preventDefault();addFiles(files)}});let drag=0;document.addEventListener("dragenter",e=>{e.preventDefault();drag++;$("dropOverlay").classList.add("show")});document.addEventListener("dragleave",e=>{e.preventDefault();drag--;if(drag<=0){drag=0;$("dropOverlay").classList.remove("show")}});document.addEventListener("dragover",e=>e.preventDefault());document.addEventListener("drop",e=>{e.preventDefault();drag=0;$("dropOverlay").classList.remove("show");addFiles(e.dataTransfer.files)});
@@ -389,46 +389,82 @@ renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refre
 window.__RONN_UI_READY=true;
 
 let mobileViewportFrame=0;
+let mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
+let mobileKeyboardState=false;
+let mobileFocusNearBottom=true;
+
 function syncMobileViewport(){
   cancelAnimationFrame(mobileViewportFrame);
   mobileViewportFrame=requestAnimationFrame(()=>{
     const root=document.documentElement;
     if(window.innerWidth>780){
       root.style.removeProperty("--ronn-vv-height");
-      root.style.removeProperty("--ronn-vv-top");
-      document.body.classList.remove("mobileKeyboardOpen");
+      document.body.classList.remove("mobileKeyboardOpen","mobileInputFocused");
+      mobileKeyboardState=false;
+      mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
       return;
     }
+
     const vv=window.visualViewport;
     const layoutH=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
-    const h=Math.max(1,Math.round((vv&&vv.height>0)?vv.height:layoutH));
-    const top=Math.max(0,Math.round(vv?.offsetTop||0));
-    root.style.setProperty("--ronn-vv-height",h+"px");
-    root.style.setProperty("--ronn-vv-top",top+"px");
-    const keyboard=(document.activeElement===input)&&(h<layoutH*0.88);
+    const visibleH=Math.max(1,Math.round(vv&&vv.height>0?vv.height:layoutH));
+    const inputFocused=document.activeElement===input;
+
+    // Keep a stable "keyboard closed" reference height. Safari can change
+    // window.innerHeight while its browser chrome animates, so never use a
+    // smaller focused height as the baseline.
+    if(!inputFocused){
+      mobileViewportBaseHeight=Math.max(visibleH,layoutH);
+    }else{
+      mobileViewportBaseHeight=Math.max(mobileViewportBaseHeight,layoutH,visibleH);
+    }
+
+    const keyboardGap=Math.max(0,mobileViewportBaseHeight-visibleH);
+    const keyboard=inputFocused&&keyboardGap>110;
+    root.style.setProperty("--ronn-vv-height",visibleH+"px");
     document.body.classList.toggle("mobileKeyboardOpen",keyboard);
-    if(keyboard&&currentView==="chat"){
-      requestAnimationFrame(()=>scrollToLatest(true));
+
+    if(keyboard!==mobileKeyboardState){
+      mobileKeyboardState=keyboard;
+      if(currentView==="chat"&&mobileFocusNearBottom){
+        requestAnimationFrame(()=>scrollToLatest(true));
+      }
     }
   });
 }
+
 syncMobileViewport();
 window.addEventListener("resize",syncMobileViewport,{passive:true});
-window.addEventListener("orientationchange",()=>setTimeout(syncMobileViewport,120),{passive:true});
+window.addEventListener("orientationchange",()=>{
+  mobileViewportBaseHeight=1;
+  setTimeout(syncMobileViewport,140);
+},{passive:true});
+
 if(window.visualViewport){
+  // Resize is enough for keyboard/browser-chrome changes. Listening to
+  // visualViewport.scroll and translating the shell caused the old jump loop.
   window.visualViewport.addEventListener("resize",syncMobileViewport,{passive:true});
-  window.visualViewport.addEventListener("scroll",syncMobileViewport,{passive:true});
 }
+
 input.addEventListener("focus",()=>{
   if(window.innerWidth<=780){
+    mobileFocusNearBottom=nearBottom();
     document.body.classList.add("mobileInputFocused");
     syncMobileViewport();
-    [40,120,260,420].forEach(ms=>setTimeout(()=>{syncMobileViewport();scrollToLatest(true)},ms));
+    setTimeout(()=>{
+      syncMobileViewport();
+      if(mobileFocusNearBottom)scrollToLatest(true);
+    },140);
   }
 });
+
 input.addEventListener("blur",()=>{
-  document.body.classList.remove("mobileInputFocused");
-  setTimeout(syncMobileViewport,80);
+  document.body.classList.remove("mobileInputFocused","mobileKeyboardOpen");
+  mobileKeyboardState=false;
+  setTimeout(()=>{
+    mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
+    syncMobileViewport();
+  },140);
 });
 
 function setMobileNav(open){
