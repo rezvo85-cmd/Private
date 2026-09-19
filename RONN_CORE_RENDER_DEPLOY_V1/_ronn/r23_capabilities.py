@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
+R23_VERSION = "R23-BRAIN-1"
+
+# Terms RONN should understand without wasting a web request.
+_COMMON_SHORT = {
+    "rmb","remember","rq","quick","real","rn","right","now","idk","imo","imho","btw",
+    "fr","ngl","lol","lmao","brb","afk","tbh","wym","wdym","yk","yeah","yup","bro",
+    "api","ui","ux","pc","cpu","gpu","ram","ssd","http","https","json","html","css",
+    "js","ts","py","sql","ai","llm","gpt","url","app","web","ios","android"
+}
+_COMMON_WORDS = {
+    "what","does","mean","who","is","are","how","why","when","where","which","can",
+    "could","would","should","the","a","an","this","that","these","those","with","from",
+    "about","for","and","or","but","not","my","your","our","their","his","her","its",
+    "fix","help","make","build","create","tell","explain","use","work","works","working",
+    "code","error","game","website","model","brain","search","find","look","latest","current"
+}
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().lower()
+
+
+def _tokens(text: str):
+    return re.findall(r"[A-Za-z0-9_+.#-]{2,48}", str(text or ""))
+
+
+def unknown_candidates(message: str) -> list[str]:
+    """Detect terms that are worth resolving through retrieval before answering.
+
+    This is deliberately conservative: it catches explicit meaning/identity requests,
+    error/package identifiers, quoted terms, acronyms and unusual compact tokens while
+    avoiding common slang RONN already knows.
+    """
+    raw = str(message or "")
+    low = _norm(raw)
+    found: list[str] = []
+
+    def add(value: str):
+        v = value.strip(" \'\".,!?;:()[]{}")
+        if not v or len(v) < 2 or len(v) > 64:
+            return
+        vl = v.lower()
+        if vl in _COMMON_SHORT or vl in _COMMON_WORDS:
+            return
+        if v not in found:
+            found.append(v)
+
+    # Explicit "what does X mean" / "what is X" for compact or quoted terms.
+    for pat in (
+        r"(?i)\bwhat\s+does\s+[\'\"]?([A-Za-z0-9_+.#-]{2,40})[\'\"]?\s+mean\b",
+        r"(?i)\bmeaning\s+of\s+[\'\"]?([A-Za-z0-9_+.#-]{2,40})",
+        r"(?i)\bwhat\s+is\s+[\'\"]([A-Za-z0-9_+.# -]{2,48})[\'\"]",
+        r"(?i)\bwho\s+is\s+[\'\"]([A-Za-z0-9_+.# -]{2,48})[\'\"]",
+    ):
+        m = re.search(pat, raw)
+        if m:
+            add(m.group(1))
+
+    # Quoted unfamiliar tokens often name products, APIs, slang, packages, etc.
+    for q in re.findall(r"[\'\"]([^\'\"]{2,48})[\'\"]", raw):
+        if len(q.split()) <= 4:
+            add(q)
+
+    # Technical identifiers and error codes are high-value retrieval targets.
+    for tok in _tokens(raw):
+        tl = tok.lower()
+        if tl in _COMMON_SHORT or tl in _COMMON_WORDS:
+            continue
+        unusual = (
+            bool(re.search(r"\d", tok) and re.search(r"[A-Za-z]", tok))
+            or "_" in tok or "." in tok or "+" in tok or "#" in tok
+            or (tok.isupper() and 2 <= len(tok) <= 12)
+        )
+        if unusual and not re.fullmatch(r"\d+(?:\.\d+)?", tok):
+            add(tok)
+
+    # Explicit uncertainty language should force retrieval even when the term is natural.
+    if any(x in low for x in (
+        "never heard of","dont know what","don't know what","unknown term",
+        "unknown error","what is this error","what does this error","slang for"
+    )):
+        for tok in _tokens(raw):
+            if tok.lower() not in _COMMON_WORDS and tok.lower() not in _COMMON_SHORT:
+                add(tok)
+
+    return found[:6]
+
+
+def retrieval_reason(message: str) -> dict[str, Any]:
+    low = _norm(message)
+    candidates = unknown_candidates(message)
+    explicit = any(x in low for x in (
+        "search the web","look this up","look it up","find out","find sources",
+        "research this","check online","search online"
+    ))
+    current = any(x in low for x in (
+        "latest","today","right now","currently","current ","this week","news","weather",
+        "forecast","score","standings","schedule","price today","stock price","who won",
+        "release date","current version","open now","breaking","recent update"
+    ))
+    local = any(x in low for x in (
+        "near me","nearby","closest","around me","in my area","my location","where am i",
+        "restaurants near","food near","coffee near","open near me"
+    ))
+    return {
+        "required": bool(explicit or current or local or candidates),
+        "explicit": explicit,
+        "current": current,
+        "local": local,
+        "unknown_terms": candidates,
+        "reason": "unknown_term" if candidates else ("current" if current else ("local" if local else ("explicit" if explicit else ""))),
+    }
+
+
+def capability_plan(base: dict, message: str, *, history=None, file_names=None,
+                    has_images=False, has_project=False, agent_mode=True) -> dict:
+    history = history or []
+    file_names = file_names or []
+    low = _norm(message)
+    difficulty = int(base.get("difficulty") or 1)
+    retrieval = retrieval_reason(message)
+
+    coding = str(base.get("profile") or "") == "coding"
+    execution_words = any(x in low for x in (
+        "run this","execute this","test this","test the code","debug this","fix this",
+        "repair this","run tests","test and fix","fix and test","retest"
+    ))
+    research_words = any(x in low for x in (
+        "research","investigate","compare sources","deep dive","find evidence","sources"
+    ))
+    world_words = any(x in low for x in (
+        "architecture","dependency","dependencies","impact","simulate","simulation",
+        "what will break","before changing","whole project","entire project","system design"
+    ))
+    computer_words = any(x in low for x in (
+        "open the website","click","type into","use my computer","control my computer",
+        "browser agent","navigate to","download it","upload it"
+    ))
+
+    return {
+        "strong_main_brain": True,
+        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or computer_words or execution_words)),
+        "code_fix_loop": bool(coding and file_names and execution_words),
+        "project_brain": bool(has_project or file_names or base.get("followup") or len(history) >= 6),
+        "long_context": bool(len(history) >= 12 or base.get("followup") or has_project),
+        "evaluation_lab": True,
+        "model_competition": bool(difficulty >= 7 and not retrieval["required"] and not has_images),
+        "world_model": bool((len(file_names) >= 2 and (coding or world_words)) or (has_project and world_words)),
+        "failure_learning": True,
+        "autonomous_research": bool(retrieval["required"] and (research_words or difficulty >= 4 or retrieval["unknown_terms"])),
+        "universal_retrieval": bool(retrieval["required"]),
+        "computer_requested": bool(computer_words),
+        "retrieval": retrieval,
+    }
+
+
+def status() -> dict[str, Any]:
+    return {
+        "version": R23_VERSION,
+        "feature_count": 11,
+        "features": {
+            "1_stronger_main_brain": True,
+            "2_full_agent_runtime": True,
+            "3_code_test_fix_retest": True,
+            "4_permanent_project_brain": True,
+            "5_long_context_compression": True,
+            "6_real_evaluation_lab": True,
+            "7_automatic_model_competition": True,
+            "8_world_model_simulation": True,
+            "9_failure_learning": True,
+            "10_autonomous_research": True,
+            "11_universal_retrieval": True,
+        },
+        "architecture": "one main brain + capability plane",
+    }
