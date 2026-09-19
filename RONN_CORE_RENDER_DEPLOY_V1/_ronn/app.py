@@ -24,7 +24,11 @@ from project_brain import (
 from core_store import get_project as core_get_project
 from goal_engine import new_task_id, requirement_ledger, verification_plan, verification_directive, static_code_checks
 from cognitive_os import metacognition_state, os_directive, compile_context
-from experience_engine import start_run, finish_run, add_feedback, stats as experience_stats, observed_model_scores, retrieve_lessons, model_feedback_penalty
+from experience_engine import (
+    start_run, finish_run, add_feedback, stats as experience_stats,
+    observed_model_scores, retrieve_lessons, model_feedback_penalty,
+    ingest_portable_outcomes, portable_outcome_status,
+)
 from evaluation_engine import run_internal_eval
 from intelligence_core import preflight_report, answer_audit, contradiction_scan, current_information_risk
 from r5_intelligence import preflight_v5, intelligence_directive_v5, route_override
@@ -569,6 +573,7 @@ class ChatBody(BaseModel):
     skill_profile: str = "auto"
     client_location: dict = Field(default_factory=dict)
     project_brain_snapshot: dict = Field(default_factory=dict)
+    outcome_profile: dict = Field(default_factory=dict)
 
 
 class StudioPlanBody(BaseModel):
@@ -1826,6 +1831,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     if not key_loaded():
         yield (json.dumps({"error":f"RONN has no configured AI provider key. Active config: {ENV_FILE}. Close RONN, run START_RONN.bat, and RONN will recover an older key or open this exact file for setup."})+"\n").encode()
         return
+
+    if body.outcome_profile:
+        try:
+            ingest_portable_outcomes(body.outcome_profile)
+        except Exception:
+            pass
 
     _file_names=[str(getattr(x,"name","file")) for x in (body.files or [])]
     _r20=r20_plan(
@@ -3236,6 +3247,7 @@ def diagnostics(request: Request):
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "r23_profile_outcomes":portable_outcome_status(),
         "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
@@ -3302,6 +3314,7 @@ def status(request: Request):
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
+        "r23_profile_outcomes":portable_outcome_status(),
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner),
