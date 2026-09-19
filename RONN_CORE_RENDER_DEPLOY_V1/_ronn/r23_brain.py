@@ -95,6 +95,56 @@ def _main_brain_candidates(providers,models):
     return out
 
 
+def competition_pair(primary_model, profile, providers, models):
+    """Return a two-model hard-task pair with the learned main brain first.
+
+    Candidate A always preserves the R23-selected main brain. Candidate B favors
+    a materially different specialist for the task when available, then a strong
+    alternate main brain. This keeps competition diverse without discarding the
+    routing evidence already used to choose the primary.
+    """
+    primary=str(primary_model or "")
+    profile=str(profile or "chat").lower()
+    pool=[]
+
+    def add(model,role):
+        model=str(model or "")
+        if model and model not in [x["model"] for x in pool]:
+            pool.append({"model":model,"role":role})
+
+    if primary:
+        add(primary,"r23_primary")
+
+    if providers.get("openrouter"):
+        if profile=="coding":
+            add(models.get("or_deepseek"),"coding_specialist")
+        elif profile in {"creative","writing"}:
+            add(models.get("or_qwen"),"general_specialist")
+
+    for model,provider,_rank in _main_brain_candidates(providers,models):
+        add(model,"alternate_main")
+
+    if providers.get("openrouter"):
+        add(models.get("or_qwen"),"diverse_general")
+        add(models.get("or_deepseek"),"diverse_coding")
+    if providers.get("nvidia"):
+        add(models.get("nvidia"),"alternate_main")
+    if providers.get("groq"):
+        add(models.get("smart"),"alternate_main")
+
+    if not pool:
+        add(models.get("smart"),"fallback")
+
+    pair=pool[:2]
+    return {
+        "models":[x["model"] for x in pair],
+        "roles":[x["role"] for x in pair],
+        "primary_preserved":bool(pair and primary and pair[0]["model"]==primary),
+        "diverse":len(pair)>=2 and pair[0]["model"]!=pair[1]["model"],
+        "profile":profile,
+    }
+
+
 def _pick_main_brain(providers,models,profile="chat"):
     """Pick the strongest healthy configured brain.
 
@@ -327,6 +377,8 @@ def status():
         "adaptive_effort_guardrails":"auto mode only; difficulty>=3; ratings>=3",
         "learned_self_correction":True,
         "self_correction_threshold":"strong negative profile outcomes; difficulty>=4; non-live non-vision",
+        "apex_primary_ownership":True,
+        "apex_competition_policy":"R23 primary first + diverse specialist/alternate; primary owns final synthesis",
         "council_default":False,
         "competition_threshold":"difficulty>=6 only",
     }
