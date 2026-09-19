@@ -163,7 +163,7 @@ def profile_domain(profile: str) -> str:
     p=str(profile or "").strip().lower()
     if p=="coding":
         return "coding"
-    if p in {"mathscience","analysis","knowledge"}:
+    if p in {"mathscience","analysis","knowledge","research"}:
         return "reasoning"
     if p=="writing":
         return "instruction"
@@ -235,8 +235,10 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
         eligible=bool(domain_row and main_score>=62.5 and domain_score>=100.0)
         reason="complete_domain_proof" if eligible else "domain_threshold_not_met"
     else:
-        eligible=bool(main_score>=87.5)
-        reason="strong_global_proof" if eligible else "global_threshold_not_met"
+        # Do not promote a challenger into casual/creative chat from a tiny
+        # objective benchmark that does not measure conversation quality.
+        eligible=False
+        reason="no_matching_objective_domain"
     return {
         "model":model,
         "profile":str(profile or "chat").lower(),
@@ -247,7 +249,7 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
         "domain_score":domain_row,
         "requirements":{
             "global_samples":MIN_SAMPLES,
-            "global_min_score":62.5 if domain else 87.5,
+            "global_min_score":62.5 if domain else None,
             "domain_samples":DOMAIN_MIN_SAMPLES.get(domain,0) if domain else 0,
             "domain_min_score":100.0 if domain else None,
         },
@@ -367,7 +369,7 @@ def status(models=None) -> dict[str,Any]:
         "routing":signal,
         "domain_scores":{d:model_arena(d) for d in DOMAIN_MIN_SAMPLES},
         "challenger_gate":{
-            "global_no_domain_min_score":87.5,
+            "no_domain_promotion":False,
             "global_with_domain_min_score":62.5,
             "domain_min_score":100.0,
             "freshness_days":MAX_AGE_DAYS,
