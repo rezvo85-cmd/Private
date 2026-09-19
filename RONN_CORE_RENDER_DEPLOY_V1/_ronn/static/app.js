@@ -186,7 +186,7 @@ function stopActivity(){clearInterval(activityTimer);activityTimer=null;setTimeo
 
 let ronnLocationCache=null,ronnLocationAt=0;
 function needsRONNLocation(text){
-  return /\b(near me|nearby|closest|around me|close to me|in my area|restaurants? near|food near|places? to eat near|coffee near|gas stations? near|stores? near|pharmacy near|hospital near|open near me)\b/i.test(String(text||""))
+  return /\b(near me|nearby|closest|around me|close to me|in my area|my location|use my location|see my location|current location|where am i|restaurants? near|restaurants? around|food near|places? to eat near|coffee near|gas stations? near|stores? near|pharmacy near|hospital near|open near me|recommend(?: me)? restaurants?)\b/i.test(String(text||""))
 }
 async function getRONNLocation(text){
   if(!needsRONNLocation(text)||!navigator.geolocation)return null;
@@ -389,9 +389,9 @@ renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refre
 window.__RONN_UI_READY=true;
 
 let mobileViewportFrame=0;
+const isiOSWebKit=/iP(hone|ad|od)/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
 let mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
 let mobileKeyboardState=false;
-let mobileFocusNearBottom=true;
 
 function syncMobileViewport(){
   cancelAnimationFrame(mobileViewportFrame);
@@ -401,70 +401,49 @@ function syncMobileViewport(){
       root.style.removeProperty("--ronn-vv-height");
       document.body.classList.remove("mobileKeyboardOpen","mobileInputFocused");
       mobileKeyboardState=false;
-      mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
+      return;
+    }
+
+    const inputFocused=document.activeElement===input;
+
+    // iOS Safari already pans its visual viewport to the focused textarea.
+    // Resizing RONN during that keyboard animation creates the blank-screen
+    // bounce shown in the screen recording, so do not fight Safari here.
+    if(isiOSWebKit){
+      root.style.removeProperty("--ronn-vv-height");
+      document.body.classList.toggle("mobileKeyboardOpen",inputFocused);
+      mobileKeyboardState=inputFocused;
       return;
     }
 
     const vv=window.visualViewport;
     const layoutH=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
     const visibleH=Math.max(1,Math.round(vv&&vv.height>0?vv.height:layoutH));
-    const inputFocused=document.activeElement===input;
-
-    // Keep a stable "keyboard closed" reference height. Safari can change
-    // window.innerHeight while its browser chrome animates, so never use a
-    // smaller focused height as the baseline.
-    if(!inputFocused){
-      mobileViewportBaseHeight=Math.max(visibleH,layoutH);
-    }else{
-      mobileViewportBaseHeight=Math.max(mobileViewportBaseHeight,layoutH,visibleH);
-    }
-
-    const keyboardGap=Math.max(0,mobileViewportBaseHeight-visibleH);
-    const keyboard=inputFocused&&keyboardGap>110;
+    if(!inputFocused)mobileViewportBaseHeight=Math.max(visibleH,layoutH);
+    const keyboard=inputFocused&&Math.max(0,mobileViewportBaseHeight-visibleH)>110;
     root.style.setProperty("--ronn-vv-height",visibleH+"px");
     document.body.classList.toggle("mobileKeyboardOpen",keyboard);
-
-    if(keyboard!==mobileKeyboardState){
-      mobileKeyboardState=keyboard;
-      if(currentView==="chat"&&mobileFocusNearBottom){
-        requestAnimationFrame(()=>scrollToLatest(true));
-      }
-    }
+    mobileKeyboardState=keyboard;
   });
 }
 
 syncMobileViewport();
 window.addEventListener("resize",syncMobileViewport,{passive:true});
-window.addEventListener("orientationchange",()=>{
-  mobileViewportBaseHeight=1;
-  setTimeout(syncMobileViewport,140);
-},{passive:true});
-
-if(window.visualViewport){
-  // Resize is enough for keyboard/browser-chrome changes. Listening to
-  // visualViewport.scroll and translating the shell caused the old jump loop.
+window.addEventListener("orientationchange",()=>setTimeout(syncMobileViewport,140),{passive:true});
+if(window.visualViewport&&!isiOSWebKit){
   window.visualViewport.addEventListener("resize",syncMobileViewport,{passive:true});
 }
 
 input.addEventListener("focus",()=>{
   if(window.innerWidth<=780){
-    mobileFocusNearBottom=nearBottom();
-    document.body.classList.add("mobileInputFocused");
-    syncMobileViewport();
-    setTimeout(()=>{
-      syncMobileViewport();
-      if(mobileFocusNearBottom)scrollToLatest(true);
-    },140);
+    document.body.classList.add("mobileInputFocused","mobileKeyboardOpen");
+    if(!isiOSWebKit)syncMobileViewport();
   }
 });
-
 input.addEventListener("blur",()=>{
   document.body.classList.remove("mobileInputFocused","mobileKeyboardOpen");
   mobileKeyboardState=false;
-  setTimeout(()=>{
-    mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
-    syncMobileViewport();
-  },140);
+  if(!isiOSWebKit)setTimeout(syncMobileViewport,120);
 });
 
 function setMobileNav(open){
