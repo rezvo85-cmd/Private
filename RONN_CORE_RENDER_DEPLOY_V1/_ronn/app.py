@@ -2630,6 +2630,11 @@ def capabilities():
         "r19_failure_memory": True,
         "r19_long_context": True,
         "r19_training_dataset": r19_training_stats(),
+        "r23_unified_brain": r20_status(),
+        "r23_all_11": r23_capability_status(),
+        "r23_agent_runtime": r23_agent_status(),
+        "r23_long_context": r23_context_status(),
+        "r23_release_ready": r23_eval_run().get("all_11_ready",False),
         "r7_capability_manifest": capability_manifest(),
         "core_api_v1": True,
         "core_conversation_store": True,
@@ -2655,29 +2660,40 @@ def capabilities():
 
 @app.post("/api/brain/inspect")
 def brain_inspect(body: ChatBody, request: Request):
-    profile = task_profile(body.message, body.files)
-    difficulty = task_difficulty(body.message)
-    intent = infer_intent(body.message)
-    cognition = cognitive_profile(body.message, difficulty, intent, profile)
-    model, route, _ = select_model(body.message, body.images, body.files, body.mode)
-    graph = extract_project_graph(body.project_context, body.files, None)
-    skills = build_skill_context(body.message, profile)[1]
-    r5 = preflight_v5(body.message, profile, difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
-    r7 = r7_preflight(body.message, profile, difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
-    project_index = index_files(body.files or [])
+    file_names=[str(getattr(x,"name","file")) for x in (body.files or [])]
+    decision=r20_plan(
+        body.message,
+        history=body.history,
+        file_names=file_names,
+        has_images=bool(body.images),
+        has_project=bool(body.project_context or (body.project_id and body.project_id!="default")),
+        agent_mode=bool(body.agent_mode),
+        explicit_mode=body.mode,
+    )
+    profile=str(decision.get("profile") or task_profile(body.message,body.files))
+    model,route=r20_resolve_route(
+        decision,
+        providers={"groq":groq_key_loaded(),"nvidia":nvidia_key_loaded(),"openrouter":openrouter_key_loaded()},
+        models={
+            "fast":FAST_MODEL,"smart":SMART_MODEL,"creator":CREATOR_MODEL,"vision":VISION_MODEL,
+            "live":LIVE_MODEL,"research":RESEARCH_MODEL,"nvidia":NVIDIA_MODEL,
+            "or_nemotron":OR_NEMOTRON_MODEL,"or_deepseek":OR_DEEPSEEK_MODEL,"or_qwen":OR_QWEN_MODEL,
+        },
+    )
+    pid=ensure_project((body.project_id or "").strip() or "default")
     return {
-        "profile": profile,
-        "intent": intent,
-        "difficulty": difficulty,
-        "route": route,
-        "model": model,
-        "cognition": cognition,
-        "stages": task_stages(cognition),
-        "skills": skills,
-        "project_graph": graph,
-        "r5_preflight": r5,
-        "r7_preflight": r7,
-        "project_index": project_index,
+        "core":"R23",
+        "profile":profile,
+        "difficulty":int(decision.get("difficulty") or 1),
+        "depth":decision.get("depth"),
+        "route":route,
+        "model":model,
+        "controller":decision,
+        "capabilities":decision.get("capabilities") or {},
+        "project_id":pid,
+        "project_brain":project_stats(pid),
+        "project_index":index_files(body.files or []),
+        "skills":build_skill_context(body.message,profile)[1],
     }
 
 
