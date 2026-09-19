@@ -37,6 +37,25 @@ def _is_correction(low: str) -> bool:
     return any(x in low for x in CORRECTION_HINTS)
 
 
+def _topic_tokens(text: str) -> set[str]:
+    stop={
+        "actually","instead","change","that","this","keep","remember","please",
+        "from","with","into","current","user","assistant","should","would","could",
+        "want","need","make","using","still","then","than","have","will",
+    }
+    return {
+        w for w in re.findall(r"[a-z0-9_]+",str(text or "").lower())
+        if len(w)>=4 and not w.isdigit() and w not in stop
+    }
+
+
+def _same_topic(left: set[str], right: set[str]) -> bool:
+    if not left or not right:
+        return False
+    overlap=len(left & right)
+    return overlap>=3 and overlap/max(1,min(len(left),len(right)))>=0.5
+
+
 def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> dict[str, Any]:
     rows = list(history or [])
     keep_recent=max(1,int(keep_recent))
@@ -48,6 +67,7 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
             "source_turns":0,
             "kept_recent":min(len(rows),keep_recent),
             "superseded_duplicates":0,
+            "superseded_conflicts":0,
         }
 
     buckets = {
@@ -60,6 +80,8 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
     }
     seen = set()
     superseded_duplicates=0
+    superseded_conflicts=0
+    superseding_topics=[]
 
     # Scan newest -> oldest so when two near-duplicate durable facts exist, the
     # newer one survives and the stale duplicate is discarded.
@@ -79,6 +101,13 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
         important = correction or role == "user" or any(x in low for x in IMPORTANT)
         if not important:
             continue
+
+        topic=_topic_tokens(content)
+        if not correction and any(_same_topic(topic,t) for t in superseding_topics):
+            superseded_conflicts+=1
+            continue
+        if correction and topic:
+            superseding_topics.append(topic)
 
         key = _key(content)
         if not key:
@@ -153,6 +182,7 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
         "source_turns":len(older),
         "kept_recent":min(len(rows),keep_recent),
         "superseded_duplicates":superseded_duplicates,
+        "superseded_conflicts":superseded_conflicts,
         "clipped_items":clipped,
         "ordering":"newest-first within priority sections",
     }
