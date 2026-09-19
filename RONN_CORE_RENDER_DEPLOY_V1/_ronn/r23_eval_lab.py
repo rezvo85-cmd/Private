@@ -15,7 +15,7 @@ from r23_brain_arena import (
 )
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_knowledge_rescue import gap_signal as knowledge_gap_signal, should_buffer as knowledge_gap_should_buffer
-from r23_context import compress_history, project_scope_active, project_scope_key
+from r23_context import compress_history, project_scope_active, project_scope_key, prompt_context_policy
 from r23_agent_runtime import status as agent_status, evidence_contract as agent_evidence_contract
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
@@ -262,7 +262,7 @@ def run():
                   and any(x.get("key")=="api_name" for x in retrieve(restored_pid,"API name",10).get("facts",[]))
               )),
 
-        _case("long context keeps newest state, corrections, and compact history","5_long_context_compression",
+        _case("long context stays current-state aware and file prompts stay deduplicated","5_long_context_compression",
               lambda:bool(
                   (lambda x:x["items"]>0 and x["source_turns"]>20 and len(x["text"])<=11000)(compress_history(long_history))
                   and "Latest corrections / superseding instructions" in correction_digest.get("text","")
@@ -273,6 +273,18 @@ def run():
                   and correction_digest.get("superseded_conflicts",0)>=1
                   and correction_digest.get("text","").count("Remember build target R23.")==1
                   and "10 seconds" not in correction_digest.get("text","")
+                  and (lambda p:
+                      p["include_files_in_compiler"] is False
+                      and p["include_current_file_kb"] is False
+                      and p["include_project_graph"] is False
+                      and p["include_context_manifest"] is False
+                      and p["project_index_mode"]=="compact"
+                      and p["raw_file_source"]=="user_message"
+                  )(prompt_context_policy(has_files=True,followup=False,project_scope=True))
+                  and (lambda p:
+                      p["include_current_file_kb"] is True
+                      and p["include_project_graph"] is True
+                  )(prompt_context_policy(has_files=False,followup=True,project_scope=True))
               )),
 
         _case("evaluation lab and Arena evidence survive portable restore","6_real_evaluation_lab",
