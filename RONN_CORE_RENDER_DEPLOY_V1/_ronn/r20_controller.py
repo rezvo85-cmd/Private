@@ -44,8 +44,10 @@ def _local_intent(message):
     low=re.sub(r"\s+"," ",(message or "").lower()).strip()
     return any(x in low for x in (
         "near me","nearby","closest","around me","close to me","in my area",
-        "restaurant near","restaurants near","food near","places to eat near","coffee near",
-        "gas station near","store near","stores near","pharmacy near","hospital near","open near me"
+        "my location","use my location","see my location","current location","where am i",
+        "restaurant near","restaurants near","restaurants around","food near","places to eat near","coffee near",
+        "gas station near","store near","stores near","pharmacy near","hospital near","open near me",
+        "recommend me restaurants","recommend restaurants"
     ))
 
 def _needs_live(message,profile):
