@@ -142,6 +142,16 @@ def score_model(model, domain, score, latency=0):
         else:
             c.execute("INSERT INTO model_scores VALUES(?,?,?,?,?,?)",(model,domain,score,latency,1,now))
 
+def set_model_score(model, domain, score, latency=0, samples=1):
+    """Replace a model/domain score with a fresh measured window."""
+    now=time.time()
+    with _db() as c:
+        c.execute("""INSERT INTO model_scores(model,domain,score,latency,samples,updated)
+        VALUES(?,?,?,?,?,?) ON CONFLICT(model,domain) DO UPDATE SET
+        score=excluded.score,latency=excluded.latency,samples=excluded.samples,updated=excluded.updated""",
+        (str(model),str(domain),float(score),float(latency),max(0,int(samples)),now))
+
+
 def model_arena(domain=None):
     with _db() as c:
         if domain:
