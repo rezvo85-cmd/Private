@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from cryptography.fernet import Fernet
-from owner_auth import hash_token, new_recovery_code, new_session_token
+from owner_auth import hash_token, new_recovery_code, new_session_token, verify_signed_session
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
@@ -168,10 +168,11 @@ def list_permissions(owner, device_id):
     return [{**dict(r), "allowed": bool(r["allowed"])} for r in rows]
 
 
-def create_owner_session(owner, client_id="", device_id="", days=30):
-    token = new_session_token()
+def create_owner_session(owner, client_id="", device_id="", days=180):
     now = time.time()
-    exp = now + max(1, min(int(days), 90)) * 86400
+    days = max(1, min(int(days), 365))
+    exp = now + days * 86400
+    token = new_session_token(owner, client_id, device_id, days)
     with _db() as c:
         c.execute(
             "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,0)",
@@ -183,8 +184,25 @@ def create_owner_session(owner, client_id="", device_id="", days=30):
 def verify_owner_session(token, owner=None):
     if not token:
         return False
+
+    signed = verify_signed_session(token, owner)
     with _db() as c:
         r = c.execute("SELECT * FROM owner_sessions WHERE token_hash=?", (hash_token(token),)).fetchone()
+
+    # New signed sessions survive Render deploys even if the local SQLite file
+    # is replaced. When the local record exists, still honor revocation.
+    if signed:
+        if r and (r["revoked"] or r["expires"] < time.time()):
+            return False
+        device_id = str(signed.get("d") or "")
+        signed_owner = str(signed.get("o") or owner or "")
+        if device_id:
+            d = get_device(signed_owner, device_id)
+            if d and d.get("revoked"):
+                return False
+        return True
+
+    # Legacy opaque sessions remain valid until they expire.
     if not r or r["revoked"] or r["expires"] < time.time():
         return False
     if owner and r["owner"] != owner:
