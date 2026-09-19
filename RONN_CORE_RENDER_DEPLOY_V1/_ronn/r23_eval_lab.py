@@ -7,12 +7,13 @@ separately at runtime.
 from __future__ import annotations
 
 from r23_brain import plan, resolve_route, status as brain_status
+from r23_brain_arena import grade as arena_grade, routing_signal as arena_routing_signal
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_context import compress_history, project_scope_active, project_scope_key
 from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
-from project_brain import ensure_project, remember, retrieve, export_project, import_project
+from project_brain import ensure_project, remember, retrieve, export_project, import_project, set_model_score
 from experience_engine import learn_lesson, retrieve_lessons
 
 MODELS={
@@ -61,9 +62,25 @@ def run():
     portable_restore=import_project(restored_pid,portable_snapshot,"r23_eval_restore")
     learn_lesson("coding","r23_parser_contract","When a parser test fails, preserve the input contract before changing output.",.95)
 
+    arena_models=dict(MODELS)
+    arena_models["or_nemotron"]="arena-eval-nemotron"
+    arena_models["nvidia"]="arena-eval-nvidia"
+    arena_models["smart"]="arena-eval-groq"
+    set_model_score(arena_models["or_nemotron"],"main",75,.40,4)
+    set_model_score(arena_models["nvidia"],"main",100,.30,4)
+    set_model_score(arena_models["smart"],"main",50,.20,4)
+
     tests=[
-        _case("strongest configured model owns normal reasoning","1_stronger_main_brain",
-              lambda:resolve_route(plan("Explain why caching helps web applications."),PROVIDERS,MODELS)[0]==MODELS["or_nemotron"]),
+        _case("main brain uses complete fresh objective arena evidence","1_stronger_main_brain",
+              lambda:bool(
+                  arena_grade({"kind":"exact","expected":"877"},"877")
+                  and arena_routing_signal([
+                      arena_models["or_nemotron"],arena_models["nvidia"],arena_models["smart"]
+                  ])["ready"]
+                  and resolve_route(
+                      plan("Explain why caching helps web applications."),PROVIDERS,arena_models
+                  )[0]==arena_models["nvidia"]
+              )),
 
         _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",
               lambda:(lambda s:s.get("browser") and s.get("controlled_code_execution") and s.get("computer_adapter"))(agent_status())),
