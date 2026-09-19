@@ -1876,7 +1876,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
             finish_run(request_id, (time.time()-(started_at or time.time())), len(full), "complete", model=model, route=route)
         except Exception:
             pass
-    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-recovered"} else "model"
+    evidence_mode = "live" if route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-recovered","knowledge-gap-rescue"} else "model"
     audit = answer_audit(original_message, full, profile=profile, runtime_verified=False, evidence_mode=evidence_mode)
     audit["static_code"] = static_code_checks(full)
     audit["r5_quality_gate"] = quality_report(original_message, full, evidence_mode=evidence_mode, runtime_verified=False)
