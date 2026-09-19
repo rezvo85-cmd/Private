@@ -73,6 +73,7 @@ from r23_context import (
 )
 from r23_eval_lab import run as r23_eval_run
 from r23_capabilities import status as r23_capability_status
+from r23_brain_arena import run as r23_arena_run, status as r23_arena_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 import memory_store_pg as pg_memory
@@ -2983,8 +2984,49 @@ def r23_capabilities_api():
         "capabilities":r23_capability_status(),
         "agent_runtime":r23_agent_status(),
         "context":r23_context_status(),
+        "brain_arena":r23_arena_status(_brain_arena_candidates()),
         "cloud_brain":r15_cloud_status(),
     }
+
+def _brain_arena_candidates():
+    models=[]
+    if openrouter_key_loaded():
+        models.append(OR_NEMOTRON_MODEL)
+    if nvidia_key_loaded():
+        models.append(NVIDIA_MODEL)
+    if groq_key_loaded():
+        models.append(SMART_MODEL)
+    return list(dict.fromkeys(x for x in models if x))
+
+
+def _brain_arena_ask(model: str, prompt: str, max_tokens: int=64):
+    messages=[
+        {"role":"system","content":"You are being evaluated on a tiny objective task. Follow the requested output format exactly. Return final answer text only."},
+        {"role":"user","content":prompt},
+    ]
+    r=minimal_cloud_request(model,messages,max(16,min(int(max_tokens),96)),stream=False)
+    try:
+        if not r.ok:
+            raise RuntimeError(f"arena_http_{r.status_code}")
+        text=parse_nonstream(r)
+    finally:
+        r.close()
+    if not text:
+        raise RuntimeError("arena_empty_response")
+    return text
+
+
+@app.get("/api/r23/brain-arena")
+def r23_brain_arena_status_api(request: Request):
+    _r14_require_owner(request)
+    return r23_arena_status(_brain_arena_candidates())
+
+
+@app.post("/api/r23/brain-arena/run")
+def r23_brain_arena_run_api(request: Request, force: bool=False):
+    _r14_require_owner(request)
+    return r23_arena_run(_brain_arena_candidates(),_brain_arena_ask,force=bool(force))
+
 
 @app.get("/api/r23/project-brain/export")
 def r23_project_brain_export_api(request: Request, project_id: str="default"):
@@ -3119,6 +3161,7 @@ def diagnostics(request: Request):
         "r23_research": (BASE / "r23_research.py").exists(),
         "r23_agent_runtime": (BASE / "r23_agent_runtime.py").exists(),
         "r23_eval_lab": (BASE / "r23_eval_lab.py").exists(),
+        "r23_brain_arena": (BASE / "r23_brain_arena.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -3192,6 +3235,7 @@ def diagnostics(request: Request):
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
+        "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
         "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
@@ -3257,6 +3301,7 @@ def status(request: Request):
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
+        "r23_brain_arena":r23_arena_status(_brain_arena_candidates()),
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner),

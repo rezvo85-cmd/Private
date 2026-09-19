@@ -9,6 +9,7 @@ from r22_lean_core import plan as r22_plan
 from r23_capabilities import capability_plan, status as capability_status
 from provider_engine import model_penalty
 from experience_engine import model_feedback_penalty
+from r23_brain_arena import routing_signal as arena_routing_signal
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
 
@@ -101,15 +102,41 @@ def _pick_main_brain(providers,models):
     if not candidates:
         return models["smart"],"unknown",0
 
+    arena=arena_routing_signal([m for m,_,_ in candidates])
+    arena_ready=bool(arena.get("ready"))
+    arena_scores=arena.get("scores") or {}
+
     scored=[]
     for model,provider,quality_rank in candidates:
         health=int(model_penalty(model) or 0)
         feedback=int(model_feedback_penalty(model) or 0)
-        # Health/feedback penalties dominate small default-priority differences.
-        scored.append((health+feedback,quality_rank,model,provider,health,feedback))
+        row=arena_scores.get(model) or {}
+        arena_score=float(row.get("score") or 0)
+        arena_latency=float(row.get("latency") or 999)
+        # Reliability and repeated user feedback remain the strongest guardrails.
+        # When every candidate has enough fresh objective samples, arena score can
+        # distinguish models inside the same healthy pool. Five-point score bands
+        # prevent tiny/noisy benchmark differences from constantly flipping routes.
+        arena_band=-(int(arena_score)//5) if arena_ready else 0
+        latency_key=round(arena_latency,2) if arena_ready else 999
+        scored.append((
+            health+feedback,
+            arena_band,
+            quality_rank,
+            latency_key,
+            model,
+            provider,
+            health,
+            feedback,
+            arena_score,
+        ))
     scored.sort()
-    _,_,model,provider,health,feedback=scored[0]
-    return model,provider,health+feedback
+    _,_,_,_,model,provider,health,feedback,arena_score=scored[0]
+    return model,provider,health+feedback,{
+        "ready":arena_ready,
+        "score":arena_score if arena_ready else None,
+        "scores":arena_scores if arena_ready else {},
+    }
 
 
 def resolve_route(decision,providers,models):
@@ -126,11 +153,12 @@ def resolve_route(decision,providers,models):
         return selected,"vision"
 
     depth=str(decision.get("depth") or "smart")
-    selected,provider,penalty=_pick_main_brain(providers,models)
+    selected,provider,penalty,arena=_pick_main_brain(providers,models)
     decision["main_brain_selected"]=selected
     decision["main_brain_provider"]=provider
     decision["main_brain_penalty"]=penalty
-    decision["main_brain_policy"]="quality-first + health-aware"
+    decision["main_brain_arena"]=arena
+    decision["main_brain_policy"]="quality-first + health-aware + objective-arena-aware"
 
     if depth=="apex":
         return selected,"apex"
@@ -174,8 +202,9 @@ def status():
         "main_brain_first":True,
         "feature_count":caps.get("feature_count",0),
         "features":caps.get("features",{}),
-        "policy":"strongest-main-brain + health-aware failover + selective capability plane",
+        "policy":"strongest-main-brain + health-aware failover + objective Brain Arena + selective capability plane",
         "main_brain_health_aware":True,
+        "brain_arena_aware":True,
         "council_default":False,
         "competition_threshold":"difficulty>=6 only",
     }
