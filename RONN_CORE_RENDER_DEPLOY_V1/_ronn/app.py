@@ -81,6 +81,7 @@ from r23_context import (
     compress_history as r23_compress_history,
     project_scope_active as r23_project_scope_active,
     project_scope_key as r23_project_scope_key,
+    prompt_context_policy as r23_prompt_context_policy,
     status as r23_context_status,
 )
 from r23_eval_lab import run as r23_eval_run
@@ -1108,6 +1109,11 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     if not lean_core or controller.get("verify") or _rel.get("current") or _rel.get("coding") or _rel.get("high_stakes"):
         system += "\n\n" + reliability_directive(body.message, profile, body.files)
     _has_project_scope = r23_project_scope_active(body.project_id, body.project_context)
+    _r23_source_policy = r23_prompt_context_policy(
+        has_files=bool(body.files),
+        followup=bool(controller.get("followup")),
+        project_scope=_has_project_scope,
+    ) if controller.get("r23") else {}
     meta_os = metacognition_state(
         body.message, profile, difficulty,
         has_files=bool(body.files), has_project=_has_project_scope
@@ -1132,11 +1138,18 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     if not lean_core or prompt_policy.get("include_evidence_plan"):
         _r19_evidence = r19_evidence_plan(body.message, bool(body.files), bool(body.images))
         system += "\n\nEVIDENCE PLAN:\n" + json.dumps(_r19_evidence, ensure_ascii=False)
+    _r23_failure_lessons=[]
     try:
         if not lean_core or prompt_policy.get("include_failure_lessons"):
             _r19_failures = r19_relevant_failures(owner, body.message, 4)
             if _r19_failures:
-                system += "\n\nRELEVANT FAILURE LESSONS:\n" + "\n".join("- " + str(x.get("lesson","")) for x in _r19_failures)
+                _r23_failure_lessons=[
+                    str(x.get("lesson","")).strip()
+                    for x in _r19_failures
+                    if str(x.get("lesson","")).strip()
+                ]
+                if not (controller.get("r23") and lean_core):
+                    system += "\n\nRELEVANT FAILURE LESSONS:\n" + "\n".join("- " + x for x in _r23_failure_lessons)
     except Exception:
         pass
     if body.agent_mode and (not lean_core or prompt_policy.get("include_agent_directive")):
@@ -1145,8 +1158,21 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
         system += "\nRequested skill profile override: " + re.sub(r"[^a-zA-Z0-9_-]", "", body.skill_profile)[:40]
     _project_index = index_files(body.files or [])
     if _project_index.get("file_count"):
-        system += "\n\nRONN R5 PROJECT INDEX (static evidence, not runtime proof):\n" + json.dumps(_project_index, ensure_ascii=False)[:12000]
-        system += "\nPROJECT INDEX SUMMARY:\n" + index_summary(_project_index)
+        if controller.get("r23") and lean_core:
+            _compact_index={
+                "file_count":_project_index.get("file_count"),
+                "languages":_project_index.get("languages",{}),
+                "duplicate_symbols":_project_index.get("duplicate_symbols",{}),
+                "env_vars":_project_index.get("env_vars",[])[:24],
+                "ports":_project_index.get("ports",[])[:16],
+                "dependency_imports":dict(list((_project_index.get("dependency_imports") or {}).items())[:24]),
+            }
+            system += "\n\nPROJECT MAP (compact static metadata; raw files appear once in the user message):\n"
+            system += index_summary(_project_index)
+            system += "\n" + json.dumps(_compact_index,ensure_ascii=False)[:6000]
+        else:
+            system += "\n\nRONN R5 PROJECT INDEX (static evidence, not runtime proof):\n" + json.dumps(_project_index, ensure_ascii=False)[:12000]
+            system += "\nPROJECT INDEX SUMMARY:\n" + index_summary(_project_index)
     if not lean_core or prompt_policy.get("include_contradiction_scan"):
         contradiction_inputs=[("current_request", body.message), ("project_context", body.project_context or "")]
         for _f in body.files or []:
@@ -1161,13 +1187,17 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     _use_project_graph = (not lean_core or prompt_policy.get("include_project_graph"))
     try:
         if _use_project_graph:
+            # Keep learning the graph even when current attached-file evidence is
+            # already visible directly to the model and should not be duplicated.
             r14_graph_ingest(owner,pid,body.message,"conversation")
             if body.project_context:
                 r14_graph_ingest(owner,pid,body.project_context,"project_context")
             r14_graph_ingest_files(owner,pid,body.files or [])
-            _r14_graph = r14_graph_context(owner,pid,body.message,8)
-            if _r14_graph:
-                system += "\n\nRELEVANT PROJECT GRAPH:\n" + _r14_graph
+            _inject_graph = not (controller.get("r23") and lean_core) or bool(_r23_source_policy.get("include_project_graph"))
+            if _inject_graph:
+                _r14_graph = r14_graph_context(owner,pid,body.message,8)
+                if _r14_graph:
+                    system += "\n\nRELEVANT PROJECT GRAPH:\n" + _r14_graph
     except Exception:
         pass
     if body.project_context:
@@ -1177,9 +1207,11 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     try:
         if not lean_core or prompt_policy.get("include_knowledge_base"):
             kb_ingest_files(owner, pid, body.files or [])
-            _kb = kb_context_block(owner, pid, body.message, 5)
-            if _kb:
-                system += "\n\nLOCAL PROJECT KNOWLEDGE:\n" + _kb
+            _inject_kb = not (controller.get("r23") and lean_core) or bool(_r23_source_policy.get("include_current_file_kb"))
+            if _inject_kb:
+                _kb = kb_context_block(owner, pid, body.message, 5)
+                if _kb:
+                    system += "\n\nLOCAL PROJECT KNOWLEDGE:\n" + _kb
         _low_msg=re.sub(r"\s+"," ",(body.message or "").lower()).strip()
         if any(x in _low_msg for x in ("across projects","other project","another project","my other projects")):
             _cross=kb_search(owner,body.message,pid,6,cross_project=True)
@@ -1195,21 +1227,27 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     _contextual_turn = bool(body.project_context or body.files or controller.get("followup"))
     retrieved = brain_context(pid, body.message) if (not lean_core or _contextual_turn) else ""
     lesson_rows = retrieve_lessons(profile, 4) if (not lean_core or prompt_policy.get("include_failure_lessons")) else []
-    lesson_block = "\n".join(f"- {x.get('lesson','')}" for x in lesson_rows if x.get("lesson"))
+    _lesson_texts=list(_r23_failure_lessons)
+    _lesson_texts.extend(str(x.get("lesson","")).strip() for x in lesson_rows if str(x.get("lesson","")).strip())
+    _lesson_texts=list(dict.fromkeys(x for x in _lesson_texts if x))[:6]
+    lesson_block = "\n".join("- " + x for x in _lesson_texts)
     _context_cap = int(meta_os["budget"]["context_budget_chars"])
     if lean_core and prompt_policy.get("context_budget_chars"):
         _context_cap = min(_context_cap, int(prompt_policy["context_budget_chars"]))
+    _compiler_files = body.files or []
+    if controller.get("r23") and lean_core and not _r23_source_policy.get("include_files_in_compiler",False):
+        _compiler_files = []
     compiled = compile_context(
         body.message,
         body.project_context or "",
-        body.files or [],
+        _compiler_files,
         memory_block="\n".join(memories or []),
         brain_block=(retrieved + ("\nEXPERIENCE LESSONS:\n"+lesson_block if lesson_block else "")),
         max_chars=_context_cap,
     )
     if compiled["text"]:
         system += "\n\nCOMPILED HIGH-VALUE CONTEXT:\n" + compiled["text"]
-    if not lean_core or _contextual_turn:
+    if not lean_core or (not controller.get("r23") and _contextual_turn) or _r23_source_policy.get("include_context_manifest"):
         system += "\n\nCONTEXT MANIFEST:\n" + json.dumps(compiled["manifest"], ensure_ascii=False)[:3500]
     if not lean_core or prompt_policy.get("include_verification_directive"):
         ledger = requirement_ledger(body.message)
