@@ -79,7 +79,7 @@ def _auth(request: Request, authorization: str | None = Header(default=None)):
     except Exception:
         pass
 
-    raise HTTPException(401, "RONN is locked. Unlock Owner access to continue.")
+    raise HTTPException(401, "This device needs to reconnect to RONN.")
 
 
 def _chat_auth(request: Request, authorization: str | None = Header(default=None)):
