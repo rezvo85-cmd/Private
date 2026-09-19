@@ -68,16 +68,20 @@ def unknown_candidates(message: str) -> list[str]:
 
     # Technical identifiers and error codes are high-value retrieval targets.
     for tok in _tokens(raw):
-        tl = tok.lower()
-        if tl in _COMMON_SHORT or tl in _COMMON_WORDS:
+        # A trailing sentence period must not turn an ordinary word into an
+        # "unknown technical identifier". Internal dots still count (numpy.linalg,
+        # v2.1, package.name, etc.).
+        core = tok.strip(".")
+        tl = core.lower()
+        if not core or tl in _COMMON_SHORT or tl in _COMMON_WORDS:
             continue
         unusual = (
-            bool(re.search(r"\d", tok) and re.search(r"[A-Za-z]", tok))
-            or "_" in tok or "." in tok or "+" in tok or "#" in tok
-            or (tok.isupper() and 2 <= len(tok) <= 12)
+            bool(re.search(r"\d", core) and re.search(r"[A-Za-z]", core))
+            or "_" in core or "." in core or "+" in core or "#" in core
+            or (core.isupper() and 2 <= len(core) <= 12)
         )
-        if unusual and not re.fullmatch(r"\d+(?:\.\d+)?", tok):
-            add(tok)
+        if unusual and not re.fullmatch(r"\d+(?:\.\d+)?", core):
+            add(core)
 
     # Explicit uncertainty language should force retrieval even when the term is natural.
     if any(x in low for x in (
