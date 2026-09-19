@@ -11,7 +11,7 @@ from r23_capabilities import unknown_candidates, retrieval_reason, status as cap
 from r23_context import compress_history, project_scope_active, project_scope_key
 from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
-from r16_simulation import project_model
+from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import ensure_project, remember, retrieve
 from experience_engine import learn_lesson, retrieve_lessons
 
@@ -85,11 +85,25 @@ def run():
         _case("very hard work activates automatic model competition","7_automatic_model_competition",
               lambda:bool(hard_plan.get("use_council") and hard_plan["capabilities"]["model_competition"])),
 
-        _case("world model maps cross-file dependencies","8_world_model_simulation",
-              lambda:any(e.get("to")=="b.py" for e in project_model([
-                  {"name":"a.py","content":"import b\nprint(b.x)"},
-                  {"name":"b.py","content":"x=1"},
-              ]).get("edges",[]))),
+        _case("world model maps dependencies and simulates change impact","8_world_model_simulation",
+              lambda:bool(
+                  any(e.get("to")=="b.py" for e in project_model([
+                      {"name":"a.py","content":"import b\nprint(b.x)"},
+                      {"name":"b.py","content":"x=1"},
+                  ]).get("edges",[]))
+                  and (lambda sim: sim.get("risk_score",0)>0 and bool(sim.get("changes")))(
+                      simulate_changes(
+                          [
+                              {"name":"a.py","content":"import b\nprint(b.x)"},
+                              {"name":"b.py","content":"x=1"},
+                          ],
+                          [
+                              {"name":"a.py","content":"import b\nprint(b.x)"},
+                              {"name":"b.py","content":"x=2"},
+                          ],
+                      )
+                  )
+              )),
 
         _case("failure learning stores and retrieves relevant lessons","9_failure_learning",
               lambda:any("preserve the input contract" in str(x.get("lesson","")).lower()
