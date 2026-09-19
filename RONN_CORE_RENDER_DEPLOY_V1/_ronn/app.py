@@ -108,6 +108,8 @@ def verify_package_integrity():
         "_ronn/app.py",
         "_ronn/core_api.py",
         "_ronn/ecosystem_api.py",
+        "_ronn/ecosystem_store.py",
+        "_ronn/owner_auth.py",
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
@@ -885,9 +887,32 @@ def looks_local(message: str):
     low = re.sub(r"\s+", " ", (message or "").lower()).strip()
     return any(x in low for x in (
         "near me","nearby","closest","around me","close to me","in my area",
-        "restaurant near","restaurants near","food near","places to eat near","coffee near",
-        "gas station near","store near","stores near","pharmacy near","hospital near","open near me"
+        "my location","use my location","see my location","current location","where am i",
+        "restaurant near","restaurants near","restaurants around","food near","places to eat near","coffee near",
+        "gas station near","store near","stores near","pharmacy near","hospital near","open near me",
+        "recommend me restaurants","recommend restaurants"
     ))
+
+def _reverse_locality(lat: float, lon: float):
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 14, "addressdetails": 1},
+            timeout=(4, 8),
+            headers={"User-Agent": "RONN/21 local-search"},
+        )
+        r.raise_for_status()
+        addr = (r.json() or {}).get("address") or {}
+        locality = addr.get("suburb") or addr.get("neighbourhood") or addr.get("city") or addr.get("town") or addr.get("village") or addr.get("county")
+        state = addr.get("state")
+        country = addr.get("country")
+        parts = []
+        for part in (locality, state, country):
+            if part and part not in parts:
+                parts.append(str(part))
+        return ", ".join(parts[:3])
+    except Exception:
+        return ""
 
 def looks_live(message: str):
     low = message.lower()
@@ -1878,11 +1903,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             _lon = float(body.client_location.get("longitude"))
             _acc = float(body.client_location.get("accuracy") or 0)
             if -90 <= _lat <= 90 and -180 <= _lon <= 180:
+                _area = _reverse_locality(_lat, _lon)
+                _where = _area or f"latitude {_lat:.5f}, longitude {_lon:.5f}"
                 _loc_note = (
-                    f"USER-AUTHORIZED DEVICE LOCATION for this local-search request: "
-                    f"latitude {_lat:.5f}, longitude {_lon:.5f}"
-                    + (f", accuracy about {_acc:.0f} meters." if _acc > 0 else ".")
-                    + " Use this only to resolve the user's nearby/local request."
+                    f"USER-AUTHORIZED DEVICE AREA for this local-search request: {_where}. "
+                    + (f"Location accuracy is about {_acc:.0f} meters. " if _acc > 0 else "")
+                    + "Use this automatically for nearby results. Do not ask the user for a city or ZIP unless the location lookup failed."
                 )
                 _tool_message = (body.message + "\n\n" + _loc_note).strip()
                 body.project_context = ((body.project_context or "") + "\n\n" + _loc_note).strip()

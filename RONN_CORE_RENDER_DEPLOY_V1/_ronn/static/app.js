@@ -35,7 +35,7 @@ async function ensureWebAuth(){
     if(!health.auth_required){setWebAuthGate(false);return true}
     const state=await (await fetch(CORE_API+"/owner/status",{headers:apiHeaders(),cache:"no-store"})).json();
     if(state.op_active){setWebAuthGate(false);return true}
-    setWebAuthGate(true,"Owner session required. Your Core token stays private on the server.");
+    setWebAuthGate(true,"Connect this iPhone once. RONN will remember it across future updates.");
     return false;
   }catch{
     setWebAuthGate(true,"RONN Core is waking up or unavailable. Try again in a moment.");
@@ -46,19 +46,19 @@ async function unlockWebAuth(){
   const secret=$("webAuthSecret")?.value||"";
   if(!secret)return;
   const btn=$("webAuthUnlock"),msg=$("webAuthMessage");
-  if(btn){btn.disabled=true;btn.textContent="Unlocking…"}
-  if(msg)msg.textContent="Creating secure owner session…";
+  if(btn){btn.disabled=true;btn.textContent="Connecting…"}
+  if(msg)msg.textContent="Connecting this device securely…";
   try{
     const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Web",platform:navigator.platform||"web",app_version:"R19",return_token:false})});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.detail||"Owner unlock failed.");
+    if(!r.ok)throw new Error(d.detail||"Could not connect this device.");
     $("webAuthSecret").value="";
     setWebAuthGate(false);
     await refreshStatus();
     await refreshMemory();
     refreshOwnerAccess();
   }catch(e){if(msg)msg.textContent=e.message||"Could not unlock RONN."}
-  finally{if(btn){btn.disabled=false;btn.textContent="Unlock RONN"}}
+  finally{if(btn){btn.disabled=false;btn.textContent="Continue"}}
 }
 
 const CHAT_KEY="ronnChats", CURRENT_KEY="ronnCurrentChat", PROJECT_KEY="ronnProjects", ACTIVE_PROJECT_KEY="ronnActiveProject";
@@ -186,7 +186,7 @@ function stopActivity(){clearInterval(activityTimer);activityTimer=null;setTimeo
 
 let ronnLocationCache=null,ronnLocationAt=0;
 function needsRONNLocation(text){
-  return /\b(near me|nearby|closest|around me|close to me|in my area|restaurants? near|food near|places? to eat near|coffee near|gas stations? near|stores? near|pharmacy near|hospital near|open near me)\b/i.test(String(text||""))
+  return /\b(near me|nearby|closest|around me|close to me|in my area|my location|use my location|see my location|current location|where am i|restaurants? near|restaurants? around|food near|places? to eat near|coffee near|gas stations? near|stores? near|pharmacy near|hospital near|open near me|recommend(?: me)? restaurants?)\b/i.test(String(text||""))
 }
 async function getRONNLocation(text){
   if(!needsRONNLocation(text)||!navigator.geolocation)return null;
@@ -306,11 +306,22 @@ async function refreshEcosystemStatus(){
 }
 async function refreshOwnerAccess(){
   if(!$("opStatus"))return;
-  try{const r=await fetch(CORE_API+"/owner/status",{headers:apiHeaders()});const d=await r.json();const active=!!d.op_active;$("opStatus").textContent=active?"Owner Active":"Locked";$("opStatus").classList.toggle("active",active);$("opUnlockRow").classList.toggle("hidden",active);$("ownerPanel").classList.toggle("hidden",!active);if(active){$("opPlan").textContent="Owner Unlimited";$("opCredits").textContent="Unlimited";await Promise.all([refreshOwnerDevices(),refreshFeatureFlags(),refreshVault(),refreshOwnerStats()])}}catch{}
+  try{
+    const r=await fetch(CORE_API+"/owner/status",{headers:apiHeaders()});
+    const d=await r.json();
+    const active=!!d.op_active;
+    $("opStatus").textContent=active?"Active":"";
+    $("opStatus").classList.toggle("active",active);
+    $("ownerAccessCard")?.classList.toggle("hidden",!active);
+    $("ownerPanel")?.classList.toggle("hidden",!active);
+    if(active){
+      $("opPlan").textContent="Owner Unlimited";
+      $("opCredits").textContent="Unlimited";
+      await Promise.all([refreshOwnerDevices(),refreshFeatureFlags(),refreshVault(),refreshOwnerStats()]);
+    }
+  }catch{}
 }
 async function refreshOwnerStats(){try{const d=await (await fetch(CORE_API+"/ecosystem/status",{headers:apiHeaders()})).json();$("ownerDeviceCount").textContent=String(d.devices||0);$("ownerSyncCursor").textContent=String(d.sync_cursor||0)}catch{}}
-async function unlockOp(){const secret=$("opSecret")?.value||"";if(!secret)return showToast("Enter the OP access code.");try{const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R19",return_token:false})});const d=await r.json().catch(()=>({}));$("opSecret").value="";if(!r.ok)return showToast(d.detail||"OP unlock failed.");showToast("Owner Unlimited enabled.");refreshOwnerAccess();refreshEcosystemStatus()}catch{showToast("Could not reach RONN Core.")}}
-async function lockOp(){try{await fetch(CORE_API+"/owner/lock",{method:"POST",headers:apiHeaders()});showToast("OP mode locked.");refreshOwnerAccess();refreshEcosystemStatus()}catch{}}
 async function refreshOwnerDevices(){const box=$("ownerDeviceList");if(!box)return;try{const d=await (await fetch(CORE_API+"/devices",{headers:apiHeaders()})).json();box.innerHTML="";(d.devices||[]).forEach(dev=>{const row=document.createElement("div");row.className="ownerRow";row.innerHTML=`<div><b>${escapeHTML(dev.name||"RONN device")}</b><small>${escapeHTML(dev.platform||"unknown")} · ${dev.trusted?"trusted":"standard"}${dev.revoked?" · revoked":""}</small></div>${dev.device_id!==deviceId&&!dev.revoked?`<button class="dangerText" data-revoke-device="${escapeHTML(dev.device_id)}">Revoke</button>`:""}`;box.appendChild(row)});if(!box.children.length)box.innerHTML='<div class="emptyState">No registered devices yet.</div>'}catch{}}
 async function generateRecoveryCodes(){try{const r=await fetch(CORE_API+"/owner/recovery-codes",{method:"POST",headers:apiHeaders()});const d=await r.json();if(!r.ok)return showToast(d.detail||"Could not create recovery codes.");const box=$("opRecoveryBox");box.classList.remove("hidden");box.innerHTML=`<b>One-time recovery codes</b><p>Save these somewhere private. Each code works once.</p><pre>${escapeHTML((d.codes||[]).join("\n"))}</pre>`}catch{}}
 async function createOwnerBackup(){try{const r=await fetch(CORE_API+"/backups",{method:"POST",headers:apiHeaders()});const d=await r.json();if(!r.ok)return showToast(d.detail||"Backup failed.");showToast(`Backup created · ${(d.backup?.files||[]).length} databases`)}catch{showToast("Backup failed.")}}
@@ -369,9 +380,6 @@ if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R21-FINAL1",{updateViaCache:"none"}).catch(()=>{}))}
 
-if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
-if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
-if($("opLockBtn"))$("opLockBtn").onclick=lockOp;
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
 if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;
 if($("ownerRecoveryBtn"))$("ownerRecoveryBtn").onclick=generateRecoveryCodes;
@@ -389,9 +397,9 @@ renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refre
 window.__RONN_UI_READY=true;
 
 let mobileViewportFrame=0;
+const isiOSWebKit=/iP(hone|ad|od)/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
 let mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
 let mobileKeyboardState=false;
-let mobileFocusNearBottom=true;
 
 function syncMobileViewport(){
   cancelAnimationFrame(mobileViewportFrame);
@@ -401,70 +409,49 @@ function syncMobileViewport(){
       root.style.removeProperty("--ronn-vv-height");
       document.body.classList.remove("mobileKeyboardOpen","mobileInputFocused");
       mobileKeyboardState=false;
-      mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
+      return;
+    }
+
+    const inputFocused=document.activeElement===input;
+
+    // iOS Safari already pans its visual viewport to the focused textarea.
+    // Resizing RONN during that keyboard animation creates the blank-screen
+    // bounce shown in the screen recording, so do not fight Safari here.
+    if(isiOSWebKit){
+      root.style.removeProperty("--ronn-vv-height");
+      document.body.classList.toggle("mobileKeyboardOpen",inputFocused);
+      mobileKeyboardState=inputFocused;
       return;
     }
 
     const vv=window.visualViewport;
     const layoutH=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
     const visibleH=Math.max(1,Math.round(vv&&vv.height>0?vv.height:layoutH));
-    const inputFocused=document.activeElement===input;
-
-    // Keep a stable "keyboard closed" reference height. Safari can change
-    // window.innerHeight while its browser chrome animates, so never use a
-    // smaller focused height as the baseline.
-    if(!inputFocused){
-      mobileViewportBaseHeight=Math.max(visibleH,layoutH);
-    }else{
-      mobileViewportBaseHeight=Math.max(mobileViewportBaseHeight,layoutH,visibleH);
-    }
-
-    const keyboardGap=Math.max(0,mobileViewportBaseHeight-visibleH);
-    const keyboard=inputFocused&&keyboardGap>110;
+    if(!inputFocused)mobileViewportBaseHeight=Math.max(visibleH,layoutH);
+    const keyboard=inputFocused&&Math.max(0,mobileViewportBaseHeight-visibleH)>110;
     root.style.setProperty("--ronn-vv-height",visibleH+"px");
     document.body.classList.toggle("mobileKeyboardOpen",keyboard);
-
-    if(keyboard!==mobileKeyboardState){
-      mobileKeyboardState=keyboard;
-      if(currentView==="chat"&&mobileFocusNearBottom){
-        requestAnimationFrame(()=>scrollToLatest(true));
-      }
-    }
+    mobileKeyboardState=keyboard;
   });
 }
 
 syncMobileViewport();
 window.addEventListener("resize",syncMobileViewport,{passive:true});
-window.addEventListener("orientationchange",()=>{
-  mobileViewportBaseHeight=1;
-  setTimeout(syncMobileViewport,140);
-},{passive:true});
-
-if(window.visualViewport){
-  // Resize is enough for keyboard/browser-chrome changes. Listening to
-  // visualViewport.scroll and translating the shell caused the old jump loop.
+window.addEventListener("orientationchange",()=>setTimeout(syncMobileViewport,140),{passive:true});
+if(window.visualViewport&&!isiOSWebKit){
   window.visualViewport.addEventListener("resize",syncMobileViewport,{passive:true});
 }
 
 input.addEventListener("focus",()=>{
   if(window.innerWidth<=780){
-    mobileFocusNearBottom=nearBottom();
-    document.body.classList.add("mobileInputFocused");
-    syncMobileViewport();
-    setTimeout(()=>{
-      syncMobileViewport();
-      if(mobileFocusNearBottom)scrollToLatest(true);
-    },140);
+    document.body.classList.add("mobileInputFocused","mobileKeyboardOpen");
+    if(!isiOSWebKit)syncMobileViewport();
   }
 });
-
 input.addEventListener("blur",()=>{
   document.body.classList.remove("mobileInputFocused","mobileKeyboardOpen");
   mobileKeyboardState=false;
-  setTimeout(()=>{
-    mobileViewportBaseHeight=Math.max(1,Math.round(window.innerHeight||document.documentElement.clientHeight||1));
-    syncMobileViewport();
-  },140);
+  if(!isiOSWebKit)setTimeout(syncMobileViewport,120);
 });
 
 function setMobileNav(open){
