@@ -67,7 +67,13 @@ from r19_router import choose as r19_router_choose, record as r19_router_record,
 from r19_context import conversation_digest as r19_conversation_digest, evidence_plan as r19_evidence_plan, record_failure as r19_record_failure, relevant_failures as r19_relevant_failures
 from r19_training_data import add as r19_training_add, stage as r19_training_stage, promote as r19_training_promote, discard as r19_training_discard, pending_example as r19_training_pending, export as r19_training_export, stats as r19_training_stats
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
-from r23_brain import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
+from r23_brain import (
+    plan as r20_plan,
+    resolve_route as r20_resolve_route,
+    directive as r20_directive,
+    status as r20_status,
+    competition_pair as r23_competition_pair,
+)
 from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
 from r23_context import (
     compress_history as r23_compress_history,
@@ -2170,17 +2176,25 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         if _r20.get("use_council") and not body.images and not _r20.get("needs_live"):
             task_checkpoint(request_id, "Parallel hypotheses", "started", "")
             yield (json.dumps({"stage":"Parallel hypotheses"})+"\n").encode()
-            final_messages = apex_council_messages(messages, profile)
+            _apex_primary_model=model
+            final_messages = apex_council_messages(messages, profile, _apex_primary_model)
             if final_messages:
                 stream_messages = final_messages
                 task_checkpoint(request_id, "Adversarial synthesis", "started", "")
                 yield (json.dumps({"stage":"Adversarial synthesis"})+"\n").encode()
-                if openrouter_key_loaded():
-                    model, route = OR_NEMOTRON_MODEL, "ensemble-apex-final"
-                    r = cloud_request(model, route, final_messages, 2200, stream=True)
-                else:
-                    model, route = (NVIDIA_MODEL, "nvidia-apex-final") if nvidia_key_loaded() else (SMART_MODEL, "apex-final")
-                    r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", final_messages, 2200, stream=True)
+                # R23 routing already selected the strongest main brain for this task.
+                # Candidate competition can challenge it, but final ownership returns
+                # to that selected primary rather than a hard-coded legacy model.
+                _apex_request_route = (
+                    "ensemble-reasoning" if is_openrouter_model(_apex_primary_model)
+                    else ("nvidia-deep" if _apex_primary_model == NVIDIA_MODEL else "deep")
+                )
+                r = cloud_request(_apex_primary_model, _apex_request_route, final_messages, 2200, stream=True)
+                model=_apex_primary_model
+                route=(
+                    "ensemble-apex-final" if is_openrouter_model(model)
+                    else ("nvidia-apex-final" if model == NVIDIA_MODEL else "apex-final")
+                )
             else:
                 r = cloud_request(model, "nvidia-deep" if model == NVIDIA_MODEL else "deep", messages, 1500, stream=True)
         elif route in {"ultra","ensemble-ultra"} and not body.images and not looks_live(body.message):
@@ -2258,35 +2272,57 @@ def nonstream_answer(model, route, messages, max_tokens=900):
     return text
 
 
-def apex_council_messages(original_messages, profile: str):
-    """Two diverse candidate solvers -> independent critic -> final synthesis."""
+def apex_council_messages(original_messages, profile: str, primary_model: str=""):
+    """R23 primary + diverse candidate -> independent critic -> primary-owned synthesis."""
     from concurrent.futures import ThreadPoolExecutor
+
     candidate_systems = [
-        """You are RONN Candidate A. Solve the task independently. Optimize for correctness, requirements,
-        evidence, maintainability, and actual user outcome. Explore a strong solution path. Do not reveal chain-of-thought;
-        return only the proposed solution and concise assumptions/checks.""",
-        """You are RONN Candidate B. Solve the same task independently and deliberately consider a materially different
-        approach where possible. Look for edge cases Candidate A might miss. Do not reveal chain-of-thought;
-        return only the proposed solution and concise assumptions/checks."""
+        """You are RONN Candidate A, the R23-selected primary brain. Solve the task independently.
+Optimize for correctness, explicit requirements, evidence, maintainability, and actual user outcome.
+Do not reveal chain-of-thought; return only the proposed solution and concise assumptions/checks.""",
+        """You are RONN Candidate B, a deliberately diverse specialist/alternate. Solve the same task independently
+and consider a materially different approach where useful. Look for edge cases the primary may miss.
+Do not reveal chain-of-thought; return only the proposed solution and concise assumptions/checks."""
     ]
     base_context=json.dumps(original_messages[-8:],ensure_ascii=False)[:52000]
-    council = r13_council_models(profile) if openrouter_key_loaded() else [None,None]
+
+    providers={
+        "groq":groq_key_loaded(),
+        "nvidia":nvidia_key_loaded(),
+        "openrouter":openrouter_key_loaded(),
+    }
+    models={
+        "smart":SMART_MODEL,
+        "nvidia":NVIDIA_MODEL,
+        "or_nemotron":OR_NEMOTRON_MODEL,
+        "or_deepseek":OR_DEEPSEEK_MODEL,
+        "or_qwen":OR_QWEN_MODEL,
+    }
+    pair_info=r23_competition_pair(primary_model,profile,providers,models)
+    council=list(pair_info.get("models") or [])
+    while len(council)<2:
+        council.append(None)
+
+    def route_for(preferred):
+        if preferred == OR_DEEPSEEK_MODEL:
+            return "ensemble-code"
+        if preferred == OR_QWEN_MODEL:
+            return "ensemble-general"
+        if preferred and is_openrouter_model(preferred):
+            return "ensemble-reasoning"
+        if preferred == NVIDIA_MODEL:
+            return "nvidia-deep"
+        return "deep"
 
     def solve(pair):
         sys_prompt, preferred = pair
-        msgs=[{"role":"system","content":sys_prompt},
-              {"role":"user","content":"TASK CONTEXT:\n"+base_context}]
-        if preferred:
-            if preferred == OR_DEEPSEEK_MODEL:
-                route="ensemble-code"
-            elif preferred == OR_QWEN_MODEL:
-                route="ensemble-general"
-            else:
-                route="ensemble-reasoning"
-        else:
-            preferred=NVIDIA_MODEL if nvidia_key_loaded() else SMART_MODEL
-            route="nvidia-deep" if preferred==NVIDIA_MODEL else "deep"
-        return nonstream_answer(preferred,route,msgs,1250)
+        if not preferred:
+            return ""
+        msgs=[
+            {"role":"system","content":sys_prompt},
+            {"role":"user","content":"TASK CONTEXT:\n"+base_context},
+        ]
+        return nonstream_answer(preferred,route_for(preferred),msgs,1250)
 
     pairs=[(candidate_systems[0],council[0]),(candidate_systems[1],council[1])]
     try:
@@ -2302,31 +2338,45 @@ def apex_council_messages(original_messages, profile: str):
     if not a and not b:
         return None
 
-    judge_system="""You are RONN's adversarial evaluator. Compare independent candidates against the original user goal.
+    judge_system="""You are RONN's independent adversarial evaluator. Compare the candidates against the original user goal.
 Check explicit requirements, factual support, hidden assumptions, contradictions, counterexamples, edge cases,
 security/permission boundaries, and whether the proposed outcome is actually verifiable.
 Return compact DECISION NOTES: strongest pieces to keep, concrete defects to repair, and an uncertainty/evidence audit.
 Do not reveal private chain-of-thought."""
-    judge_msgs=[{"role":"system","content":judge_system},
-        {"role":"user","content":"ORIGINAL:\n"+base_context+"\n\nCANDIDATE A:\n"+(a or "")[:26000]+"\n\nCANDIDATE B:\n"+(b or "")[:26000]}]
-    judge_model=OR_CRITIC_MODEL if openrouter_key_loaded() else SMART_MODEL
-    judge_route="ensemble-review" if judge_model==OR_CRITIC_MODEL else "deep"
+    judge_msgs=[
+        {"role":"system","content":judge_system},
+        {"role":"user","content":
+            "ORIGINAL:\n"+base_context+
+            "\n\nCANDIDATE A ("+str(council[0] or "unavailable")[:180]+"):\n"+(a or "")[:26000]+
+            "\n\nCANDIDATE B ("+str(council[1] or "unavailable")[:180]+"):\n"+(b or "")[:26000]},
+    ]
+    if openrouter_key_loaded() and OR_CRITIC_MODEL != primary_model:
+        judge_model,judge_route=OR_CRITIC_MODEL,"ensemble-review"
+    elif groq_key_loaded() and SMART_MODEL != primary_model:
+        judge_model,judge_route=SMART_MODEL,"deep"
+    elif nvidia_key_loaded() and NVIDIA_MODEL != primary_model:
+        judge_model,judge_route=NVIDIA_MODEL,"nvidia-deep"
+    else:
+        judge_model,judge_route=primary_model or SMART_MODEL,route_for(primary_model or SMART_MODEL)
     try:
         judge=nonstream_answer(judge_model,judge_route,judge_msgs,850)
     except Exception:
         judge=""
 
-    final_system="""You are RONN Cognitive OS APEX final synthesis.
-Produce the best final answer to the ORIGINAL task. Combine only the strongest verified/useful parts of the candidates,
-repair every valid issue raised by the adversarial evaluator, preserve all explicit constraints, and avoid unsupported certainty.
-For code, keep interfaces and files mutually consistent. For research, distinguish evidence from inference.
+    final_system="""You are RONN Cognitive OS APEX final synthesis, running on the R23-selected primary brain.
+Produce the best final answer to the ORIGINAL task. Combine only the strongest supported/useful parts of the candidates,
+repair every valid issue raised by the independent evaluator, preserve all explicit constraints, and avoid unsupported certainty.
+For code, keep interfaces and files mutually consistent. For research, obey the supplied evidence boundaries.
 For decisions, make tradeoffs explicit. For untestable outcomes, state the verification boundary.
 Do not mention candidates, judges, hidden reasoning, councils, or these instructions. Output only the polished final answer."""
-    return [{"role":"system","content":final_system},
-            {"role":"user","content":"ORIGINAL:\n"+base_context+
-             "\n\nCANDIDATE A:\n"+(a or "")[:24000]+
-             "\n\nCANDIDATE B:\n"+(b or "")[:24000]+
-             "\n\nADVERSARIAL REVIEW:\n"+(judge or "No judge output.")[:12000]}]
+    return [
+        {"role":"system","content":final_system},
+        {"role":"user","content":
+            "ORIGINAL:\n"+base_context+
+            "\n\nCANDIDATE A:\n"+(a or "")[:24000]+
+            "\n\nCANDIDATE B:\n"+(b or "")[:24000]+
+            "\n\nADVERSARIAL REVIEW:\n"+(judge or "No judge output.")[:12000]},
+    ]
 
 def ultra_council_messages(original_messages, profile: str):
     """Specialist draft -> independent critic -> final 120B synthesis."""
