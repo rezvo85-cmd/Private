@@ -15,7 +15,13 @@ from dotenv import load_dotenv
 from skills_engine import build_skill_context
 from intelligence_engine import task_difficulty, infer_intent, intelligence_directive
 from cognition_engine import cognitive_profile, cognition_directive, extract_project_graph, task_stages
-from project_brain import ensure_project, ingest_project_text, brain_context, retrieve, model_arena, score_model, record_attempt, project_stats
+from project_brain import (
+    ensure_project, ingest_project_text, brain_context, retrieve, model_arena,
+    score_model, record_attempt, project_stats,
+    export_project as export_project_brain,
+    import_project as import_project_brain,
+)
+from core_store import get_project as core_get_project
 from goal_engine import new_task_id, requirement_ledger, verification_plan, verification_directive, static_code_checks
 from cognitive_os import metacognition_state, os_directive, compile_context
 from experience_engine import start_run, finish_run, add_feedback, stats as experience_stats, observed_model_scores, retrieve_lessons, model_feedback_penalty
@@ -59,7 +65,12 @@ from r19_training_data import add as r19_training_add, stage as r19_training_sta
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
 from r23_brain import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
 from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
-from r23_context import compress_history as r23_compress_history, status as r23_context_status
+from r23_context import (
+    compress_history as r23_compress_history,
+    project_scope_active as r23_project_scope_active,
+    project_scope_key as r23_project_scope_key,
+    status as r23_context_status,
+)
 from r23_eval_lab import run as r23_eval_run
 from r23_capabilities import status as r23_capability_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
@@ -119,6 +130,7 @@ def verify_package_integrity():
         "_ronn/static/index.html",
         "_ronn/static/style.css",
         "_ronn/static/mobile_fit.css",
+        "_ronn/static/service-worker.js",
         "_ronn/r20_controller.py",
         "_ronn/r22_lean_core.py",
         "_ronn/r22_benchmarks.py",
@@ -555,6 +567,7 @@ class ChatBody(BaseModel):
     agent_mode: bool = True
     skill_profile: str = "auto"
     client_location: dict = Field(default_factory=dict)
+    project_brain_snapshot: dict = Field(default_factory=dict)
 
 
 class StudioPlanBody(BaseModel):
@@ -1068,9 +1081,10 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     _rel = reliability_flags(body.message, body.files)
     if not lean_core or controller.get("verify") or _rel.get("current") or _rel.get("coding") or _rel.get("high_stakes"):
         system += "\n\n" + reliability_directive(body.message, profile, body.files)
+    _has_project_scope = r23_project_scope_active(body.project_id, body.project_context)
     meta_os = metacognition_state(
         body.message, profile, difficulty,
-        has_files=bool(body.files), has_project=bool(body.project_context)
+        has_files=bool(body.files), has_project=_has_project_scope
     )
     _brevity = response_length_policy(body.message, body.style, difficulty, bool(body.files), bool(body.images), bool(body.project_context))
     system += "\n\n" + brevity_directive(_brevity)
@@ -1116,7 +1130,7 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
             system += "\n\nCONTRADICTION SIGNALS TO RESOLVE CONSERVATIVELY:\n" + json.dumps(_conflicts,ensure_ascii=False)[:5000]
             system += "\nPrefer the newest explicit user instruction; mention a conflict only when it changes the result."
     # Persistent project intelligence: scoped to the active project/context name.
-    project_name = (body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default")
+    project_name = r23_project_scope_key(body.project_id, body.project_context)
     pid = ensure_project(project_name)
     _use_project_graph = (not lean_core or prompt_policy.get("include_project_graph"))
     try:
@@ -1818,7 +1832,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         history=body.history,
         file_names=_file_names,
         has_images=bool(body.images),
-        has_project=bool(body.project_context),
+        has_project=r23_project_scope_active(body.project_id, body.project_context),
         agent_mode=bool(body.agent_mode),
         explicit_mode=body.mode,
     )
@@ -1837,14 +1851,15 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     request_id = new_task_id()
     started_at = time.time()
     _difficulty = int(_r20.get("difficulty") or task_difficulty(body.message))
+    _has_project_scope = r23_project_scope_active(body.project_id, body.project_context)
     _legacy_diag = bool(
         (not _r20.get("lean_core"))
-        or body.files or body.images or body.project_context
+        or body.files or body.images or _has_project_scope
         or _difficulty >= 4 or _r20.get("verify")
     )
     if _legacy_diag:
-        _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
-        _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
+        _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=_has_project_scope, files=body.files)
+        _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=_has_project_scope)
         _r7_preflight = r7_preflight(body.message, profile, _difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
         _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
         _r12_preflight = r12_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
@@ -1859,10 +1874,15 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files) if (body.images or body.files) else {"version":"R14","images":0,"files":0}
     _r14_agent = r14_agent_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message)) if body.agent_mode and (_r20.get("needs_tools") or _difficulty >= 4) else {"version":"R14","steps":[],"tool_plan":_r14_tools}
     _auto_tier = str(_r20.get("depth") or "smart")
-    _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context)) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
+    _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), _has_project_scope) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
-    _project_id = ensure_project((body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default"))
-    _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
+    _project_id = ensure_project(r23_project_scope_key(body.project_id, body.project_context))
+    if _r20.get("r23") and body.project_brain_snapshot:
+        try:
+            import_project_brain(_project_id, body.project_brain_snapshot, "client_durable_snapshot")
+        except Exception:
+            pass
+    _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), _has_project_scope)
     try:
         start_task(request_id, owner, _project_id, body.message, profile, _difficulty, _preflight["plan"]["signature"], _preflight["plan"])
         task_checkpoint(request_id, "Understand", "complete", "Request accepted and preflight analysis created.")
@@ -2687,7 +2707,7 @@ def brain_inspect(body: ChatBody, request: Request):
         history=body.history,
         file_names=file_names,
         has_images=bool(body.images),
-        has_project=bool(body.project_context or (body.project_id and body.project_id!="default")),
+        has_project=r23_project_scope_active(body.project_id, body.project_context),
         agent_mode=bool(body.agent_mode),
         explicit_mode=body.mode,
     )
@@ -2701,7 +2721,7 @@ def brain_inspect(body: ChatBody, request: Request):
             "or_nemotron":OR_NEMOTRON_MODEL,"or_deepseek":OR_DEEPSEEK_MODEL,"or_qwen":OR_QWEN_MODEL,
         },
     )
-    pid=ensure_project((body.project_id or "").strip() or "default")
+    pid=ensure_project(r23_project_scope_key(body.project_id, body.project_context))
     return {
         "core":"R23",
         "profile":profile,
@@ -2965,6 +2985,25 @@ def r23_capabilities_api():
         "context":r23_context_status(),
         "cloud_brain":r15_cloud_status(),
     }
+
+@app.get("/api/r23/project-brain/export")
+def r23_project_brain_export_api(request: Request, project_id: str="default"):
+    owner=_r14_require_owner(request)
+    raw=(project_id or "default").strip() or "default"
+    if raw!="default" and not core_get_project(owner,raw):
+        raise HTTPException(404,"Project not found.")
+    pid=ensure_project(r23_project_scope_key(raw,""))
+    return {
+        "ok":True,
+        "project_id":raw,
+        "snapshot":export_project_brain(pid,80,80),
+        "stats":project_stats(pid),
+        "durability":{
+            "cloud":r15_cloud_status(),
+            "portable_snapshot":True,
+        },
+    }
+
 
 @app.get("/api/provider-check")
 def provider_check(provider: str = "groq"):

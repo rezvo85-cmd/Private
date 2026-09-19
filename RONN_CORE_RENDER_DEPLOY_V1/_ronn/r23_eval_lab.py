@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from r23_brain import plan, resolve_route, status as brain_status
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
-from r23_context import compress_history
+from r23_context import compress_history, project_scope_active, project_scope_key
 from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
-from r16_simulation import project_model
-from project_brain import ensure_project, remember, retrieve
+from r16_simulation import project_model, simulate as simulate_changes
+from project_brain import ensure_project, remember, retrieve, export_project, import_project
 from experience_engine import learn_lesson, retrieve_lessons
 
 MODELS={
@@ -56,6 +56,9 @@ def run():
 
     pid=ensure_project("r23-eval-project")
     remember(pid,"decision","api_name","Keep the public API name stable.",.95,"r23_eval")
+    portable_snapshot=export_project(pid,20,20)
+    restored_pid=ensure_project("r23-eval-project-restored")
+    portable_restore=import_project(restored_pid,portable_snapshot,"r23_eval_restore")
     learn_lesson("coding","r23_parser_contract","When a parser test fails, preserve the input contract before changing output.",.95)
 
     tests=[
@@ -68,8 +71,15 @@ def run():
         _case("code test fix retest activates for attached repair work","3_code_test_fix_retest",
               lambda:bool(code_plan["capabilities"]["code_fix_loop"] and code_plan["capabilities"]["agent_runtime"])),
 
-        _case("project brain writes and retrieves durable project facts","4_permanent_project_brain",
-              lambda:any(x.get("key")=="api_name" for x in retrieve(pid,"API name",10).get("facts",[]))),
+        _case("project brain scopes and retrieves durable project facts","4_permanent_project_brain",
+              lambda:bool(
+                  project_scope_active("core-project-123","")
+                  and project_scope_key("core-project-123","").startswith("core:")
+                  and plan("Continue this project.",has_project=True)["capabilities"]["project_brain"]
+                  and any(x.get("key")=="api_name" for x in retrieve(pid,"API name",10).get("facts",[]))
+                  and portable_restore.get("ok")
+                  and any(x.get("key")=="api_name" for x in retrieve(restored_pid,"API name",10).get("facts",[]))
+              )),
 
         _case("long context compresses old decisions without dumping all turns","5_long_context_compression",
               lambda:(lambda x:x["items"]>0 and x["source_turns"]>20 and len(x["text"])<=11000)(compress_history(long_history))),
@@ -80,11 +90,25 @@ def run():
         _case("very hard work activates automatic model competition","7_automatic_model_competition",
               lambda:bool(hard_plan.get("use_council") and hard_plan["capabilities"]["model_competition"])),
 
-        _case("world model maps cross-file dependencies","8_world_model_simulation",
-              lambda:any(e.get("to")=="b.py" for e in project_model([
-                  {"name":"a.py","content":"import b\nprint(b.x)"},
-                  {"name":"b.py","content":"x=1"},
-              ]).get("edges",[]))),
+        _case("world model maps dependencies and simulates change impact","8_world_model_simulation",
+              lambda:bool(
+                  any(e.get("to")=="b.py" for e in project_model([
+                      {"name":"a.py","content":"import b\nprint(b.x)"},
+                      {"name":"b.py","content":"x=1"},
+                  ]).get("edges",[]))
+                  and (lambda sim: sim.get("risk_score",0)>0 and bool(sim.get("changes")))(
+                      simulate_changes(
+                          [
+                              {"name":"a.py","content":"import b\nprint(b.x)"},
+                              {"name":"b.py","content":"x=1"},
+                          ],
+                          [
+                              {"name":"a.py","content":"import b\nprint(b.x)"},
+                              {"name":"b.py","content":"x=2"},
+                          ],
+                      )
+                  )
+              )),
 
         _case("failure learning stores and retrieves relevant lessons","9_failure_learning",
               lambda:any("preserve the input contract" in str(x.get("lesson","")).lower()

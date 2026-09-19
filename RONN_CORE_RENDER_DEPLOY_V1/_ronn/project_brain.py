@@ -151,6 +151,97 @@ def model_arena(domain=None):
     return [dict(r) for r in rows]
 
 
+
+def export_project(pid, fact_limit=80, relation_limit=80):
+    """Bounded portable snapshot for client/cloud durability fallbacks."""
+    with _db() as c:
+        project=c.execute("SELECT * FROM projects WHERE project_id=?",(pid,)).fetchone()
+        facts=c.execute(
+            "SELECT kind,key,value,confidence,source,created,updated FROM facts WHERE project_id=? ORDER BY updated DESC LIMIT ?",
+            (pid,max(1,min(int(fact_limit),200))),
+        ).fetchall()
+        relations=c.execute(
+            "SELECT src,relation,dst,evidence,updated FROM relations WHERE project_id=? ORDER BY updated DESC LIMIT ?",
+            (pid,max(1,min(int(relation_limit),200))),
+        ).fetchall()
+    portable_facts=[]
+    for x in facts:
+        d=dict(x)
+        d["value"]=str(d.get("value") or "")[:1600]
+        d["source"]=str(d.get("source") or "")[:160]
+        portable_facts.append(d)
+    portable_relations=[]
+    for x in relations:
+        d=dict(x)
+        d["src"]=str(d.get("src") or "")[:220]
+        d["relation"]=str(d.get("relation") or "")[:80]
+        d["dst"]=str(d.get("dst") or "")[:220]
+        d["evidence"]=str(d.get("evidence") or "")[:600]
+        portable_relations.append(d)
+    return {
+        "version":"R23-PROJECT-SNAPSHOT-1",
+        "project":{"name":(project["name"] if project else "")[:180],"summary":(project["summary"] if project else "")[:1200]},
+        "facts":portable_facts,
+        "relations":portable_relations,
+        "exported_at":int(time.time()),
+    }
+
+
+def import_project(pid,snapshot,source="portable_snapshot"):
+    """Merge a bounded portable snapshot into the local Project Brain.
+
+    Newer/current local facts win when their update timestamp is newer. Snapshot
+    content is treated as user/project context, never as system instructions.
+    """
+    if not isinstance(snapshot,dict):
+        return {"ok":False,"reason":"invalid_snapshot","facts":0,"relations":0}
+    facts=list(snapshot.get("facts") or [])[:200]
+    relations=list(snapshot.get("relations") or [])[:200]
+    imported_facts=0;imported_relations=0
+    now=time.time()
+    with _db() as c:
+        for row in facts:
+            if not isinstance(row,dict): continue
+            kind=str(row.get("kind") or "context")[:40]
+            key=str(row.get("key") or "")[:300]
+            value=str(row.get("value") or "")[:12000]
+            if not key or not value: continue
+            confidence=max(.1,min(1.0,float(row.get("confidence") or .7)))
+            incoming_updated=float(row.get("updated") or row.get("created") or 0)
+            existing=c.execute(
+                "SELECT value,updated FROM facts WHERE project_id=? AND kind=? AND key=?",
+                (pid,kind,key),
+            ).fetchone()
+            if existing and float(existing["updated"] or 0) > incoming_updated:
+                continue
+            if existing and existing["value"] != value:
+                c.execute(
+                    "INSERT INTO fact_history(project_id,kind,key,old_value,new_value,source,changed) VALUES(?,?,?,?,?,?,?)",
+                    (pid,kind,key,existing["value"][:12000],value,source[:200],now),
+                )
+            c.execute("""INSERT INTO facts(project_id,kind,key,value,confidence,source,created,updated)
+                VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(project_id,kind,key) DO UPDATE SET
+                value=excluded.value,confidence=max(facts.confidence,excluded.confidence),
+                source=excluded.source,updated=max(facts.updated,excluded.updated)""",
+                (pid,kind,key,value,confidence,source[:200],incoming_updated or now,incoming_updated or now))
+            imported_facts+=1
+
+        for row in relations:
+            if not isinstance(row,dict): continue
+            src=str(row.get("src") or "")[:300]
+            relation=str(row.get("relation") or "")[:100]
+            dst=str(row.get("dst") or "")[:300]
+            evidence=str(row.get("evidence") or "")[:2000]
+            if not src or not relation or not dst: continue
+            updated=float(row.get("updated") or now)
+            c.execute("""INSERT INTO relations(project_id,src,relation,dst,evidence,updated)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(project_id,src,relation,dst) DO UPDATE SET
+                evidence=excluded.evidence,updated=max(relations.updated,excluded.updated)""",
+                (pid,src,relation,dst,evidence,updated))
+            imported_relations+=1
+    return {"ok":True,"facts":imported_facts,"relations":imported_relations}
+
+
 def project_stats(pid):
     with _db() as c:
         facts=c.execute("SELECT COUNT(*) n FROM facts WHERE project_id=?",(pid,)).fetchone()["n"]

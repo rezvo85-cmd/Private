@@ -116,6 +116,7 @@ class CoreChatBody(BaseModel):
     agent_mode: bool = True
     skill_profile: str = "auto"
     client_location: dict = Field(default_factory=dict)
+    project_brain_snapshot: dict = Field(default_factory=dict)
 
 
 class CoreProjectCreate(BaseModel):

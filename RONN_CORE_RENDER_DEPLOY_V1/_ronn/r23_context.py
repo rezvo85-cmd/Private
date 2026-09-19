@@ -109,9 +109,32 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
     }
 
 
+
+
+def project_scope_active(project_id: str = "default", project_context: str = "") -> bool:
+    """True when a chat belongs to a real project even if no text context was pasted."""
+    pid=str(project_id or "").strip()
+    return bool((pid and pid!="default") or str(project_context or "").strip())
+
+
+def project_scope_key(project_id: str = "default", project_context: str = "") -> str:
+    """Stable key for the persistent Project Brain.
+
+    Core project IDs win because they stay stable across turns. Ad-hoc project
+    context still gets its own scope when no Core project exists.
+    """
+    pid=str(project_id or "").strip()
+    if pid and pid!="default":
+        return "core:"+pid[:180]
+    ctx=_clean(project_context,180)
+    if ctx:
+        return "context:"+ctx
+    return "default"
+
 def status():
     return {
         "version":"R23-CONTEXT-1",
         "mode":"structured compression + recent-turn preservation",
         "categories":["constraints","decisions","failures","goals","context"],
+        "project_scope":"core project id first; ad-hoc context fallback",
     }
