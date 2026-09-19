@@ -125,12 +125,13 @@ def research(query: str, *, unknown_terms=None, depth="smart") -> dict:
     sources=[]
     for row in rows[:max(10,read_limit)]:
         page=pages.get(row.get("url"))
+        page_text=str((page or {}).get("markdown") or "")[:page_chars]
         sources.append({
             "title":row.get("title") or (page or {}).get("title") or _domain(row.get("url") or ""),
             "url":row.get("url"),
             "snippet":row.get("snippet") or "",
-            "page":(page or {}).get("markdown","")[:page_chars],
-            "read":bool(page),
+            "page":page_text,
+            "read":bool(page_text.strip()),
             "query":row.get("query",""),
         })
 
