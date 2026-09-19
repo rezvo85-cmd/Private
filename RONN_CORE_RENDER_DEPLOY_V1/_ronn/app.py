@@ -1855,7 +1855,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     except Exception:
         pass
     _real_tool_evidence=[]
-    if body.agent_mode:
+    if body.agent_mode and not _r20.get("r23"):
         # R19 tool controller: automatically use safe real tools only when the request
         # clearly calls for them. Results are injected as evidence, never invented.
         try:
@@ -1919,14 +1919,26 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         except (TypeError, ValueError):
             pass
     try:
-        _tool_run = r20_tool_execute(
-            _tool_message,
-            depth=str(_r20.get("depth") or "smart"),
-            needs_live=bool(_r20.get("needs_live")),
-            has_files=bool(body.files),
-            has_images=bool(body.images),
-        )
-        _web_research = _tool_run.get("web_research") or {}
+        if _r20.get("r23"):
+            _tool_run = r23_agent_execute(
+                owner,
+                request_id,
+                _tool_message,
+                body.files or [],
+                _r20,
+                depth=str(_r20.get("depth") or "smart"),
+                repair_fn=_r16_repair_model,
+            )
+            _web_research = _tool_run.get("research") or {}
+        else:
+            _tool_run = r20_tool_execute(
+                _tool_message,
+                depth=str(_r20.get("depth") or "smart"),
+                needs_live=bool(_r20.get("needs_live")),
+                has_files=bool(body.files),
+                has_images=bool(body.images),
+            )
+            _web_research = _tool_run.get("web_research") or {}
         if _tool_run.get("evidence"):
             yield (json.dumps({"stage":"Using tools"})+"\n").encode()
             body.project_context = ((body.project_context or "") + "\n\n" + _tool_run["evidence"]).strip()
@@ -1944,18 +1956,20 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             except Exception:
                 pass
 
-    # R20 execution boundary: tools gather evidence; an answer model writes the answer.
-    # This prevents a model from printing a pseudo tool call such as {"tool":"groq_web_search",...}.
+    # Tools gather evidence; the R23 main brain keeps ownership of synthesis.
+    # Only if retrieval completely fails do we fall back to Compound's built-in web tools.
     if _r20.get("needs_live"):
         if _tool_run.get("evidence"):
-            if groq_key_loaded():
-                model, route = SMART_MODEL, "web-synthesis"
-            elif openrouter_key_loaded():
-                model, route = OR_QWEN_MODEL, "web-synthesis"
-            elif nvidia_key_loaded():
-                model, route = NVIDIA_MODEL, "web-synthesis"
+            if not _r20.get("r23"):
+                if groq_key_loaded():
+                    model, route = SMART_MODEL, "web-synthesis"
+                elif openrouter_key_loaded():
+                    model, route = OR_QWEN_MODEL, "web-synthesis"
+                elif nvidia_key_loaded():
+                    model, route = NVIDIA_MODEL, "web-synthesis"
+            else:
+                route = "web-synthesis"
         elif groq_key_loaded():
-            # Full Compound supports multiple server-side web_search / visit_website calls.
             model, route = RESEARCH_MODEL, "research"
 
     messages = build_messages(owner, body, profile, _r20)
@@ -1986,7 +2000,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "difficulty":int(_r20.get("difficulty") or _difficulty),
         "controller":_r20,
         "intent":infer_intent(body.message),
-        "cognition":{"core":"R22","depth":str(_r20.get("depth") or "smart"),"main_brain_first":True},
+        "cognition":{"core":"R23","depth":str(_r20.get("depth") or "smart"),"main_brain_first":True,"features":11},
         "stages":["understand","tool" if _r20.get("needs_tools") else "reason","verify" if _r20.get("verify") else "answer"],
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
         "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0)},
@@ -2023,8 +2037,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "r14_knowledge_graph":r14_graph_stats(owner) if _legacy_diag else {"lean_skipped":True},
         "adaptive_tier":str(_r20.get("depth") or "smart"),
         "agent_mode":bool(body.agent_mode),
-        "decision_summary":{"core":"R22","route":route,"model":model,"reason":_r20.get("reason")},
-        "capabilities":{"lean_core":True,"tools":bool(_r20.get("needs_tools")),"live":bool(_r20.get("needs_live")),"verification":bool(_r20.get("verify"))}
+        "decision_summary":{"core":"R23","route":route,"model":model,"reason":_r20.get("reason")},
+        "capabilities":_r20.get("capabilities") or {"lean_core":True,"tools":bool(_r20.get("needs_tools")),"live":bool(_r20.get("needs_live")),"verification":bool(_r20.get("verify"))}
     }})+"\n").encode()
 
     stream_messages = messages
