@@ -46,19 +46,19 @@ async function unlockWebAuth(){
   const secret=$("webAuthSecret")?.value||"";
   if(!secret)return;
   const btn=$("webAuthUnlock"),msg=$("webAuthMessage");
-  if(btn){btn.disabled=true;btn.textContent="Unlocking…"}
-  if(msg)msg.textContent="Creating secure owner session…";
+  if(btn){btn.disabled=true;btn.textContent="Connecting…"}
+  if(msg)msg.textContent="Connecting this device securely…";
   try{
     const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Web",platform:navigator.platform||"web",app_version:"R19",return_token:false})});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.detail||"Owner unlock failed.");
+    if(!r.ok)throw new Error(d.detail||"Could not connect this device.");
     $("webAuthSecret").value="";
     setWebAuthGate(false);
     await refreshStatus();
     await refreshMemory();
     refreshOwnerAccess();
   }catch(e){if(msg)msg.textContent=e.message||"Could not unlock RONN."}
-  finally{if(btn){btn.disabled=false;btn.textContent="Unlock RONN"}}
+  finally{if(btn){btn.disabled=false;btn.textContent="Continue"}}
 }
 
 const CHAT_KEY="ronnChats", CURRENT_KEY="ronnCurrentChat", PROJECT_KEY="ronnProjects", ACTIVE_PROJECT_KEY="ronnActiveProject";
