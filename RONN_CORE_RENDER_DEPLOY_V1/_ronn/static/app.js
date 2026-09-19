@@ -35,7 +35,7 @@ async function ensureWebAuth(){
     if(!health.auth_required){setWebAuthGate(false);return true}
     const state=await (await fetch(CORE_API+"/owner/status",{headers:apiHeaders(),cache:"no-store"})).json();
     if(state.op_active){setWebAuthGate(false);return true}
-    setWebAuthGate(true,"Owner session required. Your Core token stays private on the server.");
+    setWebAuthGate(true,"Connect this iPhone once. RONN will remember it across future updates.");
     return false;
   }catch{
     setWebAuthGate(true,"RONN Core is waking up or unavailable. Try again in a moment.");
@@ -306,11 +306,22 @@ async function refreshEcosystemStatus(){
 }
 async function refreshOwnerAccess(){
   if(!$("opStatus"))return;
-  try{const r=await fetch(CORE_API+"/owner/status",{headers:apiHeaders()});const d=await r.json();const active=!!d.op_active;$("opStatus").textContent=active?"Owner Active":"Locked";$("opStatus").classList.toggle("active",active);$("opUnlockRow").classList.toggle("hidden",active);$("ownerPanel").classList.toggle("hidden",!active);if(active){$("opPlan").textContent="Owner Unlimited";$("opCredits").textContent="Unlimited";await Promise.all([refreshOwnerDevices(),refreshFeatureFlags(),refreshVault(),refreshOwnerStats()])}}catch{}
+  try{
+    const r=await fetch(CORE_API+"/owner/status",{headers:apiHeaders()});
+    const d=await r.json();
+    const active=!!d.op_active;
+    $("opStatus").textContent=active?"Active":"";
+    $("opStatus").classList.toggle("active",active);
+    $("ownerAccessCard")?.classList.toggle("hidden",!active);
+    $("ownerPanel")?.classList.toggle("hidden",!active);
+    if(active){
+      $("opPlan").textContent="Owner Unlimited";
+      $("opCredits").textContent="Unlimited";
+      await Promise.all([refreshOwnerDevices(),refreshFeatureFlags(),refreshVault(),refreshOwnerStats()]);
+    }
+  }catch{}
 }
 async function refreshOwnerStats(){try{const d=await (await fetch(CORE_API+"/ecosystem/status",{headers:apiHeaders()})).json();$("ownerDeviceCount").textContent=String(d.devices||0);$("ownerSyncCursor").textContent=String(d.sync_cursor||0)}catch{}}
-async function unlockOp(){const secret=$("opSecret")?.value||"";if(!secret)return showToast("Enter the OP access code.");try{const r=await fetch(CORE_API+"/owner/unlock",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({secret,device_id:deviceId,device_name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R19",return_token:false})});const d=await r.json().catch(()=>({}));$("opSecret").value="";if(!r.ok)return showToast(d.detail||"OP unlock failed.");showToast("Owner Unlimited enabled.");refreshOwnerAccess();refreshEcosystemStatus()}catch{showToast("Could not reach RONN Core.")}}
-async function lockOp(){try{await fetch(CORE_API+"/owner/lock",{method:"POST",headers:apiHeaders()});showToast("OP mode locked.");refreshOwnerAccess();refreshEcosystemStatus()}catch{}}
 async function refreshOwnerDevices(){const box=$("ownerDeviceList");if(!box)return;try{const d=await (await fetch(CORE_API+"/devices",{headers:apiHeaders()})).json();box.innerHTML="";(d.devices||[]).forEach(dev=>{const row=document.createElement("div");row.className="ownerRow";row.innerHTML=`<div><b>${escapeHTML(dev.name||"RONN device")}</b><small>${escapeHTML(dev.platform||"unknown")} · ${dev.trusted?"trusted":"standard"}${dev.revoked?" · revoked":""}</small></div>${dev.device_id!==deviceId&&!dev.revoked?`<button class="dangerText" data-revoke-device="${escapeHTML(dev.device_id)}">Revoke</button>`:""}`;box.appendChild(row)});if(!box.children.length)box.innerHTML='<div class="emptyState">No registered devices yet.</div>'}catch{}}
 async function generateRecoveryCodes(){try{const r=await fetch(CORE_API+"/owner/recovery-codes",{method:"POST",headers:apiHeaders()});const d=await r.json();if(!r.ok)return showToast(d.detail||"Could not create recovery codes.");const box=$("opRecoveryBox");box.classList.remove("hidden");box.innerHTML=`<b>One-time recovery codes</b><p>Save these somewhere private. Each code works once.</p><pre>${escapeHTML((d.codes||[]).join("\n"))}</pre>`}catch{}}
 async function createOwnerBackup(){try{const r=await fetch(CORE_API+"/backups",{method:"POST",headers:apiHeaders()});const d=await r.json();if(!r.ok)return showToast(d.detail||"Backup failed.");showToast(`Backup created · ${(d.backup?.files||[]).length} databases`)}catch{showToast("Backup failed.")}}
@@ -369,9 +380,6 @@ if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R21-FINAL1",{updateViaCache:"none"}).catch(()=>{}))}
 
-if($("opUnlockBtn"))$("opUnlockBtn").onclick=unlockOp;
-if($("opSecret"))$("opSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockOp()});
-if($("opLockBtn"))$("opLockBtn").onclick=lockOp;
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
 if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;
 if($("ownerRecoveryBtn"))$("ownerRecoveryBtn").onclick=generateRecoveryCodes;
