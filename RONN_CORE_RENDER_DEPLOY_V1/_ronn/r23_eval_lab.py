@@ -6,7 +6,7 @@ separately at runtime.
 """
 from __future__ import annotations
 
-from r23_brain import plan, resolve_route, status as brain_status
+from r23_brain import plan, resolve_route, status as brain_status, competition_pair
 from r23_brain_arena import (
     grade as arena_grade,
     routing_signal as arena_routing_signal,
@@ -126,6 +126,12 @@ def run():
     set_model_score(domain_models["smart"],"coding",60,.18,3)
     domain_code_plan=plan("Fix this Python bug in my code.")
     domain_code_route=resolve_route(domain_code_plan,PROVIDERS,domain_models)
+    apex_pair=competition_pair(
+        arena_models["nvidia"],
+        "coding",
+        PROVIDERS,
+        arena_models,
+    )
 
     evidence_sample=agent_evidence_contract({
         "research":{"sources":[
@@ -217,8 +223,16 @@ def run():
         _case("evaluation lab declares all eleven capabilities","6_real_evaluation_lab",
               lambda:capability_status().get("feature_count")==11 and len(capability_status().get("features",{}))==11),
 
-        _case("very hard work activates automatic model competition","7_automatic_model_competition",
-              lambda:bool(hard_plan.get("use_council") and hard_plan["capabilities"]["model_competition"])),
+        _case("very hard work uses R23-primary-owned diverse model competition","7_automatic_model_competition",
+              lambda:bool(
+                  hard_plan.get("use_council")
+                  and hard_plan["capabilities"]["model_competition"]
+                  and apex_pair.get("primary_preserved")
+                  and apex_pair.get("diverse")
+                  and apex_pair.get("models",[])[0]==arena_models["nvidia"]
+                  and len(apex_pair.get("models",[]))==2
+                  and apex_pair.get("models",[])[1]!=arena_models["nvidia"]
+              )),
 
         _case("world model maps dependencies and simulates change impact","8_world_model_simulation",
               lambda:bool(
