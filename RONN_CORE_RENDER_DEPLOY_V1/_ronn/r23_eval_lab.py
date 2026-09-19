@@ -14,7 +14,7 @@ from r23_brain_arena import (
 )
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_context import compress_history, project_scope_active, project_scope_key
-from r23_agent_runtime import status as agent_status
+from r23_agent_runtime import status as agent_status, evidence_contract as agent_evidence_contract
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import ensure_project, remember, retrieve, export_project, import_project, set_model_score
@@ -127,6 +127,25 @@ def run():
     domain_code_plan=plan("Fix this Python bug in my code.")
     domain_code_route=resolve_route(domain_code_plan,PROVIDERS,domain_models)
 
+    evidence_sample=agent_evidence_contract({
+        "research":{"sources":[
+            {"id":"R1","url":"https://example.com/read","read":True},
+            {"id":"R2","url":"https://example.com/snippet","read":False},
+        ]},
+        "browser_pages":[
+            {"url":"https://example.com/page","status":200,"text":"retrieved page"},
+            {"url":"https://example.com/bad","status":"unknown","text":"not trustworthy"},
+        ],
+        "executed":["world_model","code_test_fix_retest"],
+        "world_model":{"nodes":2},
+        "code_loop":{"ok":True,"verified":False},
+        "errors":[],
+    })
+    verified_evidence_sample=agent_evidence_contract({
+        "executed":["code_test_fix_retest"],
+        "code_loop":{"ok":True,"verified":True},
+    })
+
     tests=[
         _case("main brain combines objective arena and profile outcomes","1_stronger_main_brain",
               lambda:bool(
@@ -225,8 +244,18 @@ def run():
               lambda:any("preserve the input contract" in str(x.get("lesson","")).lower()
                          for x in retrieve_lessons("coding",20))),
 
-        _case("autonomous research generates multiple useful search angles","10_autonomous_research",
-              lambda:len(subqueries("Fix package ZXQ_991 error",unknown_terms=["ZXQ_991"],depth="deep"))>=3),
+        _case("autonomous research and evidence states stay evidence-bound","10_autonomous_research",
+              lambda:bool(
+                  len(subqueries("Fix package ZXQ_991 error",unknown_terms=["ZXQ_991"],depth="deep"))>=3
+                  and evidence_sample["retrieval"]["read_page_count"]==1
+                  and evidence_sample["retrieval"]["snippet_only_count"]==1
+                  and evidence_sample["retrieval"]["explicit_browser_pages_read"]==1
+                  and evidence_sample["computed_static_analysis"] is True
+                  and evidence_sample["runtime_execution"]["attempted"] is True
+                  and evidence_sample["runtime_execution"]["reported_ok"] is True
+                  and evidence_sample["runtime_execution"]["verified_success"] is False
+                  and verified_evidence_sample["runtime_execution"]["verified_success"] is True
+              )),
 
         _case("unknown terms automatically trigger universal retrieval","11_universal_retrieval",
               lambda:bool("ZXQ_991" in unknown_candidates("what does ZXQ_991 mean")
