@@ -324,9 +324,26 @@ function arenaSnapshot(){
   }
 }
 function saveArenaSnapshot(snapshot){
-  if(snapshot&&snapshot.version==="R23-ARENA-SNAPSHOT-1"&&Array.isArray(snapshot.rows)){
-    saveJSON(ARENA_KEY,{version:"R23-ARENA-SNAPSHOT-1",rows:snapshot.rows.slice(0,100)});
+  if(!snapshot||snapshot.version!=="R23-ARENA-SNAPSHOT-1"||!Array.isArray(snapshot.rows))return;
+  const existing=arenaSnapshot().rows;
+  const merged=new Map();
+  const cutoff=(Date.now()/1000)-45*24*3600;
+  for(const row of [...existing,...snapshot.rows]){
+    const model=String(row?.model||"").slice(0,220),domain=String(row?.domain||"").slice(0,40);
+    const updated=Number(row?.updated||0);
+    if(!model||!["main","instruction","reasoning","coding"].includes(domain)||updated<cutoff)continue;
+    const clean={
+      model,domain,
+      score:Math.max(0,Math.min(100,Number(row?.score||0))),
+      latency:Math.max(0,Math.min(120,Number(row?.latency||0))),
+      samples:Math.max(0,Math.min(100,Number(row?.samples||0)|0)),
+      updated
+    };
+    const key=model+"|"+domain,prior=merged.get(key);
+    if(!prior||clean.updated>=Number(prior.updated||0))merged.set(key,clean);
   }
+  const rows=[...merged.values()].sort((a,b)=>Number(b.updated||0)-Number(a.updated||0)).slice(0,100);
+  saveJSON(ARENA_KEY,{version:"R23-ARENA-SNAPSHOT-1",rows});
 }
 async function maybeRunBrainArena(){
   if(brainArenaCheckStarted)return;
