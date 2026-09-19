@@ -108,6 +108,8 @@ def verify_package_integrity():
         "_ronn/app.py",
         "_ronn/core_api.py",
         "_ronn/ecosystem_api.py",
+        "_ronn/ecosystem_store.py",
+        "_ronn/owner_auth.py",
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
