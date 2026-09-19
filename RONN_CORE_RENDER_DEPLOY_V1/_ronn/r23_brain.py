@@ -226,14 +226,25 @@ def _apply_adaptive_effort(decision,selected,outcome_signal):
         policy["include_evidence_plan"]=True
         decision["prompt_policy"]=policy
 
+    # Strong repeated negative outcomes on a non-trivial auto-mode task earn a
+    # real draft/audit/critic/final correction pass. This is deliberately more
+    # selective than merely raising depth and never applies to easy turns.
+    correction_pass_added=False
+    if avg<=-.5 and difficulty>=4 and not bool(decision.get("needs_live")) and decision.get("specialist")!="vision":
+        if not bool(decision.get("second_pass")):
+            decision["second_pass"]=True
+            correction_pass_added=True
+
     if after!=before:
         decision["depth"]=after
 
-    applied=bool(after!=before or verify_added)
+    applied=bool(after!=before or verify_added or correction_pass_added)
     result.update({
         "applied":applied,
         "depth_after":after,
         "verification_added":verify_added,
+        "correction_pass_added":correction_pass_added,
+        "second_pass":bool(decision.get("second_pass")),
         "reason":"repeated_negative_profile_outcomes" if applied else "negative_but_below_escalation_threshold",
     })
     decision["adaptive_effort"]=result
