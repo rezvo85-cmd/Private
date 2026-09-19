@@ -49,6 +49,16 @@ def _runnable(files):
     return rows
 
 
+def _http_status_ok(value) -> bool:
+    if value is None:
+        return True
+    try:
+        code=int(value)
+    except (TypeError,ValueError):
+        return False
+    return 200 <= code < 400
+
+
 def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
     """Summarize what this turn actually observed versus merely retrieved."""
     out=out or {}
@@ -63,7 +73,7 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
         if isinstance(x,dict)
         and not x.get("error")
         and bool(x.get("text"))
-        and (x.get("status") is None or 200 <= int(x.get("status") or 0) < 400)
+        and _http_status_ok(x.get("status"))
     )
 
     executed=set(str(x) for x in (out.get("executed") or []))
