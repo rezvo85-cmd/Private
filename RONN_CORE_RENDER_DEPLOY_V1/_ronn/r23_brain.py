@@ -325,6 +325,8 @@ def status():
         "profile_outcome_learning":True,
         "adaptive_outcome_effort":True,
         "adaptive_effort_guardrails":"auto mode only; difficulty>=3; ratings>=3",
+        "learned_self_correction":True,
+        "self_correction_threshold":"strong negative profile outcomes; difficulty>=4; non-live non-vision",
         "council_default":False,
         "competition_threshold":"difficulty>=6 only",
     }
