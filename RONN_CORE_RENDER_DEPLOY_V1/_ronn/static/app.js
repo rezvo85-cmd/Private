@@ -62,7 +62,7 @@ async function unlockWebAuth(){
   finally{if(btn){btn.disabled=false;btn.textContent="Continue"}}
 }
 
-const CHAT_KEY="ronnChats", CURRENT_KEY="ronnCurrentChat", PROJECT_KEY="ronnProjects", ACTIVE_PROJECT_KEY="ronnActiveProject", OUTCOME_KEY="ronnOutcomeProfileR23";
+const CHAT_KEY="ronnChats", CURRENT_KEY="ronnCurrentChat", PROJECT_KEY="ronnProjects", ACTIVE_PROJECT_KEY="ronnActiveProject", OUTCOME_KEY="ronnOutcomeProfileR23", ARENA_KEY="ronnBrainArenaR23";
 function outcomeSnapshot(){
   const raw=loadJSON(OUTCOME_KEY,{version:"R23-OUTCOME-1",rows:[]});
   const rows=Array.isArray(raw?.rows)?raw.rows:[];
@@ -308,19 +308,59 @@ async function runDiagnostics(){const s=$("diagnosticSummary");s.className="diag
 async function testProvider(provider){showToast(`Testing ${provider} connection and chat completion…`);try{const r=await fetch(`${CORE_API}/providers/check?provider=${encodeURIComponent(provider)}`,{headers:apiHeaders()});const d=await r.json();showToast(d.verified?`${provider.toUpperCase()} chat verified with ${d.sample_model||"a live model"}.`:`${provider.toUpperCase()} test failed: ${d.message||"completion not verified"}`);runDiagnostics()}catch(e){showToast("Provider test failed: "+e.message)}}
 
 let brainArenaCheckStarted=false;
+function arenaSnapshot(){
+  const raw=loadJSON(ARENA_KEY,{version:"R23-ARENA-SNAPSHOT-1",rows:[]});
+  const rows=Array.isArray(raw?.rows)?raw.rows:[];
+  return {
+    version:"R23-ARENA-SNAPSHOT-1",
+    rows:rows.slice(0,100).map(x=>({
+      model:String(x.model||"").slice(0,220),
+      domain:String(x.domain||"").slice(0,40),
+      score:Number(x.score||0),
+      latency:Number(x.latency||0),
+      samples:Number(x.samples||0)|0,
+      updated:Number(x.updated||0)
+    })).filter(x=>x.model&&["main","instruction","reasoning","coding"].includes(x.domain))
+  }
+}
+function saveArenaSnapshot(snapshot){
+  if(snapshot&&snapshot.version==="R23-ARENA-SNAPSHOT-1"&&Array.isArray(snapshot.rows)){
+    saveJSON(ARENA_KEY,{version:"R23-ARENA-SNAPSHOT-1",rows:snapshot.rows.slice(0,100)});
+  }
+}
 async function maybeRunBrainArena(){
   if(brainArenaCheckStarted)return;
   brainArenaCheckStarted=true;
   try{
+    const local=arenaSnapshot();
+    if(local.rows.length){
+      const restore=await fetch("/api/r23/brain-arena/restore",{
+        method:"POST",
+        headers:apiHeaders({"Content-Type":"application/json"}),
+        body:JSON.stringify({snapshot:local})
+      });
+      if(!restore.ok){brainArenaCheckStarted=false;return}
+    }
+
     const sr=await fetch("/api/r23/brain-arena",{headers:apiHeaders(),cache:"no-store"});
     if(!sr.ok){brainArenaCheckStarted=false;return}
     const s=await sr.json();
     const routing=s.routing||{};
-    if(!routing.candidate_count)return;
+    if(!routing.candidate_count){brainArenaCheckStarted=false;return}
+
     const fresh=!!routing.ready&&Number(routing.oldest||0)>0&&((Date.now()/1000)-Number(routing.oldest||0)<6*24*3600);
-    if(fresh)return;
+    if(fresh){
+      try{
+        const er=await fetch("/api/r23/brain-arena/export",{headers:apiHeaders(),cache:"no-store"});
+        if(er.ok){const ed=await er.json();saveArenaSnapshot(ed.snapshot)}
+      }catch{}
+      return;
+    }
+
     const rr=await fetch("/api/r23/brain-arena/run",{method:"POST",headers:apiHeaders()});
-    if(!rr.ok)brainArenaCheckStarted=false;
+    if(!rr.ok){brainArenaCheckStarted=false;return}
+    const d=await rr.json();
+    saveArenaSnapshot(d.snapshot);
   }catch{brainArenaCheckStarted=false}
 }
 
@@ -438,7 +478,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-OUTCOME1",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ARENA-MEM1",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
 if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;
