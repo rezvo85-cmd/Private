@@ -368,6 +368,8 @@ def status(models=None) -> dict[str,Any]:
         "max_age_days":MAX_AGE_DAYS,
         "routing":signal,
         "domain_scores":{d:model_arena(d) for d in DOMAIN_MIN_SAMPLES},
+        "portable_snapshot":True,
+        "portable_snapshot_version":"R23-ARENA-SNAPSHOT-1",
         "challenger_gate":{
             "no_domain_promotion":False,
             "global_with_domain_min_score":62.5,

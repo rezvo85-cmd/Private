@@ -20,6 +20,8 @@ from project_brain import (
     score_model, record_attempt, project_stats,
     export_project as export_project_brain,
     import_project as import_project_brain,
+    export_model_scores as export_arena_scores,
+    import_model_scores as import_arena_scores,
 )
 from core_store import get_project as core_get_project
 from goal_engine import new_task_id, requirement_ledger, verification_plan, verification_directive, static_code_checks
@@ -615,6 +617,9 @@ class FeedbackBody(BaseModel):
     request_id: str
     rating: int
     note: str = ""
+
+class ArenaSnapshotBody(BaseModel):
+    snapshot: dict = Field(default_factory=dict)
 
 class DocumentExtractBody(BaseModel):
     filename: str
@@ -3261,10 +3266,27 @@ def r23_brain_arena_status_api(request: Request):
     return r23_arena_status(_brain_arena_candidates())
 
 
+@app.get("/api/r23/brain-arena/export")
+def r23_brain_arena_export_api(request: Request):
+    _r14_require_owner(request)
+    models=_brain_arena_candidates()
+    return {"ok":True,"snapshot":export_arena_scores(models,30)}
+
+
+@app.post("/api/r23/brain-arena/restore")
+def r23_brain_arena_restore_api(body: ArenaSnapshotBody, request: Request):
+    _r14_require_owner(request)
+    models=_brain_arena_candidates()
+    return import_arena_scores(body.snapshot,models,30)
+
+
 @app.post("/api/r23/brain-arena/run")
 def r23_brain_arena_run_api(request: Request, force: bool=False):
     _r14_require_owner(request)
-    return r23_arena_run(_brain_arena_candidates(),_brain_arena_ask,force=bool(force))
+    models=_brain_arena_candidates()
+    result=r23_arena_run(models,_brain_arena_ask,force=bool(force))
+    result["snapshot"]=export_arena_scores(models,30)
+    return result
 
 
 @app.get("/api/r23/project-brain/export")
