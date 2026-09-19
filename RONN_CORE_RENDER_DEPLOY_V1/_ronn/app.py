@@ -3358,6 +3358,7 @@ def diagnostics(request: Request):
         "r23_agent_runtime": (BASE / "r23_agent_runtime.py").exists(),
         "r23_eval_lab": (BASE / "r23_eval_lab.py").exists(),
         "r23_brain_arena": (BASE / "r23_brain_arena.py").exists(),
+        "r23_knowledge_rescue": (BASE / "r23_knowledge_rescue.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
