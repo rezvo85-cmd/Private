@@ -14,7 +14,7 @@ from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import ensure_project, remember, retrieve, export_project, import_project, set_model_score
-from experience_engine import learn_lesson, retrieve_lessons
+from experience_engine import learn_lesson, retrieve_lessons, ingest_portable_outcomes, profile_feedback_signal
 
 MODELS={
     "fast":"openai/gpt-oss-20b",
@@ -69,17 +69,31 @@ def run():
     set_model_score(arena_models["or_nemotron"],"main",75,.40,4)
     set_model_score(arena_models["nvidia"],"main",100,.30,4)
     set_model_score(arena_models["smart"],"main",50,.20,4)
+    ingest_portable_outcomes({
+        "version":"R23-OUTCOME-1",
+        "rows":[
+            {"model":arena_models["or_nemotron"],"profile":"coding","good":3,"bad":0,"updated":9999999999999},
+            {"model":arena_models["nvidia"],"profile":"coding","good":0,"bad":3,"updated":9999999999999},
+            {"model":arena_models["smart"],"profile":"coding","good":1,"bad":2,"updated":9999999999999},
+        ],
+    })
 
     tests=[
-        _case("main brain uses complete fresh objective arena evidence","1_stronger_main_brain",
+        _case("main brain combines objective arena and profile outcomes","1_stronger_main_brain",
               lambda:bool(
                   arena_grade({"kind":"exact","expected":"877"},"877")
                   and arena_routing_signal([
                       arena_models["or_nemotron"],arena_models["nvidia"],arena_models["smart"]
                   ])["ready"]
+                  and profile_feedback_signal([
+                      arena_models["or_nemotron"],arena_models["nvidia"],arena_models["smart"]
+                  ],"coding",3)["ready"]
                   and resolve_route(
                       plan("Explain why caching helps web applications."),PROVIDERS,arena_models
                   )[0]==arena_models["nvidia"]
+                  and resolve_route(
+                      plan("Fix this Python bug in my code."),PROVIDERS,arena_models
+                  )[0]==arena_models["or_nemotron"]
               )),
 
         _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",
