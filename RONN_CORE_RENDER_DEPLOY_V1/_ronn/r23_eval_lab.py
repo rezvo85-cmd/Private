@@ -49,6 +49,21 @@ def run():
         long_history.append({"role":"user","content":f"Project rule {i}: keep the API names stable and remember decision {i}."})
         long_history.append({"role":"assistant","content":"Understood; the project decision is preserved."})
 
+    correction_history=[
+        {"role":"user","content":"Keep the public API timeout at 10 seconds."},
+        {"role":"assistant","content":"The timeout is 10 seconds."},
+        {"role":"user","content":"Remember build target R23."},
+        {"role":"assistant","content":"Build target R23 noted."},
+        {"role":"user","content":"Remember build target R23."},
+        {"role":"assistant","content":"Still using R23."},
+        {"role":"user","content":"Actually, change that: keep the public API timeout at 30 seconds instead."},
+        {"role":"assistant","content":"Updated to 30 seconds."},
+    ]
+    for i in range(10):
+        correction_history.append({"role":"user","content":f"Later project note {i}: continue the current implementation."})
+        correction_history.append({"role":"assistant","content":"Continuing with the current implementation."})
+    correction_digest=compress_history(correction_history,7000,8)
+
     hard=(
         "Design the entire production architecture for a multi-service platform with multiple files, "
         "dependencies, failure recovery, migration, deployment, observability, security, root cause "
@@ -167,8 +182,16 @@ def run():
                   and any(x.get("key")=="api_name" for x in retrieve(restored_pid,"API name",10).get("facts",[]))
               )),
 
-        _case("long context compresses old decisions without dumping all turns","5_long_context_compression",
-              lambda:(lambda x:x["items"]>0 and x["source_turns"]>20 and len(x["text"])<=11000)(compress_history(long_history))),
+        _case("long context keeps newest state, corrections, and compact history","5_long_context_compression",
+              lambda:bool(
+                  (lambda x:x["items"]>0 and x["source_turns"]>20 and len(x["text"])<=11000)(compress_history(long_history))
+                  and "Latest corrections / superseding instructions" in correction_digest.get("text","")
+                  and "30 seconds instead" in correction_digest.get("text","")
+                  and "Precedence: newest explicit user instruction wins" in correction_digest.get("text","")
+                  and "[turn " in correction_digest.get("text","")
+                  and correction_digest.get("superseded_duplicates",0)>=1
+                  and correction_digest.get("text","").count("Remember build target R23.")==1
+              )),
 
         _case("evaluation lab declares all eleven capabilities","6_real_evaluation_lab",
               lambda:capability_status().get("feature_count")==11 and len(capability_status().get("features",{}))==11),
