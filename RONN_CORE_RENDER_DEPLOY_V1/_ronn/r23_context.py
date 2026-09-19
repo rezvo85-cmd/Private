@@ -215,5 +215,7 @@ def status():
         "mode":"current-state compression + recent-turn preservation",
         "categories":["corrections","constraints","decisions","failures","goals","context"],
         "precedence":"newest explicit user instruction wins; corrections first",
+        "turn_order_preserved":True,
+        "supersession_matching":True,
         "project_scope":"core project id first; ad-hoc context fallback",
     }
