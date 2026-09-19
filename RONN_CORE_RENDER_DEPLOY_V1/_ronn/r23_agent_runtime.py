@@ -7,17 +7,20 @@ when that separate runtime is configured.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from pathlib import PurePosixPath
 from typing import Any
 
 from r16_workspace import write as ws_write, read as ws_read, run as ws_run
 from r16_autofix import loop as autofix_loop
-from r16_simulation import project_model
+from r16_simulation import project_model, simulate as simulate_changes
 from r17_computer import status as computer_status, action as computer_action
 from r18_research import extract_urls, collect_pages
 from r20_tool_hub import weather as weather_tool
 from r23_research import research as autonomous_research
+from experience_engine import learn_lesson
 
 
 def _item(f):
@@ -59,7 +62,9 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "research":{},
         "browser_pages":[],
         "world_model":{},
+        "simulation":{},
         "code_loop":{},
+        "learning":{},
         "computer":{},
     }
     evidence=[]
@@ -156,6 +161,55 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
                 result["ok"]=bool(fixed.get("ok"))
             else:
                 result["ok"]=bool(first.get("ok"))
+
+            # 8) Simulate the actual before/after project slice after a repair.
+            before_files=[{"name":name,"content":content} for name,content in runnable[:40]]
+            after_files=[]
+            for name,_content in runnable[:40]:
+                try:
+                    after_files.append({"name":name,"content":ws_read(owner,workspace,name).get("content","")})
+                except Exception:
+                    after_files.append({"name":name,"content":_content})
+            try:
+                sim=simulate_changes(before_files,after_files)
+                out["simulation"]=sim
+                if sim.get("changes"):
+                    out["executed"].append("change_simulation")
+                    evidence.append(
+                        "RONN CHANGE SIMULATION (computed from the verified workspace before/after files):\n"+
+                        json.dumps(sim,ensure_ascii=False)[:26000]
+                    )
+            except Exception as exc:
+                out["errors"].append("simulation:"+exc.__class__.__name__)
+
+            # 9) Learn from the verified execution result. The lesson is compact,
+            # evidence-bound, and keyed to the real runtime error signature.
+            initial_error=str(
+                first.get("stderr") or first.get("error") or first.get("stdout") or ""
+            ).strip()
+            if initial_error:
+                normalized=re.sub(r"\s+"," ",initial_error)[:500]
+                signature=hashlib.sha256((entry+"|"+normalized.lower()).encode("utf-8")).hexdigest()[:20]
+                if result.get("ok"):
+                    lesson=(
+                        "A controlled test/fix/retest succeeded for a similar runtime failure in "
+                        + entry + ". Initial verified error: " + normalized[:320]
+                        + ". Preserve surrounding interfaces and rerun tests after applying a comparable repair."
+                    )
+                    confidence=.82
+                    outcome="repair_succeeded"
+                else:
+                    lesson=(
+                        "A controlled repair attempt did not verify success for a similar failure in "
+                        + entry + ". Verified error: " + normalized[:320]
+                        + ". Do not claim completion; inspect dependencies, runtime limits, and the failing contract."
+                    )
+                    confidence=.72
+                    outcome="repair_unresolved"
+                learn_lesson("coding",signature,lesson,confidence)
+                out["learning"]={"signature":signature,"outcome":outcome,"confidence":confidence}
+                out["executed"].append("failure_learning")
+
             out["code_loop"]=result
             out["executed"].append("code_test_fix_retest")
             evidence.append(
@@ -197,6 +251,8 @@ def status():
         "controlled_code_execution":True,
         "code_autofix":True,
         "world_model":True,
+        "change_simulation":True,
+        "verified_failure_learning":True,
         "computer_adapter":True,
         "computer_verified":bool(cs.get("verified")),
     }
