@@ -162,6 +162,80 @@ def model_arena(domain=None):
 
 
 
+ARENA_SCORE_DOMAINS={"main","instruction","reasoning","coding"}
+
+
+def export_model_scores(models=None, max_age_days=30):
+    """Portable objective Arena evidence. Contains no prompts or user content."""
+    allow={str(x) for x in (models or []) if x}
+    cutoff=time.time()-max(1,min(int(max_age_days),90))*86400
+    with _db() as c:
+        rows=c.execute(
+            "SELECT model,domain,score,latency,samples,updated FROM model_scores WHERE updated>=? ORDER BY updated DESC LIMIT 120",
+            (cutoff,),
+        ).fetchall()
+    out=[]
+    for row in rows:
+        d=dict(row)
+        if d.get("domain") not in ARENA_SCORE_DOMAINS:
+            continue
+        if allow and str(d.get("model") or "") not in allow:
+            continue
+        out.append({
+            "model":str(d.get("model") or "")[:220],
+            "domain":str(d.get("domain") or "")[:40],
+            "score":round(max(0.0,min(100.0,float(d.get("score") or 0))),4),
+            "latency":round(max(0.0,min(120.0,float(d.get("latency") or 0))),4),
+            "samples":max(0,min(100,int(d.get("samples") or 0))),
+            "updated":float(d.get("updated") or 0),
+        })
+    return {
+        "version":"R23-ARENA-SNAPSHOT-1",
+        "rows":out[:100],
+        "exported_at":int(time.time()),
+    }
+
+
+def import_model_scores(snapshot, allowed_models=None, max_age_days=30):
+    """Restore newer objective Arena windows after an ephemeral backend redeploy."""
+    if not isinstance(snapshot,dict):
+        return {"ok":False,"reason":"invalid_snapshot","imported":0,"skipped":0}
+    allowed={str(x) for x in (allowed_models or []) if x}
+    rows=list(snapshot.get("rows") or [])[:100]
+    now=time.time()
+    cutoff=now-max(1,min(int(max_age_days),90))*86400
+    imported=0;skipped=0
+    with _db() as c:
+        for row in rows:
+            if not isinstance(row,dict):
+                skipped+=1;continue
+            model=str(row.get("model") or "").strip()[:220]
+            domain=str(row.get("domain") or "").strip().lower()[:40]
+            if not model or domain not in ARENA_SCORE_DOMAINS or (allowed and model not in allowed):
+                skipped+=1;continue
+            try:
+                score=max(0.0,min(100.0,float(row.get("score") or 0)))
+                latency=max(0.0,min(120.0,float(row.get("latency") or 0)))
+                samples=max(0,min(100,int(row.get("samples") or 0)))
+                updated=float(row.get("updated") or 0)
+            except Exception:
+                skipped+=1;continue
+            if samples<=0 or updated<cutoff or updated>now+3600:
+                skipped+=1;continue
+            old=c.execute(
+                "SELECT updated FROM model_scores WHERE model=? AND domain=?",
+                (model,domain),
+            ).fetchone()
+            if old and float(old["updated"] or 0)>=updated:
+                skipped+=1;continue
+            c.execute("""INSERT INTO model_scores(model,domain,score,latency,samples,updated)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(model,domain) DO UPDATE SET
+                score=excluded.score,latency=excluded.latency,samples=excluded.samples,updated=excluded.updated""",
+                (model,domain,score,latency,samples,updated))
+            imported+=1
+    return {"ok":True,"imported":imported,"skipped":skipped,"version":"R23-ARENA-SNAPSHOT-1"}
+
+
 def export_project(pid, fact_limit=80, relation_limit=80):
     """Bounded portable snapshot for client/cloud durability fallbacks."""
     with _db() as c:
