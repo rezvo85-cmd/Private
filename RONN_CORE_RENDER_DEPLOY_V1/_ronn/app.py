@@ -2085,9 +2085,20 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             model, route = RESEARCH_MODEL, "research"
 
     messages = build_messages(owner, body, profile, _r20)
+    _evidence_contract = (_tool_run.get("evidence_contract") or {}) if _r20.get("r23") else {}
+    if _evidence_contract:
+        messages[0]["content"] += (
+            "\n\nRONN EVIDENCE CONTRACT FOR THIS TURN:\n"
+            + json.dumps(_evidence_contract,ensure_ascii=False)[:9000]
+            + "\nFollow this contract when choosing wording. Retrieved/read evidence supports sourced claims; "
+              "computed analysis supports derived claims; only explicit verified execution/observation supports claims that something was actually verified. "
+              "Do not call a search snippet, webpage read, static analysis, or model inference 'verified'. "
+              "If the available evidence is weaker than the user's requested certainty, say what is known and what remains unverified."
+        )
     if _r20.get("needs_live"):
         messages[0]["content"] += (
             "\nFor current or research-dependent claims, answer from the retrieved web evidence when it is present. "
+            "Treat SOURCE R# [READ PAGE] as retrieved page evidence and SOURCE R# [SEARCH SNIPPET ONLY] as discovery evidence only. "
             "Do not describe, simulate, request, or print a tool call. If no retrieved evidence is present and the provider supports built-in live tools, it may use them internally. "
             "Never expose tool-call JSON, tool names, internal arguments, executed-tools data, or hidden reasoning to the user. "
             "Return only the normal user-facing answer and include useful source links for current claims."
@@ -2115,7 +2126,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "cognition":{"core":"R23","depth":str(_r20.get("depth") or "smart"),"main_brain_first":True,"features":11},
         "stages":["understand","tool" if _r20.get("needs_tools") else "reason","verify" if _r20.get("verify") else "answer"],
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
-        "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0)},
+        "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0),"snippet_only_count":int(_web_research.get("snippet_only_count") or 0)},
+        "evidence_contract":_evidence_contract,
         "tool_hub":{
             "planned":_tool_run.get("planned") or [],
             "executed":_tool_run.get("executed") or [],
