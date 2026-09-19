@@ -15,7 +15,13 @@ from dotenv import load_dotenv
 from skills_engine import build_skill_context
 from intelligence_engine import task_difficulty, infer_intent, intelligence_directive
 from cognition_engine import cognitive_profile, cognition_directive, extract_project_graph, task_stages
-from project_brain import ensure_project, ingest_project_text, brain_context, retrieve, model_arena, score_model, record_attempt, project_stats
+from project_brain import (
+    ensure_project, ingest_project_text, brain_context, retrieve, model_arena,
+    score_model, record_attempt, project_stats,
+    export_project as export_project_brain,
+    import_project as import_project_brain,
+)
+from core_store import get_project as core_get_project
 from goal_engine import new_task_id, requirement_ledger, verification_plan, verification_directive, static_code_checks
 from cognitive_os import metacognition_state, os_directive, compile_context
 from experience_engine import start_run, finish_run, add_feedback, stats as experience_stats, observed_model_scores, retrieve_lessons, model_feedback_penalty
@@ -560,6 +566,7 @@ class ChatBody(BaseModel):
     agent_mode: bool = True
     skill_profile: str = "auto"
     client_location: dict = Field(default_factory=dict)
+    project_brain_snapshot: dict = Field(default_factory=dict)
 
 
 class StudioPlanBody(BaseModel):
@@ -1869,6 +1876,11 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), _has_project_scope) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
     _project_id = ensure_project(r23_project_scope_key(body.project_id, body.project_context))
+    if _r20.get("r23") and body.project_brain_snapshot:
+        try:
+            import_project_brain(_project_id, body.project_brain_snapshot, "client_durable_snapshot")
+        except Exception:
+            pass
     _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), _has_project_scope)
     try:
         start_task(request_id, owner, _project_id, body.message, profile, _difficulty, _preflight["plan"]["signature"], _preflight["plan"])
@@ -2972,6 +2984,25 @@ def r23_capabilities_api():
         "context":r23_context_status(),
         "cloud_brain":r15_cloud_status(),
     }
+
+@app.get("/api/r23/project-brain/export")
+def r23_project_brain_export_api(request: Request, project_id: str="default"):
+    owner=_r14_require_owner(request)
+    raw=(project_id or "default").strip() or "default"
+    if raw!="default" and not core_get_project(owner,raw):
+        raise HTTPException(404,"Project not found.")
+    pid=ensure_project(r23_project_scope_key(raw,""))
+    return {
+        "ok":True,
+        "project_id":raw,
+        "snapshot":export_project_brain(pid,80,80),
+        "stats":project_stats(pid),
+        "durability":{
+            "cloud":r15_cloud_status(),
+            "portable_snapshot":True,
+        },
+    }
+
 
 @app.get("/api/provider-check")
 def provider_check(provider: str = "groq"):
