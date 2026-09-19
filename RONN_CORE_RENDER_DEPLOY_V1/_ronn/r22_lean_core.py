@@ -266,8 +266,18 @@ def resolve_route(decision, providers, models):
             return models["nvidia"], "research"
         return models["smart"], "knowledge"
 
+    # Very hard work gets one deliberate escalation before specialist routing.
+    # This prevents a huge coding/architecture task from being trapped on a
+    # smaller specialist simply because it contains code words.
+    if depth == "apex":
+        if openrouter:
+            return models["or_nemotron"], "apex"
+        if nvidia:
+            return models["nvidia"], "apex"
+        return models["smart"], "deep"
+
     # Coding is the one common domain where a dedicated specialist is often
-    # materially stronger than the general model.
+    # materially stronger than the general model for ordinary coding/debugging.
     if specialist == "coding":
         if openrouter:
             return models["or_deepseek"], "creator"
@@ -276,15 +286,6 @@ def resolve_route(decision, providers, models):
         if nvidia:
             return models["nvidia"], "deep"
         return models["creator"], "creator"
-
-    # Very hard reasoning may escalate once. Everything below this threshold
-    # stays with one strong general brain instead of bouncing across models.
-    if depth == "apex":
-        if openrouter:
-            return models["or_nemotron"], "apex"
-        if nvidia:
-            return models["nvidia"], "apex"
-        return models["smart"], "deep"
 
     if depth == "fast" and profile == "chat" and groq:
         return models["fast"], "fast"
