@@ -1084,9 +1084,10 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
         _r14_user = r14_user_directive(owner)
         if _r14_user:
             system += "\n\n" + _r14_user
-    _r19_digest = r19_conversation_digest(body.history, 9000) if (not lean_core or prompt_policy.get("include_long_context_digest")) else ""
+    _r23_context = r23_compress_history(body.history, 11000, 8) if (controller.get("r23") and prompt_policy.get("include_long_context_digest")) else {"text":"","items":0}
+    _r19_digest = (_r23_context.get("text") or "") if controller.get("r23") else (r19_conversation_digest(body.history, 9000) if (not lean_core or prompt_policy.get("include_long_context_digest")) else "")
     if _r19_digest:
-        system += "\n\nLONG-CONTEXT DIGEST (older constraints and decisions):\n" + _r19_digest
+        system += "\n\n" + _r19_digest
     if not lean_core or prompt_policy.get("include_evidence_plan"):
         _r19_evidence = r19_evidence_plan(body.message, bool(body.files), bool(body.images))
         system += "\n\nEVIDENCE PLAN:\n" + json.dumps(_r19_evidence, ensure_ascii=False)
