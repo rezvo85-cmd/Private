@@ -17,9 +17,9 @@ def _profile(message: str, file_names=None) -> str:
     hay = low + " " + names
 
     if any(x in hay for x in (
-        "code","script","debug","api","python","javascript","typescript","html","css",
-        ".py",".js",".ts",".json","database","backend","frontend","github","server",
-        "client","exception","stack trace","traceback","bug","compile","runtime error"
+        "code","script","debug","python","javascript","typescript","html","css",
+        ".py",".js",".ts",".json","exception","stack trace","traceback",
+        "bug in","fix my code","compile error","runtime error","syntax error"
     )):
         return "coding"
     if any(x in low for x in (
