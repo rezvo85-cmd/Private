@@ -1603,7 +1603,7 @@ def looks_like_internal_tool_payload(text: str) -> bool:
     named=any(name in low for name in tool_names) and ("query" in low or "url" in low or "args" in low)
     return bool((jsonish and protocol) or named)
 
-def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None):
+def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None, project_id: str=""):
     filt = ThinkFilter()
     full = ""
     _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} or model in {"groq/compound","groq/compound-mini"}
@@ -1695,6 +1695,26 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
 
     save_message(owner, "user", original_message or "[attachment]")
     save_message(owner, "assistant", full)
+
+    # R23 permanent project brain: learn the completed turn only when this turn
+    # was explicitly scoped to project memory. ingest_project_text is selective:
+    # it extracts constraints, decisions, failures and named code relationships
+    # rather than storing the whole response as an indiscriminate transcript.
+    if project_id:
+        try:
+            ingest_project_text(project_id, original_message or "", "completed_user_turn")
+            if profile in {"coding","analysis","creative","research"}:
+                ingest_project_text(project_id, full, "completed_assistant_turn")
+            record_attempt(
+                project_id,
+                request_id or ("turn_"+uuid.uuid4().hex[:12]),
+                "answer",
+                "complete",
+                ("Completed R23 project turn via " + str(route) + "/" + str(model))[:1000],
+            )
+        except Exception:
+            pass
+
     if request_id and safe_memory_text(original_message or "") and safe_memory_text(full):
         try:
             r19_training_stage(request_id, owner, original_message or "[attachment]", full, profile or "general", model)
@@ -2135,7 +2155,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 model, route = used_model, "backup"
                 yield (json.dumps({"meta":{"route":"backup","model":model,"profile":profile}})+"\n").encode()
 
-        for line in stream_response(r, owner, body.message, route, model, request_id, started_at, profile, retry_messages=stream_messages, brevity_policy=_length_policy, r7_report=_r7_preflight):
+        _r23_project_memory = _project_id if ((_r20.get("capabilities") or {}).get("project_brain")) else ""
+        for line in stream_response(r, owner, body.message, route, model, request_id, started_at, profile, retry_messages=stream_messages, brevity_policy=_length_policy, r7_report=_r7_preflight, project_id=_r23_project_memory):
             yield line.encode()
         try:
             task_checkpoint(request_id, "Verify", "complete", "Local answer audit completed; runtime claims remain unverified unless a real execution tool supplied evidence.")
