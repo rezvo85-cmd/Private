@@ -189,6 +189,27 @@ def compress_history(history, max_chars: int = 11000, keep_recent: int = 8) -> d
 
 
 
+def prompt_context_policy(has_files: bool=False, followup: bool=False, project_scope: bool=False) -> dict[str, Any]:
+    """R23 prompt-source policy that prevents the same evidence from being injected twice.
+
+    Attached files already appear in the user message, so the context compiler and
+    current-turn KB/graph blocks should not repeat them. Durable project retrieval
+    remains available on follow-up turns when those raw files are no longer attached.
+    """
+    has_files=bool(has_files)
+    followup=bool(followup)
+    project_scope=bool(project_scope)
+    return {
+        "include_files_in_compiler":False,
+        "project_index_mode":"compact" if has_files else "none",
+        "include_current_file_kb":False if has_files else bool(project_scope or followup),
+        "include_project_graph":False if has_files else bool(project_scope or followup),
+        "include_context_manifest":False,
+        "merge_failure_lessons":True,
+        "raw_file_source":"user_message" if has_files else "none",
+    }
+
+
 def project_scope_active(project_id: str = "default", project_context: str = "") -> bool:
     """True when a chat belongs to a real project even if no text context was pasted."""
     pid=str(project_id or "").strip()
@@ -218,4 +239,6 @@ def status():
         "turn_order_preserved":True,
         "supersession_matching":True,
         "project_scope":"core project id first; ad-hoc context fallback",
+        "prompt_deduplication":True,
+        "raw_attached_files":"single source in user message",
     }
