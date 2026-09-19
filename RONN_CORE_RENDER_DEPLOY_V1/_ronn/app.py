@@ -59,7 +59,12 @@ from r19_training_data import add as r19_training_add, stage as r19_training_sta
 from r19_training_runtime import status as r19_training_runtime_status, submit as r19_training_submit
 from r23_brain import plan as r20_plan, resolve_route as r20_resolve_route, directive as r20_directive, status as r20_status
 from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
-from r23_context import compress_history as r23_compress_history, status as r23_context_status
+from r23_context import (
+    compress_history as r23_compress_history,
+    project_scope_active as r23_project_scope_active,
+    project_scope_key as r23_project_scope_key,
+    status as r23_context_status,
+)
 from r23_eval_lab import run as r23_eval_run
 from r23_capabilities import status as r23_capability_status
 from r20_web_tools import research as r20_web_research, status as r20_web_status
@@ -1068,10 +1073,7 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     _rel = reliability_flags(body.message, body.files)
     if not lean_core or controller.get("verify") or _rel.get("current") or _rel.get("coding") or _rel.get("high_stakes"):
         system += "\n\n" + reliability_directive(body.message, profile, body.files)
-    _has_project_scope = bool(
-        (body.project_context or "").strip()
-        or ((body.project_id or "").strip() not in {"", "default"})
-    )
+    _has_project_scope = r23_project_scope_active(body.project_id, body.project_context)
     meta_os = metacognition_state(
         body.message, profile, difficulty,
         has_files=bool(body.files), has_project=_has_project_scope
@@ -1120,7 +1122,7 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
             system += "\n\nCONTRADICTION SIGNALS TO RESOLVE CONSERVATIVELY:\n" + json.dumps(_conflicts,ensure_ascii=False)[:5000]
             system += "\nPrefer the newest explicit user instruction; mention a conflict only when it changes the result."
     # Persistent project intelligence: scoped to the active project/context name.
-    project_name = (body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default")
+    project_name = r23_project_scope_key(body.project_id, body.project_context)
     pid = ensure_project(project_name)
     _use_project_graph = (not lean_core or prompt_policy.get("include_project_graph"))
     try:
@@ -1822,10 +1824,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         history=body.history,
         file_names=_file_names,
         has_images=bool(body.images),
-        has_project=bool(
-            (body.project_context or "").strip()
-            or ((body.project_id or "").strip() not in {"", "default"})
-        ),
+        has_project=r23_project_scope_active(body.project_id, body.project_context),
         agent_mode=bool(body.agent_mode),
         explicit_mode=body.mode,
     )
@@ -1844,10 +1843,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     request_id = new_task_id()
     started_at = time.time()
     _difficulty = int(_r20.get("difficulty") or task_difficulty(body.message))
-    _has_project_scope = bool(
-        (body.project_context or "").strip()
-        or ((body.project_id or "").strip() not in {"", "default"})
-    )
+    _has_project_scope = r23_project_scope_active(body.project_id, body.project_context)
     _legacy_diag = bool(
         (not _r20.get("lean_core"))
         or body.files or body.images or _has_project_scope
@@ -1872,7 +1868,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _auto_tier = str(_r20.get("depth") or "smart")
     _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), _has_project_scope) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
-    _project_id = ensure_project((body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default"))
+    _project_id = ensure_project(r23_project_scope_key(body.project_id, body.project_context))
     _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), _has_project_scope)
     try:
         start_task(request_id, owner, _project_id, body.message, profile, _difficulty, _preflight["plan"]["signature"], _preflight["plan"])
@@ -2698,7 +2694,7 @@ def brain_inspect(body: ChatBody, request: Request):
         history=body.history,
         file_names=file_names,
         has_images=bool(body.images),
-        has_project=bool(body.project_context or (body.project_id and body.project_id!="default")),
+        has_project=r23_project_scope_active(body.project_id, body.project_context),
         agent_mode=bool(body.agent_mode),
         explicit_mode=body.mode,
     )
@@ -2712,7 +2708,7 @@ def brain_inspect(body: ChatBody, request: Request):
             "or_nemotron":OR_NEMOTRON_MODEL,"or_deepseek":OR_DEEPSEEK_MODEL,"or_qwen":OR_QWEN_MODEL,
         },
     )
-    pid=ensure_project((body.project_id or "").strip() or "default")
+    pid=ensure_project(r23_project_scope_key(body.project_id, body.project_context))
     return {
         "core":"R23",
         "profile":profile,
