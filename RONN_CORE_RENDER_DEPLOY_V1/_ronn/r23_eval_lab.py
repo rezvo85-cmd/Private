@@ -134,10 +134,15 @@ def run():
                   and adaptive_fast_route[1]=="knowledge"
                   and adaptive_fast.get("depth")=="fast"
                   and adaptive_fast.get("adaptive_effort",{}).get("reason")=="explicit_mode_preserved"
+                  and adaptive_fast.get("second_pass") is False
                   and adaptive_verify_route[1]=="deep"
                   and adaptive_verify.get("verify") is True
+                  and adaptive_verify.get("second_pass") is True
+                  and adaptive_verify.get("adaptive_effort",{}).get("second_pass") is True
+                  and adaptive_verify.get("adaptive_effort",{}).get("correction_pass_added") is True
                   and adaptive_verify.get("prompt_policy",{}).get("include_verification_directive") is True
                   and adaptive_simple.get("depth")=="fast"
+                  and adaptive_simple.get("second_pass") is False
                   and adaptive_simple.get("adaptive_effort",{}).get("applied") is False
                   and arena_domain_signal([
                       domain_models["or_nemotron"],domain_models["nvidia"],domain_models["smart"]
