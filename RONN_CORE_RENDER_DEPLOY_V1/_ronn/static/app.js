@@ -57,6 +57,7 @@ async function unlockWebAuth(){
     await refreshStatus();
     await refreshMemory();
     refreshOwnerAccess();
+    setTimeout(maybeRunBrainArena,1200);
   }catch(e){if(msg)msg.textContent=e.message||"Could not unlock RONN."}
   finally{if(btn){btn.disabled=false;btn.textContent="Continue"}}
 }
