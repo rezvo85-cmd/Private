@@ -111,6 +111,7 @@ def verify_package_integrity():
         "_ronn/static/app.js",
         "_ronn/static/index.html",
         "_ronn/static/style.css",
+        "_ronn/static/mobile_fit.css",
         "_ronn/r20_controller.py",
     } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
