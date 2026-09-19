@@ -17,12 +17,12 @@
 <div class="webAuthGate hidden" id="webAuthGate" aria-live="polite">
   <div class="webAuthCard">
     <div class="webAuthOrb"><img src="/static/ronn_logo.svg" alt="RONN"></div>
-    <span class="eyebrow">RONN OWNER ACCESS</span>
-    <h1>Unlock RONN</h1>
-    <p>Your Core token stays on the server. Enter your OP access code to create a secure browser session.</p>
-    <input id="webAuthSecret" type="password" autocomplete="current-password" placeholder="OP access code">
-    <button id="webAuthUnlock">Unlock RONN</button>
-    <small id="webAuthMessage">Secure session · no Core token stored in this browser</small>
+    <span class="eyebrow">RONN DEVICE ACCESS</span>
+    <h1>Connect this iPhone</h1>
+    <p>Enter your access code once. RONN will remember this device across future updates.</p>
+    <input id="webAuthSecret" type="password" autocomplete="current-password" placeholder="Access code">
+    <button id="webAuthUnlock">Continue</button>
+    <small id="webAuthMessage">Remembered securely on this device</small>
   </div>
 </div>
 <div class="appShell">
@@ -241,16 +241,15 @@
         <div class="settingCard"><b>Adaptive intelligence</b><p>RONN chooses speed, depth, specialists, live research, and verification based on the task.</p></div>
         <div class="settingCard"><b>R19 Agent OS</b><p>Durable memory hooks, rollback, execution workspaces, simulation, browser research, multi-agent jobs, monitoring, self-created tools, adaptive routing, and model-training data are built into RONN.</p></div>
         <div class="settingCard"><b>Cloud-ready sync</b><p>Projects, conversations, tasks, settings, handoffs, and device events have a shared sync stream.</p></div>
-        <div class="settingCard"><b>Privacy boundaries</b><p>Provider keys remain backend-only. OP secrets are never saved as readable text.</p></div>
+        <div class="settingCard"><b>Privacy boundaries</b><p>Provider keys remain backend-only. Your remembered device session is signed and the access code is never stored as readable text.</p></div>
       </div>
       <div class="r19CapabilityCard">
         <div class="r19CapabilityHead"><div><span class="eyebrow">R19 SYSTEMS</span><h2>Major upgrades</h2><p>Active systems are separated from integrations that still need an external runtime or account connection.</p></div><button class="ghost" id="refreshR19Btn">Refresh</button></div>
         <div class="r19CapabilityMatrix" id="r19CapabilityMatrix"><div class="emptyState">Checking RONN systems…</div></div>
       </div>
 
-      <div class="ownerAccessCard">
-        <div class="ownerAccessHead"><div><span class="eyebrow">ADVANCED</span><h2>OP Access</h2><p>Owner-only access, unlimited RONN credits, admin tools, and future mobile owner sync.</p></div><span class="opState" id="opStatus">Locked</span></div>
-        <div class="opUnlockRow" id="opUnlockRow"><input id="opSecret" type="password" autocomplete="off" placeholder="OP access code"><button class="primarySmall" id="opUnlockBtn">Unlock OP</button></div>
+      <div class="ownerAccessCard hidden" id="ownerAccessCard">
+        <div class="ownerAccessHead"><div><span class="eyebrow">OWNER</span><h2>Owner tools</h2><p>This device stays connected automatically, including after RONN updates.</p></div><span class="opState active" id="opStatus">Active</span></div>
         <div class="ownerPanel hidden" id="ownerPanel">
           <div class="ownerSummary">
             <div><span>ACCESS</span><b id="opPlan">Owner Unlimited</b></div>
@@ -258,7 +257,7 @@
             <div><span>DEVICES</span><b id="ownerDeviceCount">0</b></div>
             <div><span>SYNC</span><b id="ownerSyncCursor">0</b></div>
           </div>
-          <div class="ownerButtons"><button class="ghost" id="ownerRefreshBtn">Refresh</button><button class="ghost" id="ownerRecoveryBtn">Generate recovery codes</button><button class="ghost" id="ownerBackupBtn">Create backup</button><button class="dangerText" id="opLockBtn">Lock OP</button></div>
+          <div class="ownerButtons"><button class="ghost" id="ownerRefreshBtn">Refresh</button><button class="ghost" id="ownerRecoveryBtn">Generate recovery codes</button><button class="ghost" id="ownerBackupBtn">Create backup</button></div>
           <div class="recoveryBox hidden" id="opRecoveryBox"></div>
           <details class="ownerAdvanced"><summary>Devices & permissions</summary><div class="ownerList" id="ownerDeviceList"></div></details>
           <details class="ownerAdvanced"><summary>Encrypted Vault</summary><div class="vaultComposer"><input id="vaultTitle" placeholder="Secure note title"><textarea id="vaultText" placeholder="Private text stored encrypted at rest"></textarea><button class="ghost" id="vaultSaveBtn">Save to Vault</button></div><div class="ownerList" id="vaultList"></div></details>
