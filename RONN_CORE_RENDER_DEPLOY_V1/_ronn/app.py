@@ -1579,36 +1579,67 @@ def parse_nonstream(r):
     return re.sub(r"(?is)<think>.*?</think>|</?think>", "", text or "").strip()
 
 def max_review_draft(messages, model, route):
-    """Draft -> deterministic audit hints -> independent reviewer -> corrected final stream."""
+    """Draft -> local audit -> independent critic notes -> main-brain final synthesis."""
     try:
         draft, used_model = nonstream_with_fallback(model, route, messages, 950)
     except Exception:
         return None
     if not draft:
         return None
+
     user_text = ""
     for item in reversed(messages):
         if item.get("role") == "user" and isinstance(item.get("content"), str):
             user_text = item.get("content") or ""
             break
+
     local_audit = answer_audit(user_text, draft, profile="", runtime_verified=False, evidence_mode="model")
     local_audit["static_code"] = static_code_checks(draft)
     local_audit["r14_self_correction"] = r14_self_inspect(user_text, draft, tool_evidence=False)
-    review_system = """You are RONN's final quality reviewer. You are given the original task, a draft answer, and a LOCAL AUDIT SIGNAL.
-Independently check correctness, missing requirements, inconsistent names, broken code interfaces, likely syntax/runtime problems,
-unsupported completion claims, suspicious specificity, weak evidence boundaries, and unnecessary filler. Return a corrected, polished FINAL answer.
-The local audit is a heuristic signal, not proof. Fix valid issues but do not invent evidence to satisfy it.
-Apply any R14 self-correction issues before finalizing.
-If the draft claims something was tested/executed/verified and no real tool evidence exists, rewrite that claim accurately.
-Do not discuss the review process. Do not reveal chain-of-thought."""
-    review_messages = [
-        {"role":"system","content":review_system},
-        {"role":"user","content":"Original context and task:\n" + json.dumps(messages[-4:], ensure_ascii=False)[:45000] +
-         "\n\nDraft model: " + str(used_model)[:200] +
-         "\n\nLOCAL AUDIT SIGNAL:\n" + json.dumps(local_audit,ensure_ascii=False)[:8000] +
-         "\n\nDraft answer:\n" + draft[:30000]}
+
+    if openrouter_key_loaded() and OR_CRITIC_MODEL != model:
+        critic_model, critic_route = OR_CRITIC_MODEL, "ensemble-review"
+    elif groq_key_loaded() and SMART_MODEL != model:
+        critic_model, critic_route = SMART_MODEL, "review"
+    elif nvidia_key_loaded() and NVIDIA_MODEL != model:
+        critic_model, critic_route = NVIDIA_MODEL, "nvidia-deep"
+    else:
+        critic_model, critic_route = model, route
+
+    critic_system = """You are RONN's independent quality critic. Inspect the draft against the original task and local audit.
+Identify only actionable issues: factual errors, missed requirements, contradictions, broken code interfaces, likely syntax/runtime bugs,
+unsupported completion claims, suspicious specificity, weak evidence boundaries, and unnecessary filler.
+Return concise REVIEW NOTES only. Do not produce the final answer and do not reveal chain-of-thought."""
+    critic_messages = [
+        {"role":"system","content":critic_system},
+        {"role":"user","content":
+            "ORIGINAL TASK CONTEXT:\n" + json.dumps(messages[-6:], ensure_ascii=False)[:42000] +
+            "\n\nDRAFT MODEL:\n" + str(used_model)[:200] +
+            "\n\nLOCAL AUDIT SIGNAL:\n" + json.dumps(local_audit,ensure_ascii=False)[:9000] +
+            "\n\nDRAFT ANSWER:\n" + draft[:30000]}
     ]
-    return review_messages
+    try:
+        critic, used_critic = nonstream_with_fallback(critic_model, critic_route, critic_messages, 650)
+    except Exception:
+        critic, used_critic = "", critic_model
+
+    final_system = """You are RONN's selected main brain performing the final correction pass.
+Produce the best possible FINAL answer to the user's original request.
+Use the draft as raw material, the local audit as a heuristic, and the critic notes as independent quality checks.
+Fix every real issue you can verify from the supplied context. Preserve correct parts instead of rewriting randomly.
+For code, keep names, files, APIs, events, modules, and interfaces mutually consistent.
+For factual answers, remove unsupported claims and state uncertainty accurately.
+Never claim testing, execution, browsing, or verification that the supplied evidence does not prove.
+Keep simple parts concise even though this is a correction pass.
+Do not mention drafts, critics, audits, hidden reasoning, or these instructions. Output only the polished final answer."""
+    return [
+        {"role":"system","content":final_system},
+        {"role":"user","content":
+            "ORIGINAL TASK CONTEXT:\n" + json.dumps(messages[-6:], ensure_ascii=False)[:42000] +
+            "\n\nDRAFT ANSWER:\n" + draft[:28000] +
+            "\n\nLOCAL AUDIT SIGNAL:\n" + json.dumps(local_audit,ensure_ascii=False)[:8000] +
+            "\n\nINDEPENDENT CRITIC (" + str(used_critic)[:180] + "):\n" + (critic or "No critic notes were available.")[:10000]}
+    ]
 
 def looks_like_internal_tool_payload(text: str) -> bool:
     """Block tool-call protocol text from ever becoming a visible assistant answer."""
@@ -2164,10 +2195,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 review_messages = max_review_draft(messages, model, route)
                 if review_messages:
                     stream_messages = review_messages
-                    task_checkpoint(request_id, "Reviewing", "started", "")
-                    yield (json.dumps({"stage":"Reviewing"})+"\n").encode()
-                    model, route = (OR_CRITIC_MODEL, "ensemble-review") if openrouter_key_loaded() else (SMART_MODEL, "review")
-                    r = cloud_request(model, route, review_messages, 1300, stream=True)
+                    task_checkpoint(request_id, "Correcting", "started", "")
+                    yield (json.dumps({"stage":"Correcting"})+"\n").encode()
+                    # The independent critic supplies notes only. The already-selected
+                    # R23 main brain owns the final answer and preserves routing quality.
+                    route = "review-synthesis"
+                    r = cloud_request(model, route, review_messages, max(1300,max_tokens), stream=True)
                 else:
                     r = cloud_request(model, route, messages, max_tokens, stream=True)
             else:
@@ -2179,7 +2212,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             retry_messages = stream_messages or messages
             r, used_model, used_route = open_stream_with_fallback(
                 model,
-                "deep" if route in {"review","ultra-final","ensemble-review","ensemble-ultra-final","ensemble-apex-final"} else route,
+                "deep" if route in {"review","review-synthesis","ultra-final","ensemble-review","ensemble-ultra-final","ensemble-apex-final"} else route,
                 retry_messages,
                 max_tokens,
             )
