@@ -7,7 +7,11 @@ separately at runtime.
 from __future__ import annotations
 
 from r23_brain import plan, resolve_route, status as brain_status
-from r23_brain_arena import grade as arena_grade, routing_signal as arena_routing_signal
+from r23_brain_arena import (
+    grade as arena_grade,
+    routing_signal as arena_routing_signal,
+    domain_signal as arena_domain_signal,
+)
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_context import compress_history, project_scope_active, project_scope_key
 from r23_agent_runtime import status as agent_status
@@ -66,9 +70,9 @@ def run():
     arena_models["or_nemotron"]="arena-eval-nemotron"
     arena_models["nvidia"]="arena-eval-nvidia"
     arena_models["smart"]="arena-eval-groq"
-    set_model_score(arena_models["or_nemotron"],"main",75,.40,4)
-    set_model_score(arena_models["nvidia"],"main",100,.30,4)
-    set_model_score(arena_models["smart"],"main",50,.20,4)
+    set_model_score(arena_models["or_nemotron"],"main",75,.40,8)
+    set_model_score(arena_models["nvidia"],"main",100,.30,8)
+    set_model_score(arena_models["smart"],"main",50,.20,8)
     ingest_portable_outcomes({
         "version":"R23-OUTCOME-1",
         "rows":[
@@ -94,6 +98,19 @@ def run():
     adaptive_verify_route=resolve_route(adaptive_verify,PROVIDERS,arena_models)
     adaptive_simple=plan("hi")
     adaptive_simple_route=resolve_route(adaptive_simple,PROVIDERS,arena_models)
+
+    domain_models=dict(MODELS)
+    domain_models["or_nemotron"]="domain-eval-nemotron"
+    domain_models["nvidia"]="domain-eval-nvidia"
+    domain_models["smart"]="domain-eval-groq"
+    set_model_score(domain_models["or_nemotron"],"main",75,.40,8)
+    set_model_score(domain_models["nvidia"],"main",100,.30,8)
+    set_model_score(domain_models["smart"],"main",60,.20,8)
+    set_model_score(domain_models["or_nemotron"],"coding",100,.35,3)
+    set_model_score(domain_models["nvidia"],"coding",35,.25,3)
+    set_model_score(domain_models["smart"],"coding",60,.18,3)
+    domain_code_plan=plan("Fix this Python bug in my code.")
+    domain_code_route=resolve_route(domain_code_plan,PROVIDERS,domain_models)
 
     tests=[
         _case("main brain combines objective arena and profile outcomes","1_stronger_main_brain",
@@ -122,6 +139,11 @@ def run():
                   and adaptive_verify.get("prompt_policy",{}).get("include_verification_directive") is True
                   and adaptive_simple.get("depth")=="fast"
                   and adaptive_simple.get("adaptive_effort",{}).get("applied") is False
+                  and arena_domain_signal([
+                      domain_models["or_nemotron"],domain_models["nvidia"],domain_models["smart"]
+                  ],"coding")["ready"]
+                  and domain_code_route[0]==domain_models["or_nemotron"]
+                  and domain_code_plan.get("main_brain_domain_arena",{}).get("domain")=="coding"
               )),
 
         _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",
