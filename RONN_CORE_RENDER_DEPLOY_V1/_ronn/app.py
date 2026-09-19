@@ -1068,9 +1068,13 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     _rel = reliability_flags(body.message, body.files)
     if not lean_core or controller.get("verify") or _rel.get("current") or _rel.get("coding") or _rel.get("high_stakes"):
         system += "\n\n" + reliability_directive(body.message, profile, body.files)
+    _has_project_scope = bool(
+        (body.project_context or "").strip()
+        or ((body.project_id or "").strip() not in {"", "default"})
+    )
     meta_os = metacognition_state(
         body.message, profile, difficulty,
-        has_files=bool(body.files), has_project=bool(body.project_context)
+        has_files=bool(body.files), has_project=_has_project_scope
     )
     _brevity = response_length_policy(body.message, body.style, difficulty, bool(body.files), bool(body.images), bool(body.project_context))
     system += "\n\n" + brevity_directive(_brevity)
@@ -1818,7 +1822,10 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         history=body.history,
         file_names=_file_names,
         has_images=bool(body.images),
-        has_project=bool(body.project_context),
+        has_project=bool(
+            (body.project_context or "").strip()
+            or ((body.project_id or "").strip() not in {"", "default"})
+        ),
         agent_mode=bool(body.agent_mode),
         explicit_mode=body.mode,
     )
@@ -1837,14 +1844,18 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     request_id = new_task_id()
     started_at = time.time()
     _difficulty = int(_r20.get("difficulty") or task_difficulty(body.message))
+    _has_project_scope = bool(
+        (body.project_context or "").strip()
+        or ((body.project_id or "").strip() not in {"", "default"})
+    )
     _legacy_diag = bool(
         (not _r20.get("lean_core"))
-        or body.files or body.images or body.project_context
+        or body.files or body.images or _has_project_scope
         or _difficulty >= 4 or _r20.get("verify")
     )
     if _legacy_diag:
-        _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=bool(body.project_context), files=body.files)
-        _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=bool(body.project_context))
+        _r5_preflight = preflight_v5(body.message, profile, _difficulty, history=body.history, has_files=bool(body.files), has_project=_has_project_scope, files=body.files)
+        _r6_preflight = r6_preflight(body.message, profile, _difficulty, style=body.style, has_files=bool(body.files), has_images=bool(body.images), has_project=_has_project_scope)
         _r7_preflight = r7_preflight(body.message, profile, _difficulty, history_count=len(body.history), files=body.files, image_count=len(body.images), project_context=body.project_context)
         _r11_preflight = r11_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
         _r12_preflight = r12_preflight(body.message, history=body.history, profile=profile, difficulty=_difficulty, has_files=bool(body.files), has_images=bool(body.images), project_context=body.project_context)
@@ -1859,10 +1870,10 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _r14_mm = r14_multimodal_plan(body.message, len(body.images), body.files) if (body.images or body.files) else {"version":"R14","images":0,"files":0}
     _r14_agent = r14_agent_plan(body.message, profile, bool(body.files), bool(body.images), likely_current_fact(body.message)) if body.agent_mode and (_r20.get("needs_tools") or _difficulty >= 4) else {"version":"R14","steps":[],"tool_plan":_r14_tools}
     _auto_tier = str(_r20.get("depth") or "smart")
-    _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context)) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
+    _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), _has_project_scope) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
     _project_id = ensure_project((body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default"))
-    _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
+    _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), _has_project_scope)
     try:
         start_task(request_id, owner, _project_id, body.message, profile, _difficulty, _preflight["plan"]["signature"], _preflight["plan"])
         task_checkpoint(request_id, "Understand", "complete", "Request accepted and preflight analysis created.")
