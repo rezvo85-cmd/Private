@@ -152,12 +152,14 @@ def _feedback_row(model,profile,min_ratings=3):
         if portable:
             good=int(portable["good"] or 0);bad=int(portable["bad"] or 0)
             total=good+bad
-            if total>=int(min_ratings):
+            updated=float(portable["updated"] or 0)
+            fresh=updated >= time.time()-(60*86400)
+            if fresh and total>=int(min_ratings):
                 return {
                     "ratings":total,
                     "avg_rating":(good-bad)/max(1,total),
                     "source":"device_aggregate",
-                    "updated":float(portable["updated"] or 0),
+                    "updated":updated,
                 }
         row=c.execute("""SELECT COUNT(f.id) ratings, AVG(f.rating) avg_rating
             FROM runs r JOIN feedback f ON f.request_id=r.request_id
