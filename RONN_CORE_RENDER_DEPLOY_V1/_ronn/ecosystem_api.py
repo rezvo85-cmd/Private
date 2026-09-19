@@ -199,11 +199,11 @@ def owner_unlock(body: UnlockBody, request: Request, response: Response):
     device_id = body.device_id or request.headers.get("x-ronn-device") or ""
     if device_id:
         register_device(owner, device_id, body.device_name, body.platform, body.app_version, True)
-    token, expires = create_owner_session(owner, request.headers.get("x-ronn-client", ""), device_id, 30)
+    token, expires = create_owner_session(owner, request.headers.get("x-ronn-client", ""), device_id, 180)
     response.set_cookie(
         "ronn_op",
         token,
-        max_age=30 * 86400,
+        max_age=180 * 86400,
         httponly=True,
         samesite="lax",
         secure=(request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"),
