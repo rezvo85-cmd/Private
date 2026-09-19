@@ -12,7 +12,7 @@ from r23_context import compress_history, project_scope_active, project_scope_ke
 from r23_agent_runtime import status as agent_status
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
-from project_brain import ensure_project, remember, retrieve
+from project_brain import ensure_project, remember, retrieve, export_project, import_project
 from experience_engine import learn_lesson, retrieve_lessons
 
 MODELS={
@@ -56,6 +56,9 @@ def run():
 
     pid=ensure_project("r23-eval-project")
     remember(pid,"decision","api_name","Keep the public API name stable.",.95,"r23_eval")
+    portable_snapshot=export_project(pid,20,20)
+    restored_pid=ensure_project("r23-eval-project-restored")
+    portable_restore=import_project(restored_pid,portable_snapshot,"r23_eval_restore")
     learn_lesson("coding","r23_parser_contract","When a parser test fails, preserve the input contract before changing output.",.95)
 
     tests=[
@@ -74,6 +77,8 @@ def run():
                   and project_scope_key("core-project-123","").startswith("core:")
                   and plan("Continue this project.",has_project=True)["capabilities"]["project_brain"]
                   and any(x.get("key")=="api_name" for x in retrieve(pid,"API name",10).get("facts",[]))
+                  and portable_restore.get("ok")
+                  and any(x.get("key")=="api_name" for x in retrieve(restored_pid,"API name",10).get("facts",[]))
               )),
 
         _case("long context compresses old decisions without dumping all turns","5_long_context_compression",
