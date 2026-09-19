@@ -544,6 +544,7 @@ class TextFile(BaseModel):
 
 class ChatBody(BaseModel):
     message: str = ""
+    project_id: str = "default"
     history: list[dict] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
     files: list[TextFile] = Field(default_factory=list)
@@ -1115,7 +1116,7 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
             system += "\n\nCONTRADICTION SIGNALS TO RESOLVE CONSERVATIVELY:\n" + json.dumps(_conflicts,ensure_ascii=False)[:5000]
             system += "\nPrefer the newest explicit user instruction; mention a conflict only when it changes the result."
     # Persistent project intelligence: scoped to the active project/context name.
-    project_name = (body.project_context[:180] if body.project_context else "default")
+    project_name = (body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default")
     pid = ensure_project(project_name)
     _use_project_graph = (not lean_core or prompt_policy.get("include_project_graph"))
     try:
@@ -1840,7 +1841,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     _auto_tier = str(_r20.get("depth") or "smart")
     _os_state = metacognition_state(body.message, profile, _difficulty, bool(body.files), bool(body.project_context)) if _legacy_diag else {"lean_core":True,"strategies":[{"name":"direct"}],"budget":{"verification_required":bool(_r20.get("verify"))}}
     _strategy = (_os_state.get("strategies") or [{"name":"direct"}])[0]["name"]
-    _project_id = ensure_project((body.project_context[:180] if body.project_context else "default"))
+    _project_id = ensure_project((body.project_id or "").strip() or (body.project_context[:180] if body.project_context else "default"))
     _preflight = preflight_report(body.message, profile, _difficulty, bool(body.files), bool(body.project_context))
     try:
         start_task(request_id, owner, _project_id, body.message, profile, _difficulty, _preflight["plan"]["signature"], _preflight["plan"])
