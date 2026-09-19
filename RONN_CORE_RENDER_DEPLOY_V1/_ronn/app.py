@@ -1280,7 +1280,7 @@ def request_payload(model, route, messages, max_tokens, stream=True):
 
     if model.startswith("openai/gpt-oss"):
         payload["temperature"] = 0.55
-        payload["reasoning_effort"] = "low" if route == "fast" else ("high" if route in {"deep","review","ultra","tools","r20-deep","r20-reasoning","r20-code","r20-apex"} else "medium")
+        payload["reasoning_effort"] = "low" if route == "fast" else ("high" if route in {"deep","review","review-synthesis","ultra","tools","r20-deep","r20-reasoning","r20-code","r20-apex"} else "medium")
         payload["include_reasoning"] = False
     elif model == VISION_MODEL and route == "vision":
         payload["temperature"] = 0.6
