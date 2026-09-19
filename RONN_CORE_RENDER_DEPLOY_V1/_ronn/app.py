@@ -1957,6 +1957,34 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             except Exception:
                 pass
 
+    # R23 failure learning records verified execution failures as reusable lessons.
+    if _r20.get("r23"):
+        try:
+            _code_result = _tool_run.get("code_loop") or {}
+            if _code_result and not _code_result.get("ok"):
+                _err = ((_code_result.get("autofix") or {}).get("error")
+                        or (_code_result.get("initial_run") or {}).get("stderr")
+                        or (_code_result.get("initial_run") or {}).get("error")
+                        or "Controlled code execution did not pass.")
+                r19_record_failure(
+                    owner,
+                    "Verified code/runtime failure for a similar task: " + re.sub(r"\s+"," ",str(_err))[:900],
+                    profile or "coding",
+                )
+        except Exception:
+            pass
+        try:
+            if (_r20.get("capabilities") or {}).get("project_brain"):
+                r15_cloud_event(owner,"r23_project_turn",json.dumps({
+                    "project_id":body.project_id,
+                    "request_id":request_id,
+                    "profile":profile,
+                    "world_model":bool(_tool_run.get("world_model")),
+                    "code_verified":bool((_tool_run.get("code_loop") or {}).get("ok")),
+                },ensure_ascii=False))
+        except Exception:
+            pass
+
     # Tools gather evidence; the R23 main brain keeps ownership of synthesis.
     # Only if retrieval completely fails do we fall back to Compound's built-in web tools.
     if _r20.get("needs_live"):
@@ -2882,7 +2910,24 @@ def artifacts_api(workspace: str="default"):
 
 @app.get("/api/evaluation")
 def evaluation_api():
-    return run_internal_eval()
+    base=run_internal_eval()
+    base["r23"]=r23_eval_run()
+    base["r23_all_11_ready"]=bool(base["r23"].get("all_11_ready"))
+    return base
+
+@app.get("/api/r23/evaluation")
+def r23_evaluation_api():
+    return r23_eval_run()
+
+@app.get("/api/r23/capabilities")
+def r23_capabilities_api():
+    return {
+        "brain":r20_status(),
+        "capabilities":r23_capability_status(),
+        "agent_runtime":r23_agent_status(),
+        "context":r23_context_status(),
+        "cloud_brain":r15_cloud_status(),
+    }
 
 @app.get("/api/provider-check")
 def provider_check(provider: str = "groq"):
@@ -2992,6 +3037,12 @@ def diagnostics(request: Request):
         "r20_controller": (BASE / "r20_controller.py").exists(),
         "r22_lean_core": (BASE / "r22_lean_core.py").exists(),
         "r22_benchmarks": (BASE / "r22_benchmarks.py").exists(),
+        "r23_brain": (BASE / "r23_brain.py").exists(),
+        "r23_capabilities": (BASE / "r23_capabilities.py").exists(),
+        "r23_context": (BASE / "r23_context.py").exists(),
+        "r23_research": (BASE / "r23_research.py").exists(),
+        "r23_agent_runtime": (BASE / "r23_agent_runtime.py").exists(),
+        "r23_eval_lab": (BASE / "r23_eval_lab.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
         "task_queue": (BASE / "task_queue.py").exists(),
@@ -3012,6 +3063,7 @@ def diagnostics(request: Request):
     r14_checks = run_r14_benchmarks()
     r15_checks = r15_eval_run()
     r22_checks = r22_eval_run()
+    r23_checks = r23_eval_run()
     provider = provider_config_status()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
@@ -3036,6 +3088,8 @@ def diagnostics(request: Request):
         warnings.append("One or more R15-R19 capability checks failed.")
     if r22_checks.get("score", 0) < 100:
         warnings.append("One or more R22 lean-intelligence checks failed.")
+    if not r23_checks.get("all_11_ready"):
+        warnings.append("R23 did not pass all 11 major-capability checks.")
     if not all(required.values()):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
@@ -3058,6 +3112,10 @@ def diagnostics(request: Request):
         "r14_eval":r14_checks,
         "r15_eval":r15_checks,
         "r22_eval":r22_checks,
+        "r23_eval":r23_checks,
+        "r23_brain":r20_status(),
+        "r23_agent_runtime":r23_agent_status(),
+        "r23_context":r23_context_status(),
         "r21_release_gate":R21_RELEASE_STATUS,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
@@ -3118,6 +3176,11 @@ def status(request: Request):
         "r13_eval_score":run_r13_benchmarks().get("score",0),
         "r14_eval_score":run_r14_benchmarks().get("score",0),
         "r15_eval_score":r15_eval_run().get("score",0),
+        "r23_eval_score":r23_eval_run().get("score",0),
+        "r23_all_11_ready":r23_eval_run().get("all_11_ready",False),
+        "r23_brain":r20_status(),
+        "r23_agent_runtime":r23_agent_status(),
+        "r23_context":r23_context_status(),
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner),
