@@ -2278,6 +2278,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
 
     messages = build_messages(owner, body, profile, _r20)
     _evidence_contract = (_tool_run.get("evidence_contract") or {}) if _r20.get("r23") else {}
+    _evidence_sufficiency = (_tool_run.get("evidence_sufficiency") or {}) if _r20.get("r23") else {}
     if _evidence_contract:
         messages[0]["content"] += (
             "\n\nRONN EVIDENCE CONTRACT FOR THIS TURN:\n"
@@ -2287,6 +2288,23 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
               "Do not call a search snippet, webpage read, static analysis, or model inference 'verified'. "
               "If the available evidence is weaker than the user's requested certainty, say what is known and what remains unverified."
         )
+    if _evidence_sufficiency and not _evidence_sufficiency.get("sufficient",True):
+        messages[0]["content"] += (
+            "\n\nEVIDENCE SUFFICIENCY GATE: NOT SATISFIED. "
+            "Required evidence is still missing for: "
+            + ", ".join(_evidence_sufficiency.get("gaps") or ["unknown evidence gap"])
+            + ". Do not imply the requested verification/research/observation completed successfully. "
+              "Give the strongest supported answer available and state the remaining evidence limitation precisely."
+        )
+        try:
+            task_checkpoint(
+                request_id,
+                "Evidence sufficiency",
+                "blocked",
+                "Missing required evidence: " + ", ".join(_evidence_sufficiency.get("gaps") or ["unknown"]),
+            )
+        except Exception:
+            pass
     if _r20.get("needs_live"):
         messages[0]["content"] += (
             "\nFor current or research-dependent claims, answer from the retrieved web evidence when it is present. "
@@ -2320,6 +2338,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
         "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0),"snippet_only_count":int(_web_research.get("snippet_only_count") or 0)},
         "evidence_contract":_evidence_contract,
+        "evidence_sufficiency":_evidence_sufficiency,
         "tool_arbitration":_r20.get("tool_arbitration") or {},
         "tool_hub":{
             "planned":_tool_run.get("planned") or [],
