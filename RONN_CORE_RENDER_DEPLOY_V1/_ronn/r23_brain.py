@@ -444,7 +444,7 @@ def resolve_route(decision,providers,models):
     decision["main_brain_quality_lab"]=signals.get("quality_lab") or {}
     decision["main_brain_challengers"]=signals.get("challengers") or {}
     _apply_adaptive_effort(decision,selected,decision["main_brain_outcomes"])
-    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + objective-arena-aware + profile-outcome-aware + adaptive-effort"
+    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + progressive-quality-lab + objective-arena-aware + profile-outcome-aware + adaptive-effort"
 
     depth=str(decision.get("depth") or "smart")
     if depth=="apex":
