@@ -86,7 +86,11 @@ from r23_context import (
 )
 from r23_eval_lab import run as r23_eval_run
 from r23_capabilities import status as r23_capability_status
-from r23_brain_arena import run as r23_arena_run, status as r23_arena_status
+from r23_brain_arena import (
+    run as r23_arena_run,
+    status as r23_arena_status,
+    record_shadow_result as r23_record_shadow_result,
+)
 from r23_research import research as r23_research_run
 from r23_capabilities import unknown_candidates as r23_unknown_candidates
 from r23_knowledge_rescue import (
@@ -2474,8 +2478,9 @@ Do not reveal chain-of-thought; return only the proposed solution and concise as
     judge_system="""You are RONN's independent adversarial evaluator. Compare the candidates against the original user goal.
 Check explicit requirements, factual support, hidden assumptions, contradictions, counterexamples, edge cases,
 security/permission boundaries, and whether the proposed outcome is actually verifiable.
-Return compact DECISION NOTES: strongest pieces to keep, concrete defects to repair, and an uncertainty/evidence audit.
-Do not reveal private chain-of-thought."""
+Your FIRST line must be exactly one of: PREFERENCE: A, PREFERENCE: B, or PREFERENCE: TIE.
+Then return compact DECISION NOTES: strongest pieces to keep, concrete defects to repair, and an uncertainty/evidence audit.
+Choose TIE when neither candidate is materially better. Do not reveal private chain-of-thought."""
     judge_msgs=[
         {"role":"system","content":judge_system},
         {"role":"user","content":
@@ -2495,6 +2500,17 @@ Do not reveal private chain-of-thought."""
         judge=nonstream_answer(judge_model,judge_route,judge_msgs,850)
     except Exception:
         judge=""
+
+    # Certified Candidate B challengers collect aggregate real-workload evidence
+    # while Candidate A still owns the final answer. Only A/B/TIE is stored.
+    try:
+        roles=list(pair_info.get("roles") or [])
+        if len(roles)>1 and roles[1]=="certified_shadow_challenger" and council[1]:
+            pref_match=re.search(r"(?im)^\s*PREFERENCE\s*:\s*(A|B|TIE)\b",judge or "")
+            if pref_match:
+                r23_record_shadow_result(council[1],profile,pref_match.group(1).upper())
+    except Exception:
+        pass
 
     final_system="""You are RONN Cognitive OS APEX final synthesis, running on the R23-selected primary brain.
 Produce the best final answer to the ORIGINAL task. Combine only the strongest supported/useful parts of the candidates,
