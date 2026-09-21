@@ -17,6 +17,76 @@ from r23_brain_arena import (
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
 
+_REASONING_FLOORS={
+    "fast":0,
+    "smart":900,
+    "deep":1800,
+    "apex":3000,
+}
+
+
+def reasoning_effort_for_depth(depth: str) -> str:
+    depth=str(depth or "smart").lower()
+    if depth=="fast":
+        return "low"
+    if depth in {"deep","apex"}:
+        return "high"
+    return "medium"
+
+
+def reasoning_effort_for_route(route: str) -> str:
+    """Provider-facing effort level derived from the actual request route."""
+    route=str(route or "").lower()
+    if route=="fast":
+        return "low"
+    if (
+        "apex" in route
+        or "deep" in route
+        or "review" in route
+        or route in {"ultra","tools","r20-reasoning","r20-code"}
+    ):
+        return "high"
+    return "medium"
+
+
+def reasoning_completion_budget(depth: str, visible_max_tokens: int) -> int:
+    """Keep visible brevity separate from the total reasoning completion budget."""
+    depth=str(depth or "smart").lower()
+    visible=max(1,int(visible_max_tokens or 1))
+    floor=int(_REASONING_FLOORS.get(depth,900))
+    return max(visible,floor)
+
+
+def reasoning_contract(decision: dict) -> str:
+    depth=str((decision or {}).get("depth") or "smart").lower()
+    effort=reasoning_effort_for_depth(depth)
+    if depth=="fast":
+        rules=(
+            "Solve directly. Use only the reasoning needed to avoid an obvious mistake."
+        )
+    elif depth=="deep":
+        rules=(
+            "Before answering, privately decompose the task into requirements and constraints; "
+            "check important assumptions, edge cases, and one plausible counterexample/failure mode; "
+            "then verify the final conclusion against the user's explicit requirements."
+        )
+    elif depth=="apex":
+        rules=(
+            "Before answering, privately form at least two plausible solution paths or hypotheses when applicable; "
+            "compare their failure modes and tradeoffs, adversarially test the strongest option, reconcile contradictions, "
+            "and verify the final result against every explicit requirement and available evidence."
+        )
+    else:
+        rules=(
+            "Privately identify the key requirement, solve it carefully, and do a short sanity check before answering."
+        )
+    return (
+        "RONN REASONING EFFORT:\n"
+        f"- Depth: {depth}; provider effort target: {effort}.\n"
+        f"- {rules}\n"
+        "- Keep private reasoning private. Return only the polished answer, not chain-of-thought or scratch work."
+    )
+
 
 def plan(message, history=None, file_names=None, has_images=False, has_project=False,
          agent_mode=True, explicit_mode="auto"):
@@ -382,6 +452,7 @@ def directive(decision):
         "- Tools, memory, research, execution, simulation, and specialist models support that brain; they do not compete with its instructions.\n"
         f"- Reasoning depth: {decision.get('depth')}\n"
         f"- Task profile: {decision.get('profile')}\n"
+        + reasoning_contract(decision) + "\n"
         f"- Active capabilities: {', '.join(active) if active else 'main brain only'}\n"
         "- Use real tool evidence when present. Never claim an action succeeded without evidence.\n"
         "- Keep simple answers simple; use the larger capability plane only when the task earns it."
@@ -404,6 +475,9 @@ def status():
         "proven_main_brain_challengers":True,
         "profile_outcome_learning":True,
         "adaptive_outcome_effort":True,
+        "provider_reasoning_effort":True,
+        "reasoning_budget_decoupled_from_visible_brevity":True,
+        "reasoning_effort_levels":{"fast":"low","smart":"medium","deep":"high","apex":"high"},
         "adaptive_effort_guardrails":"auto mode only; difficulty>=3; ratings>=3",
         "learned_self_correction":True,
         "self_correction_threshold":"strong negative profile outcomes; difficulty>=4; non-live non-vision",
