@@ -3718,7 +3718,6 @@ def diagnostics(request: Request):
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
         "r23_tool_arbiter":r23_tool_arbiter_status(),
-        "r23_tool_arbiter":r23_tool_arbiter_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "r23_quality_lab":r23_quality_status(_quality_lab_candidates("main")),
