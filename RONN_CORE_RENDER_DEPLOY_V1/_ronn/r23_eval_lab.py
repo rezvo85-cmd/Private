@@ -34,6 +34,14 @@ from r23_tool_arbiter import (
     status as tool_arbiter_status,
 )
 from r23_research import subqueries
+from r23_quality_lab import (
+    CASES as QUALITY_CASES,
+    cases_for_tier as quality_cases_for_tier,
+    grade as quality_grade,
+    run as quality_run,
+    quality_signal,
+    status as quality_status,
+)
 from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import (
     ensure_project, remember, retrieve, export_project, import_project, set_model_score,
@@ -203,12 +211,45 @@ def run():
         arena_models,
     )
 
+    quality_models=dict(MODELS)
+    quality_models["or_nemotron"]="quality-eval-nemotron"
+    quality_models["nvidia"]="quality-eval-nvidia"
+    quality_models["smart"]="quality-eval-groq"
+    for _m in (
+        quality_models["or_nemotron"],
+        quality_models["nvidia"],
+        quality_models["smart"],
+    ):
+        set_model_score(_m,"main",100,.20,8)
+    set_model_score(quality_models["or_nemotron"],"quality_screen",75,.30,12)
+    set_model_score(quality_models["nvidia"],"quality_screen",100,.32,12)
+    set_model_score(quality_models["smart"],"quality_screen",83.3,.18,12)
+    # A partial higher tier must not override the complete shared screen tier.
+    set_model_score(quality_models["nvidia"],"quality_standard",100,.35,24)
+    quality_shared_signal=quality_signal([
+        quality_models["or_nemotron"],quality_models["nvidia"],quality_models["smart"]
+    ],"auto")
+    quality_route=resolve_route(
+        plan("Explain why caching can improve a web application's performance."),
+        PROVIDERS,
+        quality_models,
+    )
+
+    _quality_answers={x["prompt"]:x["expected"] for x in QUALITY_CASES}
+    quality_runner_result=quality_run(
+        ["quality-eval-runner"],
+        lambda _model,prompt,_max_tokens:_quality_answers[prompt],
+        tier="deep",
+        force=True,
+    )
+
     arena_memory_source="arena-memory-eval-source"
     arena_memory_restored="arena-memory-eval-restored"
     set_model_score(arena_memory_source,"main",100,.21,8)
     set_model_score(arena_memory_source,"coding",100,.19,3)
     set_model_score(arena_memory_source,"certification",100,.20,6)
     set_model_score(arena_memory_source,"shadow_coding",66.67,.0,3)
+    set_model_score(arena_memory_source,"quality_screen",91.7,.18,12)
     arena_memory_snapshot=export_model_scores([arena_memory_source],30)
     arena_memory_rows=[]
     for _row in arena_memory_snapshot.get("rows",[]):
@@ -476,11 +517,32 @@ def run():
                   capability_status().get("feature_count")==11
                   and len(capability_status().get("features",{}))==11
                   and arena_memory_restore.get("ok")
-                  and arena_memory_restore.get("imported",0)>=4
+                  and arena_memory_restore.get("imported",0)>=5
                   and arena_routing_signal([arena_memory_restored])["ready"]
                   and arena_domain_signal([arena_memory_restored],"coding")["ready"]
                   and arena_shadow_signal(arena_memory_restored,"coding")["ready"]
+                  and quality_signal([arena_memory_restored],"screen")["ready"]
                   and arena_challenger_signal(arena_memory_restored,"coding")["eligible"]
+                  and len(QUALITY_CASES)==36
+                  and len(quality_cases_for_tier("screen"))==12
+                  and len(quality_cases_for_tier("standard"))==24
+                  and len(quality_cases_for_tier("deep"))==36
+                  and len({x["category"] for x in QUALITY_CASES})==6
+                  and all(sum(1 for x in QUALITY_CASES if x["category"]==cat)==6
+                          for cat in {x["category"] for x in QUALITY_CASES})
+                  and quality_grade(QUALITY_CASES[0],QUALITY_CASES[0]["expected"])
+                  and not quality_grade(QUALITY_CASES[0],"definitely wrong")
+                  and quality_status().get("manual_only") is True
+                  and quality_status().get("auto_run") is False
+                  and quality_shared_signal.get("ready") is True
+                  and quality_shared_signal.get("tier")=="screen"
+                  and quality_route[0]==quality_models["nvidia"]
+                  and quality_runner_result.get("signal",{}).get("ready") is True
+                  and quality_runner_result.get("signal",{}).get("tier")=="deep"
+                  and quality_runner_result.get("cases_per_model")==36
+                  and quality_runner_result.get("provider_calls")==36
+                  and quality_runner_result.get("results",[{}])[0].get("score")==100.0
+                  and quality_runner_result.get("results",[{}])[0].get("complete") is True
               )),
 
         _case("very hard work uses R23-primary-owned diverse model competition","7_automatic_model_competition",
