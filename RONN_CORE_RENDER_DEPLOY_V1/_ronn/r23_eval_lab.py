@@ -6,7 +6,11 @@ separately at runtime.
 """
 from __future__ import annotations
 
-from r23_brain import plan, resolve_route, status as brain_status, competition_pair
+from r23_brain import (
+    plan, resolve_route, status as brain_status, competition_pair,
+    reasoning_effort_for_depth, reasoning_effort_for_route,
+    reasoning_completion_budget, reasoning_contract,
+)
 from r23_brain_arena import (
     grade as arena_grade,
     routing_signal as arena_routing_signal,
@@ -336,6 +340,22 @@ def run():
                   and adaptive_simple.get("depth")=="fast"
                   and adaptive_simple.get("second_pass") is False
                   and adaptive_simple.get("adaptive_effort",{}).get("applied") is False
+                  and reasoning_effort_for_depth("fast")=="low"
+                  and reasoning_effort_for_depth("smart")=="medium"
+                  and reasoning_effort_for_depth("deep")=="high"
+                  and reasoning_effort_for_depth("apex")=="high"
+                  and reasoning_effort_for_route("knowledge")=="medium"
+                  and reasoning_effort_for_route("deep")=="high"
+                  and reasoning_effort_for_route("apex")=="high"
+                  and reasoning_effort_for_route("review-synthesis")=="high"
+                  and reasoning_completion_budget("fast",180)==180
+                  and reasoning_completion_budget("smart",180)>=900
+                  and reasoning_completion_budget("deep",180)>=1800
+                  and reasoning_completion_budget("apex",180)>=3000
+                  and "counterexample" in reasoning_contract({"depth":"deep"}).lower()
+                  and "two plausible" in reasoning_contract({"depth":"apex"}).lower()
+                  and brain_status().get("provider_reasoning_effort") is True
+                  and brain_status().get("reasoning_budget_decoupled_from_visible_brevity") is True
                   and arena_domain_signal([
                       domain_models["or_nemotron"],domain_models["nvidia"],domain_models["smart"]
                   ],"coding")["ready"]
