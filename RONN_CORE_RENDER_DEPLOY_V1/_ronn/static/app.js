@@ -320,7 +320,7 @@ function arenaSnapshot(){
       latency:Number(x.latency||0),
       samples:Number(x.samples||0)|0,
       updated:Number(x.updated||0)
-    })).filter(x=>x.model&&["main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding","quality_screen","quality_standard","quality_deep"].includes(x.domain))
+    })).filter(x=>x.model&&["main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding","quality_screen","quality_standard","quality_deep","quality_screen_instruction","quality_screen_reasoning","quality_screen_coding","quality_screen_evidence","quality_screen_context","quality_screen_tools","quality_standard_instruction","quality_standard_reasoning","quality_standard_coding","quality_standard_evidence","quality_standard_context","quality_standard_tools","quality_deep_instruction","quality_deep_reasoning","quality_deep_coding","quality_deep_evidence","quality_deep_context","quality_deep_tools"].includes(x.domain))
   }
 }
 function saveArenaSnapshot(snapshot){
@@ -331,7 +331,7 @@ function saveArenaSnapshot(snapshot){
   for(const row of [...existing,...snapshot.rows]){
     const model=String(row?.model||"").slice(0,220),domain=String(row?.domain||"").slice(0,40);
     const updated=Number(row?.updated||0);
-    if(!model||!["main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding","quality_screen","quality_standard","quality_deep"].includes(domain)||updated<cutoff)continue;
+    if(!model||!["main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding","quality_screen","quality_standard","quality_deep","quality_screen_instruction","quality_screen_reasoning","quality_screen_coding","quality_screen_evidence","quality_screen_context","quality_screen_tools","quality_standard_instruction","quality_standard_reasoning","quality_standard_coding","quality_standard_evidence","quality_standard_context","quality_standard_tools","quality_deep_instruction","quality_deep_reasoning","quality_deep_coding","quality_deep_evidence","quality_deep_context","quality_deep_tools"].includes(domain)||updated<cutoff)continue;
     const clean={
       model,domain,
       score:Math.max(0,Math.min(100,Number(row?.score||0))),
