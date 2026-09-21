@@ -18,7 +18,11 @@ from r23_brain_arena import (
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_knowledge_rescue import gap_signal as knowledge_gap_signal, should_buffer as knowledge_gap_should_buffer
 from r23_context import compress_history, project_scope_active, project_scope_key, prompt_context_policy
-from r23_agent_runtime import status as agent_status, evidence_contract as agent_evidence_contract
+from r23_agent_runtime import (
+    status as agent_status,
+    evidence_contract as agent_evidence_contract,
+    evidence_sufficiency as agent_evidence_sufficiency,
+)
 from r23_tool_arbiter import (
     should_arbitrate as tool_should_arbitrate,
     parse_verdict as tool_parse_verdict,
@@ -232,6 +236,74 @@ def run():
         "code_loop":{"ok":True,"verified":True},
     })
 
+    weak_live_out={
+        "research":{"sources":[
+            {"id":"R1","url":"https://example.com/snippet","read":False},
+            {"id":"R2","url":"https://example.org/snippet","read":False},
+        ]},
+        "executed":["universal_retrieval"],
+        "errors":[],
+    }
+    weak_live_contract=agent_evidence_contract(weak_live_out)
+    weak_live_sufficiency=agent_evidence_sufficiency(
+        weak_live_out,
+        {"needs_live":True,"capabilities":{"universal_retrieval":True}},
+        contract=weak_live_contract,
+        depth="smart",
+    )
+    read_live_out={
+        "research":{"sources":[
+            {"id":"R1","url":"https://example.com/read","read":True},
+            {"id":"R2","url":"https://example.org/snippet","read":False},
+        ]},
+        "executed":["universal_retrieval"],
+        "errors":[],
+    }
+    read_live_contract=agent_evidence_contract(read_live_out)
+    read_live_sufficiency=agent_evidence_sufficiency(
+        read_live_out,
+        {"needs_live":True,"capabilities":{"universal_retrieval":True}},
+        contract=read_live_contract,
+        depth="smart",
+    )
+    deep_one_read_sufficiency=agent_evidence_sufficiency(
+        read_live_out,
+        {"needs_live":True,"capabilities":{"universal_retrieval":True,"autonomous_research":True}},
+        contract=read_live_contract,
+        depth="deep",
+    )
+    deep_two_read_out={
+        "research":{"sources":[
+            {"id":"R1","url":"https://example.com/read","read":True},
+            {"id":"R2","url":"https://example.org/read","read":True},
+        ]},
+        "executed":["autonomous_research"],
+        "errors":[],
+    }
+    deep_two_read_contract=agent_evidence_contract(deep_two_read_out)
+    deep_two_read_sufficiency=agent_evidence_sufficiency(
+        deep_two_read_out,
+        {"needs_live":True,"capabilities":{"universal_retrieval":True,"autonomous_research":True}},
+        contract=deep_two_read_contract,
+        depth="deep",
+    )
+    unverified_code_sufficiency=agent_evidence_sufficiency(
+        {
+            "executed":["code_test_fix_retest"],
+            "code_loop":{"ok":True,"verified":False},
+        },
+        {"verify":True,"capabilities":{"code_fix_loop":True}},
+        depth="smart",
+    )
+    verified_code_sufficiency=agent_evidence_sufficiency(
+        {
+            "executed":["code_test_fix_retest"],
+            "code_loop":{"ok":True,"verified":True},
+        },
+        {"verify":True,"capabilities":{"code_fix_loop":True}},
+        depth="smart",
+    )
+
     tests=[
         _case("main brain combines objective arena and profile outcomes","1_stronger_main_brain",
               lambda:bool(
@@ -426,7 +498,7 @@ def run():
               lambda:any("preserve the input contract" in str(x.get("lesson","")).lower()
                          for x in retrieve_lessons("coding",20))),
 
-        _case("autonomous research and evidence states stay evidence-bound","10_autonomous_research",
+        _case("autonomous research, recovery, and evidence sufficiency stay evidence-bound","10_autonomous_research",
               lambda:bool(
                   len(subqueries("Fix package ZXQ_991 error",unknown_terms=["ZXQ_991"],depth="deep"))>=3
                   and evidence_sample["retrieval"]["read_page_count"]==1
@@ -437,6 +509,16 @@ def run():
                   and evidence_sample["runtime_execution"]["reported_ok"] is True
                   and evidence_sample["runtime_execution"]["verified_success"] is False
                   and verified_evidence_sample["runtime_execution"]["verified_success"] is True
+                  and agent_status().get("bounded_research_recovery") is True
+                  and agent_status().get("evidence_sufficiency_gate") is True
+                  and weak_live_sufficiency["sufficient"] is False
+                  and "live_source_evidence" in weak_live_sufficiency["gaps"]
+                  and read_live_sufficiency["sufficient"] is True
+                  and deep_one_read_sufficiency["sufficient"] is False
+                  and deep_two_read_sufficiency["sufficient"] is True
+                  and unverified_code_sufficiency["sufficient"] is False
+                  and "runtime_verification" in unverified_code_sufficiency["gaps"]
+                  and verified_code_sufficiency["sufficient"] is True
               )),
 
         _case("unknown terms and admitted knowledge gaps trigger retrieval rescue","11_universal_retrieval",
