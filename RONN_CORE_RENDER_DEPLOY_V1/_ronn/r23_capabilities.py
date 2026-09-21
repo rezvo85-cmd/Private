@@ -150,6 +150,7 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
     return {
         "strong_main_brain": True,
         "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or computer_words or execution_words)),
+        "browser_url": bool(has_url),
         "code_fix_loop": bool(coding and file_names and execution_words),
         "project_brain": bool(has_project or file_names or base.get("followup") or len(history) >= 6),
         "long_context": bool(len(history) >= 12 or base.get("followup") or has_project),
