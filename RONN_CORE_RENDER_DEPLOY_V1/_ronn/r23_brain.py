@@ -14,9 +14,23 @@ from r23_brain_arena import (
     domain_signal as arena_domain_signal,
     challenger_signal as arena_challenger_signal,
 )
-from r23_quality_lab import quality_signal as r23_quality_signal
+from r23_quality_lab import (
+    quality_signal as r23_quality_signal,
+    category_signal as r23_quality_category_signal,
+)
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
+
+_PROFILE_QUALITY_CATEGORY={
+    "coding":"coding",
+    "mathscience":"reasoning",
+    "analysis":"reasoning",
+    "knowledge":"reasoning",
+    "research":"evidence",
+    "writing":"instruction",
+    "creative":"instruction",
+    "chat":"context",
+}
 
 _REASONING_FLOORS={
     "fast":0,
@@ -256,6 +270,7 @@ def _pick_main_brain(providers,models,profile="chat"):
             "domain_arena":{"domain":"","ready":False,"scores":{}},
             "outcomes":{"profile":str(profile or "chat"),"ready":False,"scores":{}},
             "quality_lab":{"ready":False,"tier":"","scores":{}},
+            "quality_category":{"ready":False,"tier":"","category":_PROFILE_QUALITY_CATEGORY.get(str(profile or "chat"),""),"scores":{}},
             "challengers":challenger_signals,
         }
 
@@ -272,6 +287,10 @@ def _pick_main_brain(providers,models,profile="chat"):
     quality_lab=r23_quality_signal(candidate_models,"auto")
     quality_ready=bool(quality_lab.get("ready"))
     quality_scores=quality_lab.get("scores") or {}
+    quality_category_name=_PROFILE_QUALITY_CATEGORY.get(str(profile or "chat"),"")
+    quality_category=r23_quality_category_signal(candidate_models,quality_category_name,"auto") if quality_category_name else {"ready":False,"scores":{}}
+    quality_category_ready=bool(quality_category.get("ready"))
+    quality_category_scores=quality_category.get("scores") or {}
 
     scored=[]
     for model,provider,quality_rank in candidates:
@@ -288,12 +307,15 @@ def _pick_main_brain(providers,models,profile="chat"):
         outcome_penalty=int(outcome_row.get("penalty") or 0)
         quality_row=quality_scores.get(model) or {}
         quality_score=float(quality_row.get("score") or 0)
+        quality_category_row=quality_category_scores.get(model) or {}
+        quality_category_score=float(quality_category_row.get("score") or 0)
 
         # Reliability is the hard guardrail. Repeated negative feedback for this
         # specific task profile can independently demote a model. Positive outcome
         # ranking activates only when every candidate has enough fair coverage.
         profile_band=-int(round(outcome_avg*4)) if outcome_ready else 0
         domain_band=-(int(domain_score)//5) if domain_ready else 0
+        quality_category_band=-(int(quality_category_score)//5) if quality_category_ready else 0
         quality_band=-(int(quality_score)//5) if quality_ready else 0
         arena_band=-(int(arena_score)//5) if arena_ready else 0
         latency_key=round(
@@ -305,6 +327,7 @@ def _pick_main_brain(providers,models,profile="chat"):
             health+feedback+outcome_penalty,
             profile_band,
             domain_band,
+            quality_category_band,
             quality_band,
             arena_band,
             quality_rank,
@@ -315,11 +338,12 @@ def _pick_main_brain(providers,models,profile="chat"):
             feedback,
             arena_score,
             domain_score,
+            quality_category_score,
             quality_score,
             outcome_avg,
         ))
     scored.sort()
-    _,_,_,_,_,_,_,model,provider,health,feedback,arena_score,domain_score,quality_score,outcome_avg=scored[0]
+    _,_,_,_,_,_,_,_,model,provider,health,feedback,arena_score,domain_score,quality_category_score,quality_score,outcome_avg=scored[0]
     return model,provider,health+feedback,{
         "arena":{"ready":arena_ready,"score":arena_score if arena_ready else None,"scores":arena_scores if arena_ready else {}},
         "domain_arena":{
@@ -335,6 +359,14 @@ def _pick_main_brain(providers,models,profile="chat"):
             "case_count":quality_lab.get("case_count") or 0,
             "score":quality_score if quality_ready else None,
             "scores":quality_scores if quality_ready else {},
+        },
+        "quality_category":{
+            "ready":quality_category_ready,
+            "tier":quality_category.get("tier") or "",
+            "category":quality_category_name,
+            "case_count":quality_category.get("case_count") or 0,
+            "score":quality_category_score if quality_category_ready else None,
+            "scores":quality_category_scores if quality_category_ready else {},
         },
         "challengers":challenger_signals,
     }
@@ -442,9 +474,10 @@ def resolve_route(decision,providers,models):
     decision["main_brain_domain_arena"]=signals.get("domain_arena") or {}
     decision["main_brain_outcomes"]=signals.get("outcomes") or {}
     decision["main_brain_quality_lab"]=signals.get("quality_lab") or {}
+    decision["main_brain_quality_category"]=signals.get("quality_category") or {}
     decision["main_brain_challengers"]=signals.get("challengers") or {}
     _apply_adaptive_effort(decision,selected,decision["main_brain_outcomes"])
-    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + progressive-quality-lab + objective-arena-aware + profile-outcome-aware + adaptive-effort"
+    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + category-quality-aware + progressive-quality-lab + objective-arena-aware + profile-outcome-aware + adaptive-effort"
 
     depth=str(decision.get("depth") or "smart")
     if depth=="apex":
@@ -495,7 +528,8 @@ def status():
         "brain_arena_aware":True,
         "domain_brain_arena":True,
         "progressive_quality_lab":True,
-        "quality_lab_routing_rule":"only when every compared candidate has the same complete fresh tier",
+        "category_quality_routing":True,
+        "quality_lab_routing_rule":"overall and category evidence are used only when every compared candidate has the same complete fresh tier",
         "proven_main_brain_challengers":True,
         "profile_outcome_learning":True,
         "adaptive_outcome_effort":True,
