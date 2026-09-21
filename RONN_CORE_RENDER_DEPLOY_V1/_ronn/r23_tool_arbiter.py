@@ -120,6 +120,23 @@ def apply_verdict(decision: dict, verdict: dict, *, has_files=False) -> dict:
     if not v.get("accepted") or action=="none":
         return out
 
+    # Context-bound actions cannot be invented by the arbiter. Explicit URLs are
+    # handled by the deterministic browser detector before arbitration.
+    if action in {"code_execute","world_model"} and not has_files:
+        out["tool_arbitration"].update({
+            "action":"none",
+            "accepted":False,
+            "reason":"attached_files_required_for_action",
+        })
+        return out
+    if action=="browser_url":
+        out["tool_arbitration"].update({
+            "action":"none",
+            "accepted":False,
+            "reason":"explicit_urls_use_deterministic_browser_path",
+        })
+        return out
+
     caps=dict(out.get("capabilities") or {})
     policy=dict(out.get("prompt_policy") or {})
     caps["agent_runtime"]=True
