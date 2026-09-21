@@ -119,6 +119,79 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
     }
 
 
+def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
+                         *, contract: dict[str,Any] | None=None, depth: str="smart") -> dict[str,Any]:
+    """Decide whether tool evidence actually satisfies the requested evidence boundary.
+
+    This is deliberately mechanical. It never invents evidence and never upgrades
+    snippets/static analysis into runtime verification.
+    """
+    out=out or {}
+    decision=decision or {}
+    caps=decision.get("capabilities") or {}
+    contract=contract or evidence_contract(out)
+    retrieval=contract.get("retrieval") or {}
+    runtime=contract.get("runtime_execution") or {}
+    requirements=[]
+
+    def require(name: str, met: bool, detail: str):
+        requirements.append({"name":name,"met":bool(met),"detail":str(detail)[:220]})
+
+    if decision.get("needs_live"):
+        structured=bool(contract.get("structured_live_data"))
+        read_pages=int(retrieval.get("read_page_count") or 0)
+        explicit_pages=int(retrieval.get("explicit_browser_pages_read") or 0)
+        min_reads=2 if caps.get("autonomous_research") and depth in {"deep","apex"} else 1
+        live_met=bool(structured or explicit_pages>=1 or read_pages>=min_reads)
+        require(
+            "live_source_evidence",
+            live_met,
+            (
+                "structured live data returned"
+                if structured else
+                f"{read_pages} research page(s) read; {min_reads} required at this depth"
+            ),
+        )
+
+    if caps.get("browser_url"):
+        read_pages=int(retrieval.get("explicit_browser_pages_read") or 0)
+        require("explicit_url_read",read_pages>=1,f"{read_pages} explicit URL page(s) successfully read")
+
+    if caps.get("code_fix_loop") and decision.get("verify"):
+        require(
+            "runtime_verification",
+            bool(runtime.get("verified_success")),
+            "controlled runtime verified success" if runtime.get("verified_success") else "runtime verification was not completed successfully",
+        )
+
+    if caps.get("world_model"):
+        require(
+            "static_dependency_analysis",
+            bool(contract.get("computed_static_analysis")),
+            "world/dependency model computed" if contract.get("computed_static_analysis") else "world/dependency model was requested but not computed",
+        )
+
+    if caps.get("computer_requested"):
+        require(
+            "computer_observation",
+            bool(contract.get("computer_observation_verified")),
+            "connected computer observation verified" if contract.get("computer_observation_verified") else "computer observation was not verified",
+        )
+
+    gaps=[x["name"] for x in requirements if not x["met"]]
+    return {
+        "version":"R23-EVIDENCE-SUFFICIENCY-1",
+        "sufficient":not gaps,
+        "requirements":requirements,
+        "gaps":gaps,
+        "required_count":len(requirements),
+        "met_count":sum(1 for x in requirements if x["met"]),
+        "reason":"all_required_evidence_present" if requirements and not gaps else (
+            "no_strict_evidence_requirement" if not requirements else "required_evidence_missing"
+        ),
+    }
+
+
 def execute(owner: str, request_id: str, message: str, files, decision: dict,
             *, depth="smart", repair_fn=None) -> dict[str,Any]:
     caps=(decision or {}).get("capabilities") or {}
@@ -136,7 +209,9 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "code_loop":{},
         "learning":{},
         "computer":{},
+        "recovery":{},
         "evidence_contract":{},
+        "evidence_sufficiency":{},
     }
     evidence=[]
 
@@ -179,6 +254,41 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
                 unknown_terms=retrieval.get("unknown_terms") or [],
                 depth=depth,
             )
+
+            # One bounded recovery pass when retrieval found no readable page.
+            # This remains raw retrieval/page reading; no extra model is inserted.
+            recovery_depth=(
+                "deep" if depth in {"fast","smart"}
+                else ("apex" if depth=="deep" else "")
+            )
+            weak_initial=bool(
+                not rr.get("ok")
+                or int(rr.get("read_count") or 0)<=0
+            )
+            if weak_initial and recovery_depth:
+                recovery_info={
+                    "attempted":True,
+                    "from_depth":depth,
+                    "to_depth":recovery_depth,
+                    "used":False,
+                }
+                try:
+                    rr2=autonomous_research(
+                        message,
+                        unknown_terms=retrieval.get("unknown_terms") or [],
+                        depth=recovery_depth,
+                    )
+                    q1=(int(rr.get("read_count") or 0),int(rr.get("source_count") or 0))
+                    q2=(int(rr2.get("read_count") or 0),int(rr2.get("source_count") or 0))
+                    if q2>q1:
+                        rr=rr2
+                        recovery_info["used"]=True
+                    recovery_info["final_read_count"]=int(rr.get("read_count") or 0)
+                    recovery_info["final_source_count"]=int(rr.get("source_count") or 0)
+                except Exception as recovery_exc:
+                    recovery_info["error"]=recovery_exc.__class__.__name__
+                out["recovery"]["research"]=recovery_info
+
             out["research"]=rr
             if rr.get("ok"):
                 out["executed"].append("autonomous_research" if caps.get("autonomous_research") else "universal_retrieval")
@@ -310,7 +420,11 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
 
     out["evidence"]="\n\n".join(x for x in evidence if x)[:110000]
     out["sources"]=out["sources"][:16]
-    out["evidence_contract"]=evidence_contract(out)
+    contract=evidence_contract(out)
+    sufficiency=evidence_sufficiency(out,decision,contract=contract,depth=depth)
+    contract["sufficiency"]=sufficiency
+    out["evidence_contract"]=contract
+    out["evidence_sufficiency"]=sufficiency
     return out
 
 
@@ -328,4 +442,6 @@ def status():
         "computer_adapter":True,
         "computer_verified":bool(cs.get("verified")),
         "evidence_contract":True,
+        "evidence_sufficiency_gate":True,
+        "bounded_research_recovery":True,
     }
