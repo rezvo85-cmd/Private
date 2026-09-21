@@ -75,6 +75,8 @@ from r23_brain import (
     directive as r20_directive,
     status as r20_status,
     competition_pair as r23_competition_pair,
+    reasoning_effort_for_route as r23_reasoning_effort_for_route,
+    reasoning_completion_budget as r23_reasoning_completion_budget,
 )
 from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
 from r23_context import (
@@ -1338,6 +1340,7 @@ class ThinkFilter:
 
 def request_payload(model, route, messages, max_tokens, stream=True):
     payload = {"model":model,"messages":messages,"stream":stream,"max_tokens":max_tokens}
+    reasoning_effort=r23_reasoning_effort_for_route(route)
 
     if model in {"groq/compound","groq/compound-mini"}:
         payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
@@ -1345,11 +1348,14 @@ def request_payload(model, route, messages, max_tokens, stream=True):
 
     if model in OR_ENSEMBLE_MODELS:
         payload["temperature"] = 0.45 if model != OR_CRITIC_MODEL else 0.3
+        # OpenRouter normalizes reasoning effort for supported thinking models.
+        # Reasoning fields are never surfaced to the RONN UI.
+        payload["reasoning"] = {"effort":reasoning_effort}
         return payload
 
     if model.startswith("openai/gpt-oss"):
         payload["temperature"] = 0.55
-        payload["reasoning_effort"] = "low" if route == "fast" else ("high" if route in {"deep","review","review-synthesis","ultra","tools","r20-deep","r20-reasoning","r20-code","r20-apex"} else "medium")
+        payload["reasoning_effort"] = reasoning_effort
         payload["include_reasoning"] = False
     elif model == VISION_MODEL and route == "vision":
         payload["temperature"] = 0.6
@@ -1358,9 +1364,10 @@ def request_payload(model, route, messages, max_tokens, stream=True):
     elif model == NVIDIA_MODEL:
         payload["temperature"] = 0.7
         payload["top_p"] = 0.95
-        # Nemotron may emit reasoning_content separately. RONN never forwards that
-        # field to the UI; only the final content is displayed.
-        payload["extra_body"] = {"chat_template_kwargs":{"enable_thinking":True}}
+        # Keep the already-supported NVIDIA thinking control. Fast mode may skip
+        # hidden thinking; smart/deep/apex keep it enabled. RONN never forwards
+        # reasoning_content to the UI.
+        payload["extra_body"] = {"chat_template_kwargs":{"enable_thinking":reasoning_effort!="low"}}
     else:
         payload["temperature"] = 0.6
     return payload
@@ -1527,10 +1534,16 @@ def minimal_cloud_request(model, messages, max_tokens, stream=True):
 
 
 def open_stream_with_fallback(preferred_model, route, messages, max_tokens):
-    """Try primary + backups instead of instantly failing on 429/4xx/5xx."""
+    """Try primary + backups without collapsing hard-task reasoning budgets."""
     last = None
     attempts = []
-    budgets = [max_tokens, min(max_tokens, 700), min(max_tokens, 450)]
+    effort=r23_reasoning_effort_for_route(route)
+    if effort=="high":
+        budgets=[max_tokens,max(1200,min(max_tokens,1800)),max(900,min(max_tokens,1300))]
+    elif effort=="medium":
+        budgets=[max_tokens,max(700,min(max_tokens,1000)),max(550,min(max_tokens,800))]
+    else:
+        budgets=[max_tokens,min(max_tokens,700),min(max_tokens,450)]
     for idx, model in enumerate(model_fallback_order(preferred_model, route)):
         budget = budgets[min(idx, len(budgets)-1)]
         try:
@@ -1547,7 +1560,8 @@ def open_stream_with_fallback(preferred_model, route, messages, max_tokens):
         # Retry same model once with minimal provider-compatible fields.
         if status in (400, 422, 429, 500, 502, 503, 504):
             try:
-                r2 = minimal_cloud_request(model, messages, min(budget, 450), stream=True)
+                _minimal_cap = 1200 if effort=="high" else (700 if effort=="medium" else 450)
+                r2 = minimal_cloud_request(model, messages, min(budget, _minimal_cap), stream=True)
                 if r2.ok:
                     return r2, model, ("backup" if model != preferred_model else route)
                 attempts.append(f"{model} minimal: {r2.status_code} {r2.text[:180]}")
@@ -2317,8 +2331,17 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         body.message, body.style, int(_r20.get("difficulty") or _difficulty),
         bool(body.files), bool(body.images), bool(body.project_context)
     )
-    _base_budget = {"fast":700,"smart":1200,"deep":1800,"apex":2400}.get(str(_r20.get("depth") or "smart"),1200)
-    max_tokens = min(_base_budget, int(_length_policy.get("max_tokens") or _base_budget))
+    _depth=str(_r20.get("depth") or "smart")
+    _base_budget = {"fast":700,"smart":1200,"deep":1800,"apex":3000}.get(_depth,1200)
+    _visible_max_tokens=int(_length_policy.get("max_tokens") or _base_budget)
+    # Visible brevity is a style target, not the total hidden-reasoning ceiling.
+    # Fast turns keep the small budget; smart/deep/apex get enough completion
+    # room for reasoning while the brevity directive still constrains final prose.
+    max_tokens = (
+        min(_base_budget,_visible_max_tokens)
+        if _depth=="fast"
+        else r23_reasoning_completion_budget(_depth,_visible_max_tokens)
+    )
     # Research/list questions need enough room for the requested list even when each entry should stay concise.
     if _length_policy.get("list_count"):
         max_tokens = max(max_tokens, min(1200, 120 + int(_length_policy["list_count"]) * 55))
@@ -2353,6 +2376,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "reliability":reliability_flags(body.message, body.files),
         "evidence_mode":"live" if _r20.get("needs_live") or route in {"live","research","max","tools","r20-current","r20-research"} else "model",
         "response_length":_length_policy,
+        "reasoning_budget":{
+            "depth":_depth,
+            "visible_max_tokens":_visible_max_tokens,
+            "completion_max_tokens":max_tokens,
+            "provider_effort":r23_reasoning_effort_for_route(route),
+        },
         "verification_level":"high" if _r20.get("verify") else "standard",
         "preflight":_preflight,
         "task_plan":_preflight["plan"],
