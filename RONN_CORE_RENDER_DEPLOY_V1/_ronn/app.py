@@ -87,6 +87,10 @@ from r23_context import (
     status as r23_context_status,
 )
 from r23_eval_lab import run as r23_eval_run
+from r23_quality_lab import (
+    run as r23_quality_run,
+    status as r23_quality_status,
+)
 from r23_capabilities import status as r23_capability_status
 from r23_brain_arena import (
     run as r23_arena_run,
@@ -3029,6 +3033,7 @@ def capabilities():
         "r23_all_11": r23_capability_status(),
         "r23_agent_runtime": r23_agent_status(),
         "r23_long_context": r23_context_status(),
+        "r23_quality_lab": r23_quality_status(_quality_lab_candidates("main")),
         "r23_release_ready": r23_eval_run().get("all_11_ready",False),
         "r7_capability_manifest": capability_manifest(),
         "core_api_v1": True,
@@ -3421,6 +3426,37 @@ def _brain_arena_ask(model: str, prompt: str, max_tokens: int=64):
     return text
 
 
+def _quality_lab_candidates(scope: str="main"):
+    active=_brain_arena_candidates()
+    scope=str(scope or "main").strip().lower()
+    if scope=="all":
+        return active
+    if scope!="main":
+        raise HTTPException(400,"scope must be main or all")
+    preferred={OR_NEMOTRON_MODEL,NVIDIA_MODEL,SMART_MODEL}
+    rows=[m for m in active if m in preferred]
+    return rows or active[:3]
+
+
+def _quality_lab_ask(model: str, prompt: str, max_tokens: int=64):
+    messages=[
+        {"role":"system","content":"You are being evaluated on an objective RONN quality task. Reason privately, follow the requested output format exactly, and return final answer text only."},
+        {"role":"user","content":prompt},
+    ]
+    # Use RONN's real deep reasoning request path, but allow enough hidden
+    # reasoning budget that an exact short answer is not starved.
+    r=cloud_request(model,"deep",messages,max(600,min(900,int(max_tokens)*10)),stream=False)
+    try:
+        if not r.ok:
+            raise RuntimeError(f"quality_lab_http_{r.status_code}")
+        text=parse_nonstream(r)
+    finally:
+        r.close()
+    if not text:
+        raise RuntimeError("quality_lab_empty_response")
+    return text
+
+
 @app.get("/api/r23/brain-arena")
 def r23_brain_arena_status_api(request: Request):
     _r14_require_owner(request)
@@ -3453,6 +3489,22 @@ def r23_brain_arena_run_api(request: Request, force: bool=False):
         challenger_models=challengers,
     )
     result["snapshot"]=export_arena_scores(models,30)
+    return result
+
+
+@app.get("/api/r23/quality-lab")
+def r23_quality_lab_status_api(request: Request, scope: str="main"):
+    _r14_require_owner(request)
+    models=_quality_lab_candidates(scope)
+    return r23_quality_status(models)
+
+
+@app.post("/api/r23/quality-lab/run")
+def r23_quality_lab_run_api(request: Request, tier: str="screen", scope: str="main", force: bool=False):
+    _r14_require_owner(request)
+    models=_quality_lab_candidates(scope)
+    result=r23_quality_run(models,_quality_lab_ask,tier=tier,force=bool(force))
+    result["snapshot"]=export_arena_scores(_brain_arena_candidates(),30)
     return result
 
 
@@ -3591,6 +3643,7 @@ def diagnostics(request: Request):
         "r23_tool_arbiter": (BASE / "r23_tool_arbiter.py").exists(),
         "r23_eval_lab": (BASE / "r23_eval_lab.py").exists(),
         "r23_brain_arena": (BASE / "r23_brain_arena.py").exists(),
+        "r23_quality_lab": (BASE / "r23_quality_lab.py").exists(),
         "r23_knowledge_rescue": (BASE / "r23_knowledge_rescue.py").exists(),
         "knowledge_base": (BASE / "knowledge_base.py").exists(),
         "snapshot_engine": (BASE / "snapshot_engine.py").exists(),
@@ -3665,9 +3718,9 @@ def diagnostics(request: Request):
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
         "r23_tool_arbiter":r23_tool_arbiter_status(),
-        "r23_tool_arbiter":r23_tool_arbiter_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
+        "r23_quality_lab":r23_quality_status(_quality_lab_candidates("main")),
         "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
         "r21_release_gate":R21_RELEASE_STATUS,
@@ -3736,6 +3789,7 @@ def status(request: Request):
         "r23_agent_runtime":r23_agent_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
+        "r23_quality_lab":r23_quality_status(_quality_lab_candidates("main")),
         "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
         "r13_ensemble":r13_status(),

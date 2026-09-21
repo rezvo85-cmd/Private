@@ -162,7 +162,7 @@ def model_arena(domain=None):
 
 
 
-ARENA_SCORE_DOMAINS={"main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding"}
+ARENA_SCORE_DOMAINS={"main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding","quality_screen","quality_standard","quality_deep"}
 
 
 def export_model_scores(models=None, max_age_days=30):

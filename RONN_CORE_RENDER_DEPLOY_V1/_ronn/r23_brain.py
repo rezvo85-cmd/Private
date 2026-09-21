@@ -14,6 +14,7 @@ from r23_brain_arena import (
     domain_signal as arena_domain_signal,
     challenger_signal as arena_challenger_signal,
 )
+from r23_quality_lab import quality_signal as r23_quality_signal
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
 
@@ -254,6 +255,7 @@ def _pick_main_brain(providers,models,profile="chat"):
             "arena":{"ready":False,"scores":{}},
             "domain_arena":{"domain":"","ready":False,"scores":{}},
             "outcomes":{"profile":str(profile or "chat"),"ready":False,"scores":{}},
+            "quality_lab":{"ready":False,"tier":"","scores":{}},
             "challengers":challenger_signals,
         }
 
@@ -267,6 +269,9 @@ def _pick_main_brain(providers,models,profile="chat"):
     outcomes=profile_feedback_signal(candidate_models,profile,3)
     outcome_ready=bool(outcomes.get("ready"))
     outcome_scores=outcomes.get("scores") or {}
+    quality_lab=r23_quality_signal(candidate_models,"auto")
+    quality_ready=bool(quality_lab.get("ready"))
+    quality_scores=quality_lab.get("scores") or {}
 
     scored=[]
     for model,provider,quality_rank in candidates:
@@ -281,18 +286,26 @@ def _pick_main_brain(providers,models,profile="chat"):
         outcome_row=outcome_scores.get(model) or {}
         outcome_avg=float(outcome_row.get("avg_rating") or 0)
         outcome_penalty=int(outcome_row.get("penalty") or 0)
+        quality_row=quality_scores.get(model) or {}
+        quality_score=float(quality_row.get("score") or 0)
 
         # Reliability is the hard guardrail. Repeated negative feedback for this
         # specific task profile can independently demote a model. Positive outcome
         # ranking activates only when every candidate has enough fair coverage.
         profile_band=-int(round(outcome_avg*4)) if outcome_ready else 0
         domain_band=-(int(domain_score)//5) if domain_ready else 0
+        quality_band=-(int(quality_score)//5) if quality_ready else 0
         arena_band=-(int(arena_score)//5) if arena_ready else 0
-        latency_key=round(domain_latency if domain_ready else arena_latency,2) if (domain_ready or arena_ready) else 999
+        latency_key=round(
+            float(quality_row.get("latency") or 999)
+            if quality_ready else (domain_latency if domain_ready else arena_latency),
+            2,
+        ) if (quality_ready or domain_ready or arena_ready) else 999
         scored.append((
             health+feedback+outcome_penalty,
             profile_band,
             domain_band,
+            quality_band,
             arena_band,
             quality_rank,
             latency_key,
@@ -302,10 +315,11 @@ def _pick_main_brain(providers,models,profile="chat"):
             feedback,
             arena_score,
             domain_score,
+            quality_score,
             outcome_avg,
         ))
     scored.sort()
-    _,_,_,_,_,_,model,provider,health,feedback,arena_score,domain_score,outcome_avg=scored[0]
+    _,_,_,_,_,_,_,model,provider,health,feedback,arena_score,domain_score,quality_score,outcome_avg=scored[0]
     return model,provider,health+feedback,{
         "arena":{"ready":arena_ready,"score":arena_score if arena_ready else None,"scores":arena_scores if arena_ready else {}},
         "domain_arena":{
@@ -315,6 +329,13 @@ def _pick_main_brain(providers,models,profile="chat"):
             "scores":domain_scores if domain_ready else {},
         },
         "outcomes":{"profile":profile,"ready":outcome_ready,"score":outcome_avg if model in outcome_scores else None,"scores":outcome_scores},
+        "quality_lab":{
+            "ready":quality_ready,
+            "tier":quality_lab.get("tier") or "",
+            "case_count":quality_lab.get("case_count") or 0,
+            "score":quality_score if quality_ready else None,
+            "scores":quality_scores if quality_ready else {},
+        },
         "challengers":challenger_signals,
     }
 
@@ -420,9 +441,10 @@ def resolve_route(decision,providers,models):
     decision["main_brain_arena"]=signals.get("arena") or {}
     decision["main_brain_domain_arena"]=signals.get("domain_arena") or {}
     decision["main_brain_outcomes"]=signals.get("outcomes") or {}
+    decision["main_brain_quality_lab"]=signals.get("quality_lab") or {}
     decision["main_brain_challengers"]=signals.get("challengers") or {}
     _apply_adaptive_effort(decision,selected,decision["main_brain_outcomes"])
-    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + objective-arena-aware + profile-outcome-aware + adaptive-effort"
+    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + progressive-quality-lab + objective-arena-aware + profile-outcome-aware + adaptive-effort"
 
     depth=str(decision.get("depth") or "smart")
     if depth=="apex":
@@ -472,6 +494,8 @@ def status():
         "main_brain_health_aware":True,
         "brain_arena_aware":True,
         "domain_brain_arena":True,
+        "progressive_quality_lab":True,
+        "quality_lab_routing_rule":"only when every compared candidate has the same complete fresh tier",
         "proven_main_brain_challengers":True,
         "profile_outcome_learning":True,
         "adaptive_outcome_effort":True,
