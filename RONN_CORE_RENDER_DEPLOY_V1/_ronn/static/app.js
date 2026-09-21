@@ -320,7 +320,7 @@ function arenaSnapshot(){
       latency:Number(x.latency||0),
       samples:Number(x.samples||0)|0,
       updated:Number(x.updated||0)
-    })).filter(x=>x.model&&["main","instruction","reasoning","coding","certification"].includes(x.domain))
+    })).filter(x=>x.model&&["main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding"].includes(x.domain))
   }
 }
 function saveArenaSnapshot(snapshot){
@@ -331,7 +331,7 @@ function saveArenaSnapshot(snapshot){
   for(const row of [...existing,...snapshot.rows]){
     const model=String(row?.model||"").slice(0,220),domain=String(row?.domain||"").slice(0,40);
     const updated=Number(row?.updated||0);
-    if(!model||!["main","instruction","reasoning","coding","certification"].includes(domain)||updated<cutoff)continue;
+    if(!model||!["main","instruction","reasoning","coding","certification","shadow_instruction","shadow_reasoning","shadow_coding"].includes(domain)||updated<cutoff)continue;
     const clean={
       model,domain,
       score:Math.max(0,Math.min(100,Number(row?.score||0))),
@@ -497,7 +497,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-CERT1",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-SHADOW1",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
 if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;

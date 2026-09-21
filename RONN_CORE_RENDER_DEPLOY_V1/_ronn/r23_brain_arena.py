@@ -13,13 +13,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from project_brain import model_arena, set_model_score
+from project_brain import model_arena, set_model_score, score_model
 
 VERSION="R23-BRAIN-ARENA-3"
 MIN_SAMPLES=8
 DOMAIN_MIN_SAMPLES={"instruction":2,"reasoning":3,"coding":3}
 CERTIFICATION_MIN_SAMPLES=6
 CERTIFICATION_MIN_SCORE=83.3
+SHADOW_MIN_SAMPLES=3
+SHADOW_MIN_SCORE=60.0
 MAX_AGE_DAYS=14
 RUN_TTL_SECONDS=7*24*3600
 RETRY_COOLDOWN_SECONDS=6*3600
@@ -250,6 +252,59 @@ def domain_signal(models, profile: str) -> dict[str,Any]:
     }
 
 
+def shadow_domain(profile: str) -> str:
+    domain=profile_domain(profile)
+    return f"shadow_{domain}" if domain else ""
+
+
+def shadow_signal(model: str, profile: str) -> dict[str,Any]:
+    model=str(model or "")
+    domain=shadow_domain(profile)
+    if not model or not domain:
+        return {
+            "model":model,
+            "profile":str(profile or "").lower(),
+            "domain":domain,
+            "ready":False,
+            "score":None,
+            "samples":0,
+            "min_samples":SHADOW_MIN_SAMPLES,
+            "min_score":SHADOW_MIN_SCORE,
+        }
+    rows=_fresh_row_map(
+        [model],
+        domain=domain,
+        min_samples=SHADOW_MIN_SAMPLES,
+        max_age_days=MAX_AGE_DAYS,
+    )
+    row=dict(rows.get(model) or {})
+    score=float(row.get("score") or 0)
+    samples=int(row.get("samples") or 0)
+    return {
+        "model":model,
+        "profile":str(profile or "").lower(),
+        "domain":domain,
+        "ready":bool(row and samples>=SHADOW_MIN_SAMPLES and score>=SHADOW_MIN_SCORE),
+        "score":score if row else None,
+        "samples":samples,
+        "min_samples":SHADOW_MIN_SAMPLES,
+        "min_score":SHADOW_MIN_SCORE,
+        "row":row,
+    }
+
+
+def record_shadow_result(model: str, profile: str, preference: str) -> dict[str,Any]:
+    """Record one judge preference from a real hard-task incumbent/challenger comparison."""
+    model=str(model or "")
+    domain=shadow_domain(profile)
+    pref=str(preference or "").strip().upper()
+    if not model or not domain or pref not in {"A","B","TIE"}:
+        return {"ok":False,"reason":"invalid_shadow_result"}
+    score=100.0 if pref=="B" else (50.0 if pref=="TIE" else 0.0)
+    score_model(model,domain,score,0)
+    return {"ok":True,"model":model,"profile":str(profile or "").lower(),"preference":pref,"signal":shadow_signal(model,profile)}
+
+
 def fresh_score(model: str, domain: str="main") -> dict[str,Any]:
     """Return one complete, fresh objective score window or an empty dict."""
     model=str(model or "")
@@ -279,6 +334,9 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
     domain_score=float(domain_row.get("score") or 0)
     certification_score=float(certification.get("score") or 0)
     certification_complete=int(certification.get("samples") or 0)>=CERTIFICATION_MIN_SAMPLES
+    domain_proven=bool(domain and domain_row and main_score>=62.5 and domain_score>=100.0)
+    certified=bool(main and certification_complete and certification_score>=CERTIFICATION_MIN_SCORE and domain_proven)
+    shadow=shadow_signal(model,profile)
     if not main:
         eligible=False
         reason="missing_complete_global_window"
@@ -288,23 +346,29 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
     elif certification_score<CERTIFICATION_MIN_SCORE:
         eligible=False
         reason="certification_threshold_not_met"
-    elif domain:
-        eligible=bool(domain_row and main_score>=62.5 and domain_score>=100.0)
-        reason="complete_domain_and_certification_proof" if eligible else "domain_threshold_not_met"
-    else:
-        # Do not promote a challenger into casual/creative chat from objective
-        # tests that do not measure conversational/creative quality.
+    elif not domain:
         eligible=False
         reason="no_matching_objective_domain"
+    elif not domain_proven:
+        eligible=False
+        reason="domain_threshold_not_met"
+    elif not shadow.get("ready"):
+        eligible=False
+        reason="awaiting_production_shadow_trials"
+    else:
+        eligible=True
+        reason="complete_certification_and_production_shadow_proof"
     return {
         "model":model,
         "profile":str(profile or "chat").lower(),
         "domain":domain,
         "eligible":eligible,
+        "certified":certified,
         "reason":reason,
         "main":main,
         "domain_score":domain_row,
         "certification":certification,
+        "shadow":shadow,
         "requirements":{
             "global_samples":MIN_SAMPLES,
             "global_min_score":62.5 if domain else None,
@@ -312,6 +376,8 @@ def challenger_signal(model: str, profile: str) -> dict[str,Any]:
             "domain_min_score":100.0 if domain else None,
             "certification_samples":CERTIFICATION_MIN_SAMPLES,
             "certification_min_score":CERTIFICATION_MIN_SCORE,
+            "shadow_samples":SHADOW_MIN_SAMPLES,
+            "shadow_min_score":SHADOW_MIN_SCORE,
         },
     }
 
@@ -521,6 +587,9 @@ def status(models=None, challenger_models=None) -> dict[str,Any]:
         "max_age_days":MAX_AGE_DAYS,
         "routing":signal,
         "domain_scores":{d:model_arena(d) for d in DOMAIN_MIN_SAMPLES},
+        "shadow_scores":{
+            d:model_arena("shadow_"+d) for d in DOMAIN_MIN_SAMPLES
+        },
         "certification":{
             "ready":certification_ready,
             "required_models":challengers,
@@ -536,6 +605,8 @@ def status(models=None, challenger_models=None) -> dict[str,Any]:
             "domain_min_score":100.0,
             "certification_samples":CERTIFICATION_MIN_SAMPLES,
             "certification_min_score":CERTIFICATION_MIN_SCORE,
+            "shadow_samples":SHADOW_MIN_SAMPLES,
+            "shadow_min_score":SHADOW_MIN_SCORE,
             "freshness_days":MAX_AGE_DAYS,
         },
         "all_scores":model_arena("main"),

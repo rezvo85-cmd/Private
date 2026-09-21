@@ -117,6 +117,21 @@ def competition_pair(primary_model, profile, providers, models):
         add(primary,"r23_primary")
 
     if providers.get("openrouter"):
+        # Certified challengers shadow the incumbent on real hard tasks before
+        # they are allowed to become a primary brain. Task-relevant ordering
+        # keeps the comparison useful rather than random.
+        challenger_order=(
+            ("or_deepseek","or_qwen") if profile=="coding"
+            else (("or_qwen","or_deepseek") if profile in {"writing","analysis","knowledge","research","mathscience"} else ())
+        )
+        for key in challenger_order:
+            challenger=str(models.get(key) or "")
+            if not challenger or challenger==primary:
+                continue
+            signal=arena_challenger_signal(challenger,profile)
+            if signal.get("certified"):
+                add(challenger,"certified_shadow_challenger")
+
         if profile=="coding":
             add(models.get("or_deepseek"),"coding_specialist")
         elif profile in {"creative","writing"}:

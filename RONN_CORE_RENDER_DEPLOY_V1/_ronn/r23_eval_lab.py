@@ -12,6 +12,8 @@ from r23_brain_arena import (
     routing_signal as arena_routing_signal,
     domain_signal as arena_domain_signal,
     challenger_signal as arena_challenger_signal,
+    shadow_signal as arena_shadow_signal,
+    record_shadow_result as arena_record_shadow_result,
 )
 from r23_capabilities import unknown_candidates, retrieval_reason, status as capability_status
 from r23_knowledge_rescue import gap_signal as knowledge_gap_signal, should_buffer as knowledge_gap_should_buffer
@@ -148,11 +150,20 @@ def run():
     set_model_score(challenger_models["or_deepseek"],"main",87.5,.32,8)
     set_model_score(challenger_models["or_deepseek"],"coding",100,.27,3)
     set_model_score(challenger_models["or_deepseek"],"certification",83.3,.31,6)
+    arena_record_shadow_result(challenger_models["or_deepseek"],"coding","B")
+    arena_record_shadow_result(challenger_models["or_deepseek"],"coding","B")
+    arena_record_shadow_result(challenger_models["or_deepseek"],"coding","A")
     set_model_score(challenger_models["or_qwen"],"main",100,.22,8)
     set_model_score(challenger_models["or_qwen"],"coding",100,.18,3)
-    set_model_score(challenger_models["or_qwen"],"certification",66.7,.20,6)
+    set_model_score(challenger_models["or_qwen"],"certification",100,.20,6)
     challenger_plan=plan("Fix this Python bug in my code.")
     challenger_route=resolve_route(challenger_plan,PROVIDERS,challenger_models)
+    challenger_pair=competition_pair(
+        challenger_models["nvidia"],
+        "coding",
+        PROVIDERS,
+        challenger_models,
+    )
 
     apex_pair=competition_pair(
         arena_models["nvidia"],
@@ -166,6 +177,7 @@ def run():
     set_model_score(arena_memory_source,"main",100,.21,8)
     set_model_score(arena_memory_source,"coding",100,.19,3)
     set_model_score(arena_memory_source,"certification",100,.20,6)
+    set_model_score(arena_memory_source,"shadow_coding",66.67,.0,3)
     arena_memory_snapshot=export_model_scores([arena_memory_source],30)
     arena_memory_rows=[]
     for _row in arena_memory_snapshot.get("rows",[]):
@@ -237,10 +249,21 @@ def run():
                   and arena_challenger_signal(
                       challenger_models["or_deepseek"],"coding"
                   )["eligible"]
+                  and arena_shadow_signal(
+                      challenger_models["or_deepseek"],"coding"
+                  )["ready"]
+                  and arena_challenger_signal(
+                      challenger_models["or_qwen"],"coding"
+                  )["certified"]
                   and not arena_challenger_signal(
                       challenger_models["or_qwen"],"coding"
                   )["eligible"]
+                  and arena_challenger_signal(
+                      challenger_models["or_qwen"],"coding"
+                  )["reason"]=="awaiting_production_shadow_trials"
                   and challenger_route[0]==challenger_models["or_deepseek"]
+                  and challenger_pair.get("roles",[])[1]=="certified_shadow_challenger"
+                  and challenger_pair.get("models",[])[1]==challenger_models["or_deepseek"]
                   and challenger_plan.get("main_brain_challengers",{}).get(
                       challenger_models["or_deepseek"],{}
                   ).get("eligible") is True
@@ -295,9 +318,10 @@ def run():
                   capability_status().get("feature_count")==11
                   and len(capability_status().get("features",{}))==11
                   and arena_memory_restore.get("ok")
-                  and arena_memory_restore.get("imported",0)>=3
+                  and arena_memory_restore.get("imported",0)>=4
                   and arena_routing_signal([arena_memory_restored])["ready"]
                   and arena_domain_signal([arena_memory_restored],"coding")["ready"]
+                  and arena_shadow_signal(arena_memory_restored,"coding")["ready"]
                   and arena_challenger_signal(arena_memory_restored,"coding")["eligible"]
               )),
 
