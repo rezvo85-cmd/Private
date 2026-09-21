@@ -28,7 +28,7 @@ def should_arbitrate(decision: dict, *, has_files=False, has_images=False,
     # Obvious/explicit needs already have a deterministic fast path.
     if decision.get("needs_live") or retrieval.get("required"):
         return False
-    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("computer_requested"):
+    if caps.get("browser_url") or caps.get("code_fix_loop") or caps.get("world_model") or caps.get("computer_requested"):
         return False
 
     profile=str(decision.get("profile") or "chat").lower()
