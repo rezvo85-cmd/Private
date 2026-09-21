@@ -19,6 +19,12 @@ from r23_capabilities import unknown_candidates, retrieval_reason, status as cap
 from r23_knowledge_rescue import gap_signal as knowledge_gap_signal, should_buffer as knowledge_gap_should_buffer
 from r23_context import compress_history, project_scope_active, project_scope_key, prompt_context_policy
 from r23_agent_runtime import status as agent_status, evidence_contract as agent_evidence_contract
+from r23_tool_arbiter import (
+    should_arbitrate as tool_should_arbitrate,
+    parse_verdict as tool_parse_verdict,
+    apply_verdict as tool_apply_verdict,
+    status as tool_arbiter_status,
+)
 from r23_research import subqueries
 from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import (
@@ -80,6 +86,23 @@ def run():
     code_plan=plan("Fix this Python error, run tests, repair it and retest until it works.",
                    file_names=["main.py","helper.py"],has_project=True)
     unknown_plan=plan("what does ZXQ_991 mean")
+
+    arbiter_simple=plan("hi")
+    arbiter_weather=plan("What's the weather today?")
+    arbiter_url=plan("Read https://example.com/docs and explain the API.")
+    arbiter_ambiguous=plan(
+        "Please inspect why this Python service behaves inconsistently under retries.",
+        file_names=["service.py"],
+        has_project=True,
+    )
+    arbiter_high=tool_parse_verdict(
+        '{"action":"code_execute","confidence":0.91,"reason":"runtime behavior must be observed"}'
+    )
+    arbiter_applied=tool_apply_verdict(arbiter_ambiguous,arbiter_high,has_files=True)
+    arbiter_low=tool_parse_verdict(
+        '{"action":"live_research","confidence":0.55,"reason":"freshness might matter"}'
+    )
+    arbiter_low_applied=tool_apply_verdict(arbiter_ambiguous,arbiter_low,has_files=True)
 
     pid=ensure_project("r23-eval-project")
     remember(pid,"decision","api_name","Keep the public API name stable.",.95,"r23_eval")
@@ -272,8 +295,51 @@ def run():
                   ).get("eligible") is False
               )),
 
-        _case("agent runtime exposes browser code and computer adapters","2_full_agent_runtime",
-              lambda:(lambda s:s.get("browser") and s.get("controlled_code_execution") and s.get("computer_adapter"))(agent_status())),
+        _case("agent runtime exposes real tools with selective main-brain arbitration","2_full_agent_runtime",
+              lambda:bool(
+                  (lambda s:s.get("browser") and s.get("controlled_code_execution") and s.get("computer_adapter"))(agent_status())
+                  and tool_arbiter_status().get("selective")
+                  and not tool_should_arbitrate(
+                      arbiter_simple,
+                      has_files=False,
+                      has_images=False,
+                      has_project=False,
+                      agent_mode=True,
+                  )
+                  and not tool_should_arbitrate(
+                      arbiter_weather,
+                      has_files=False,
+                      has_images=False,
+                      has_project=False,
+                      agent_mode=True,
+                  )
+                  and arbiter_url.get("capabilities",{}).get("browser_url") is True
+                  and arbiter_url.get("capabilities",{}).get("agent_runtime") is True
+                  and not tool_should_arbitrate(
+                      arbiter_url,
+                      has_files=False,
+                      has_images=False,
+                      has_project=False,
+                      agent_mode=True,
+                  )
+                  and arbiter_ambiguous.get("capabilities",{}).get("code_fix_loop") is False
+                  and arbiter_ambiguous.get("capabilities",{}).get("world_model") is False
+                  and tool_should_arbitrate(
+                      arbiter_ambiguous,
+                      has_files=True,
+                      has_images=False,
+                      has_project=True,
+                      agent_mode=True,
+                  )
+                  and arbiter_high.get("accepted") is True
+                  and arbiter_applied.get("needs_tools") is True
+                  and arbiter_applied.get("verify") is True
+                  and arbiter_applied.get("capabilities",{}).get("code_fix_loop") is True
+                  and arbiter_applied.get("tool_arbitration",{}).get("action")=="code_execute"
+                  and arbiter_low.get("accepted") is False
+                  and arbiter_low_applied.get("needs_live") is False
+                  and arbiter_low_applied.get("tool_arbitration",{}).get("action")=="none"
+              )),
 
         _case("code test fix retest activates for attached repair work","3_code_test_fix_retest",
               lambda:bool(code_plan["capabilities"]["code_fix_loop"] and code_plan["capabilities"]["agent_runtime"])),

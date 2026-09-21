@@ -100,6 +100,13 @@ from r23_knowledge_rescue import (
     build_rescue_messages as r23_gap_build_messages,
     status as r23_gap_status,
 )
+from r23_tool_arbiter import (
+    should_arbitrate as r23_should_arbitrate,
+    arbiter_messages as r23_arbiter_messages,
+    parse_verdict as r23_parse_tool_verdict,
+    apply_verdict as r23_apply_tool_verdict,
+    status as r23_tool_arbiter_status,
+)
 from r20_web_tools import research as r20_web_research, status as r20_web_status
 from r20_tool_hub import execute as r20_tool_execute, status as r20_tool_status
 import memory_store_pg as pg_memory
@@ -2038,6 +2045,48 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
     started_at = time.time()
     _difficulty = int(_r20.get("difficulty") or task_difficulty(body.message))
     _has_project_scope = r23_project_scope_active(body.project_id, body.project_context)
+
+    # R23 keeps deterministic routing for obvious tool needs. Only ambiguous
+    # medium/hard turns ask the already-selected main brain for one tiny,
+    # structured tool-need decision before any tool runs.
+    _tool_arbiter={}
+    if _r20.get("r23") and r23_should_arbitrate(
+        _r20,
+        has_files=bool(body.files),
+        has_images=bool(body.images),
+        has_project=_has_project_scope,
+        agent_mode=bool(body.agent_mode),
+    ):
+        try:
+            _arbiter_messages=r23_arbiter_messages(
+                body.message,
+                _r20,
+                file_names=_file_names,
+                has_project=_has_project_scope,
+            )
+            _arbiter_text,_arbiter_model=nonstream_with_fallback(
+                model,
+                route,
+                _arbiter_messages,
+                180,
+            )
+            _tool_arbiter=r23_parse_tool_verdict(_arbiter_text)
+            _tool_arbiter["model"]=_arbiter_model
+            _r20=r23_apply_tool_verdict(
+                _r20,
+                _tool_arbiter,
+                has_files=bool(body.files),
+            )
+        except Exception as _arbiter_exc:
+            _tool_arbiter={
+                "ok":False,
+                "action":"none",
+                "accepted":False,
+                "confidence":0.0,
+                "reason":_arbiter_exc.__class__.__name__,
+            }
+            _r20["tool_arbitration"]=_tool_arbiter
+
     _legacy_diag = bool(
         (not _r20.get("lean_core"))
         or body.files or body.images or _has_project_scope
@@ -2271,6 +2320,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "tools_enabled": bool(_r20.get("needs_live")) or route in {"live","research","max","tools","r20-current","r20-research"},
         "web_research":{"ok":bool(_web_research.get("ok")),"source_count":int(_web_research.get("source_count") or 0),"read_count":int(_web_research.get("read_count") or 0),"snippet_only_count":int(_web_research.get("snippet_only_count") or 0)},
         "evidence_contract":_evidence_contract,
+        "tool_arbitration":_r20.get("tool_arbitration") or {},
         "tool_hub":{
             "planned":_tool_run.get("planned") or [],
             "executed":_tool_run.get("executed") or [],
@@ -3238,6 +3288,7 @@ def r23_capabilities_api():
         "brain":r20_status(),
         "capabilities":r23_capability_status(),
         "agent_runtime":r23_agent_status(),
+        "tool_arbiter":r23_tool_arbiter_status(),
         "context":r23_context_status(),
         "brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "cloud_brain":r15_cloud_status(),
@@ -3489,6 +3540,7 @@ def diagnostics(request: Request):
         "r23_context": (BASE / "r23_context.py").exists(),
         "r23_research": (BASE / "r23_research.py").exists(),
         "r23_agent_runtime": (BASE / "r23_agent_runtime.py").exists(),
+        "r23_tool_arbiter": (BASE / "r23_tool_arbiter.py").exists(),
         "r23_eval_lab": (BASE / "r23_eval_lab.py").exists(),
         "r23_brain_arena": (BASE / "r23_brain_arena.py").exists(),
         "r23_knowledge_rescue": (BASE / "r23_knowledge_rescue.py").exists(),
@@ -3564,6 +3616,8 @@ def diagnostics(request: Request):
         "r23_eval":r23_checks,
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
+        "r23_tool_arbiter":r23_tool_arbiter_status(),
+        "r23_tool_arbiter":r23_tool_arbiter_status(),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "r23_knowledge_gap_rescue":r23_gap_status(),
