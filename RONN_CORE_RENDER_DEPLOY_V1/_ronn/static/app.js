@@ -320,7 +320,7 @@ function arenaSnapshot(){
       latency:Number(x.latency||0),
       samples:Number(x.samples||0)|0,
       updated:Number(x.updated||0)
-    })).filter(x=>x.model&&["main","instruction","reasoning","coding"].includes(x.domain))
+    })).filter(x=>x.model&&["main","instruction","reasoning","coding","certification"].includes(x.domain))
   }
 }
 function saveArenaSnapshot(snapshot){
@@ -331,7 +331,7 @@ function saveArenaSnapshot(snapshot){
   for(const row of [...existing,...snapshot.rows]){
     const model=String(row?.model||"").slice(0,220),domain=String(row?.domain||"").slice(0,40);
     const updated=Number(row?.updated||0);
-    if(!model||!["main","instruction","reasoning","coding"].includes(domain)||updated<cutoff)continue;
+    if(!model||!["main","instruction","reasoning","coding","certification"].includes(domain)||updated<cutoff)continue;
     const clean={
       model,domain,
       score:Math.max(0,Math.min(100,Number(row?.score||0))),
@@ -362,10 +362,12 @@ async function maybeRunBrainArena(){
     const sr=await fetch("/api/r23/brain-arena",{headers:apiHeaders(),cache:"no-store"});
     if(!sr.ok){brainArenaCheckStarted=false;return}
     const s=await sr.json();
-    const routing=s.routing||{};
+    const routing=s.routing||{},cert=s.certification||{};
     if(!routing.candidate_count){brainArenaCheckStarted=false;return}
 
-    const fresh=!!routing.ready&&Number(routing.oldest||0)>0&&((Date.now()/1000)-Number(routing.oldest||0)<6*24*3600);
+    const baseFresh=!!routing.ready&&Number(routing.oldest||0)>0&&((Date.now()/1000)-Number(routing.oldest||0)<6*24*3600);
+    const certFresh=!Number(cert.required_models?.length||0)||cert.ready===true;
+    const fresh=baseFresh&&certFresh;
     if(fresh){
       try{
         const er=await fetch("/api/r23/brain-arena/export",{headers:apiHeaders(),cache:"no-store"});
@@ -495,7 +497,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ARENA-MEM1",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-CERT1",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
 if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;
