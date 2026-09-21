@@ -197,6 +197,65 @@ def _fresh_rows(models, tier: str, max_age_days: int=MAX_AGE_DAYS) -> dict[str,d
     return out
 
 
+def _fresh_category_rows(models, tier: str, category: str, max_age_days: int=MAX_AGE_DAYS) -> dict[str,dict[str,Any]]:
+    wanted={str(x) for x in models if x}
+    category=str(category or "").strip().lower()
+    domain=f"quality_{tier}_{category}"
+    needed=sum(1 for x in cases_for_tier(tier) if str(x.get("category") or "")==category)
+    cutoff=time.time()-max(1,int(max_age_days))*86400
+    out={}
+    if needed<=0:
+        return out
+    for row in model_arena(domain):
+        model=str(row.get("model") or "")
+        if model not in wanted:
+            continue
+        if int(row.get("samples") or 0)<needed or float(row.get("updated") or 0)<cutoff:
+            continue
+        out[model]={
+            "score":round(float(row.get("score") or 0),2),
+            "latency":round(float(row.get("latency") or 0),3),
+            "samples":int(row.get("samples") or 0),
+            "updated":float(row.get("updated") or 0),
+        }
+    return out
+
+
+def category_signal(models, category: str, tier: str="auto") -> dict[str,Any]:
+    models=list(dict.fromkeys(str(x) for x in models if x))
+    category=str(category or "").strip().lower()
+    requested=str(tier or "auto").lower()
+    valid_categories={str(x["category"]) for x in CASES}
+    if category not in valid_categories:
+        return {"version":VERSION,"ready":False,"category":category,"reason":"unknown_category","scores":{}}
+    tiers=TIER_ORDER if requested=="auto" else (requested,)
+    if requested!="auto" and requested not in TIER_STAGE:
+        raise ValueError("tier must be auto, screen, standard, or deep")
+    for candidate_tier in tiers:
+        scores=_fresh_category_rows(models,candidate_tier,category)
+        if models and all(m in scores for m in models):
+            return {
+                "version":VERSION,
+                "ready":True,
+                "tier":candidate_tier,
+                "category":category,
+                "case_count":sum(1 for x in cases_for_tier(candidate_tier) if x["category"]==category),
+                "candidate_count":len(models),
+                "measured_count":len(scores),
+                "scores":scores,
+            }
+    return {
+        "version":VERSION,
+        "ready":False,
+        "tier":requested if requested!="auto" else "",
+        "category":category,
+        "candidate_count":len(models),
+        "measured_count":0,
+        "scores":{},
+        "available":{t:_fresh_category_rows(models,t,category) for t in ("screen","standard","deep")},
+    }
+
+
 def quality_signal(models, tier: str="auto") -> dict[str,Any]:
     models=list(dict.fromkeys(str(x) for x in models if x))
     requested=str(tier or "auto").lower()
@@ -275,6 +334,15 @@ def _run_model(model: str, ask_fn: Callable[[str,str,int],str], tier: str) -> di
         lat=sum(float(x.get("latency") or 0) for x in tier_rows)/needed
         set_model_score(model,"quality_"+name,tier_score,lat,needed)
         persisted.append({"tier":name,"score":tier_score,"samples":needed,"latency":round(lat,3)})
+        for category in sorted({str(x.get("category") or "") for x in tier_rows if x.get("category")}):
+            category_rows=[x for x in tier_rows if str(x.get("category") or "")==category]
+            category_needed=len(category_rows)
+            if not category_needed or any("transport_error" in x for x in category_rows):
+                continue
+            category_passed=sum(1 for x in category_rows if x.get("passed"))
+            category_score=round(100*category_passed/category_needed,1)
+            category_latency=sum(float(x.get("latency") or 0) for x in category_rows)/category_needed
+            set_model_score(model,f"quality_{name}_{category}",category_score,category_latency,category_needed)
 
     categories={}
     for category in sorted({x["category"] for x in cases}):
@@ -353,6 +421,9 @@ def status(models=None) -> dict[str,Any]:
         "running":_LOCK.locked(),
         "last_attempt":_LAST_ATTEMPT,
         "signal":quality_signal(models,"auto") if models else {"ready":False,"scores":{}},
+        "category_signals":{
+            category:category_signal(models,category,"auto") for category in categories
+        } if models else {},
         "scores":{
             t:model_arena("quality_"+t) for t in ("screen","standard","deep")
         },
