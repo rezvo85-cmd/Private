@@ -367,9 +367,15 @@ def run():
                   ).get("eligible") is False
               )),
 
-        _case("agent runtime exposes real tools with selective main-brain arbitration","2_full_agent_runtime",
+        _case("agent runtime exposes tools, arbitration, and evidence sufficiency","2_full_agent_runtime",
               lambda:bool(
-                  (lambda s:s.get("browser") and s.get("controlled_code_execution") and s.get("computer_adapter"))(agent_status())
+                  (lambda s:
+                      s.get("browser")
+                      and s.get("controlled_code_execution")
+                      and s.get("computer_adapter")
+                      and s.get("evidence_sufficiency_gate")
+                      and s.get("bounded_research_recovery")
+                  )(agent_status())
                   and tool_arbiter_status().get("selective")
                   and not tool_should_arbitrate(
                       arbiter_simple,
@@ -411,6 +417,14 @@ def run():
                   and arbiter_low.get("accepted") is False
                   and arbiter_low_applied.get("needs_live") is False
                   and arbiter_low_applied.get("tool_arbitration",{}).get("action")=="none"
+                  and weak_live_sufficiency.get("sufficient") is False
+                  and "live_source_evidence" in weak_live_sufficiency.get("gaps",[])
+                  and read_live_sufficiency.get("sufficient") is True
+                  and deep_one_read_sufficiency.get("sufficient") is False
+                  and deep_two_read_sufficiency.get("sufficient") is True
+                  and unverified_code_sufficiency.get("sufficient") is False
+                  and "runtime_verification" in unverified_code_sufficiency.get("gaps",[])
+                  and verified_code_sufficiency.get("sufficient") is True
               )),
 
         _case("code test fix retest activates for attached repair work","3_code_test_fix_retest",
