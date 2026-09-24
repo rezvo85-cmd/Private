@@ -7,6 +7,7 @@ from pathlib import Path
 
 from brevity_engine import response_length_policy, brevity_directive
 from r20_tool_hub import plan as tool_plan
+from provider_models import DEFAULTS as PROVIDER_MODEL_DEFAULTS, model_migration
 
 BASE=Path(__file__).resolve().parent
 ROOT=BASE.parent
@@ -71,6 +72,32 @@ def run():
         )
     except Exception as exc:
         add("database_blueprint_binding",False,str(exc)[:240])
+
+    # Provider model IDs age independently from RONN code. Detect stale Groq
+    # environment overrides explicitly so runtime migration cannot hide a
+    # production configuration that should be cleaned up.
+    try:
+        groq_base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip()
+        configured_models={
+            "fast":(os.getenv("RONN_FAST_MODEL") or PROVIDER_MODEL_DEFAULTS["fast"]).strip(),
+            "smart":(os.getenv("RONN_SMART_MODEL") or PROVIDER_MODEL_DEFAULTS["smart"]).strip(),
+            "creator":(os.getenv("RONN_CREATOR_MODEL") or PROVIDER_MODEL_DEFAULTS["creator"]).strip(),
+            "vision":(os.getenv("RONN_VISION_MODEL") or PROVIDER_MODEL_DEFAULTS["vision"]).strip(),
+            "live":(os.getenv("RONN_LIVE_MODEL") or PROVIDER_MODEL_DEFAULTS["live"]).strip(),
+            "research":(os.getenv("RONN_RESEARCH_MODEL") or PROVIDER_MODEL_DEFAULTS["research"]).strip(),
+        }
+        migrations={k:model_migration(v,groq_base) for k,v in configured_models.items()}
+        stale={k:v for k,v in migrations.items() if v.get("migrated")}
+        add(
+            "provider_models_current",
+            not stale,
+            {
+                "stale_configured_roles":sorted(stale),
+                "effective_models":{k:v.get("effective") for k,v in migrations.items()},
+            },
+        )
+    except Exception as exc:
+        add("provider_models_current",False,str(exc)[:240])
 
     # On the actual Render service, the secure Blueprint declaration is not
     # enough by itself: the runtime must really have DATABASE_URL.
