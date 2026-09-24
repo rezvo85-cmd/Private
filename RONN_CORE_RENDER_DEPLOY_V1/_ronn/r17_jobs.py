@@ -82,8 +82,13 @@ def _pack(x):
         "preview":str(x)[:max(0,MAX_JSON_CHARS//2)],
     }
     text=json.dumps(fallback,ensure_ascii=False)
+    while len(text)>MAX_JSON_CHARS and fallback.get("preview"):
+        preview=fallback["preview"]
+        shrink=max(64,len(preview)//4)
+        fallback["preview"]=preview[:-shrink] if shrink<len(preview) else ""
+        text=json.dumps(fallback,ensure_ascii=False)
     if len(text)>MAX_JSON_CHARS:
-        fallback["preview"]=fallback["preview"][:max(0,len(fallback["preview"])-(len(text)-MAX_JSON_CHARS)-32)]
+        fallback.pop("preview",None)
         text=json.dumps(fallback,ensure_ascii=False)
     return text
 
