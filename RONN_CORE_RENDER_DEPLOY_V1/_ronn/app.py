@@ -133,6 +133,11 @@ from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, comp
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
 from task_engine import start_task, checkpoint as task_checkpoint, finish_task, get_task, recent_tasks, stats as task_stats, latest_incomplete
 from provider_engine import record as record_provider_event, recent_health, rank_models, summary as provider_health_summary
+from provider_models import (
+    configured_model as provider_configured_model,
+    live_synthesis_target as provider_live_synthesis_target,
+    status as provider_models_status,
+)
 from artifact_engine import write_artifact, list_artifacts, inspect_text
 from document_engine import extract_document, status as document_engine_status
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
@@ -245,12 +250,12 @@ OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/ap
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
 
-FAST_MODEL = os.getenv("RONN_FAST_MODEL", "openai/gpt-oss-20b").strip()
-SMART_MODEL = os.getenv("RONN_SMART_MODEL", "openai/gpt-oss-120b").strip()
-CREATOR_MODEL = os.getenv("RONN_CREATOR_MODEL", "qwen/qwen3.6-27b").strip()
-VISION_MODEL = os.getenv("RONN_VISION_MODEL", "qwen/qwen3.6-27b").strip()
-LIVE_MODEL = os.getenv("RONN_LIVE_MODEL", "groq/compound-mini").strip()
-RESEARCH_MODEL = os.getenv("RONN_RESEARCH_MODEL", "groq/compound").strip()
+FAST_MODEL = provider_configured_model("RONN_FAST_MODEL", "fast", API_BASE)
+SMART_MODEL = provider_configured_model("RONN_SMART_MODEL", "smart", API_BASE)
+CREATOR_MODEL = provider_configured_model("RONN_CREATOR_MODEL", "creator", API_BASE)
+VISION_MODEL = provider_configured_model("RONN_VISION_MODEL", "vision", API_BASE)
+LIVE_MODEL = provider_configured_model("RONN_LIVE_MODEL", "live", API_BASE)
+RESEARCH_MODEL = provider_configured_model("RONN_RESEARCH_MODEL", "research", API_BASE)
 
 PUBLIC_MODE = os.getenv("RONN_PUBLIC_MODE", "false").strip().lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RONN_RATE_LIMIT_PER_MINUTE", "10"))
@@ -1570,10 +1575,6 @@ def request_payload(model, route, messages, max_tokens, stream=True):
     payload = {"model":model,"messages":messages,"stream":stream,"max_tokens":max_tokens}
     reasoning_effort=r23_reasoning_effort_for_route(route)
 
-    if model in {"groq/compound","groq/compound-mini"}:
-        payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
-        return payload
-
     if model in OR_ENSEMBLE_MODELS:
         payload["temperature"] = 0.45 if model != OR_CRITIC_MODEL else 0.3
         # OpenRouter normalizes reasoning effort for supported thinking models.
@@ -1616,8 +1617,6 @@ def provider_for_model(model: str):
 def cloud_request(model, route, messages, max_tokens, stream=True):
     base_url, api_key, provider = provider_for_model(model)
     headers = {"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
-    if provider == "groq" and model in {"groq/compound","groq/compound-mini"}:
-        headers["Groq-Model-Version"] = "latest"
     if provider == "openrouter":
         headers["X-Title"] = "RONN"
     started = time.time()
@@ -1968,7 +1967,7 @@ def looks_like_internal_tool_payload(text: str) -> bool:
 def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None, project_id: str=""):
     filt = ThinkFilter()
     full = ""
-    _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} or model in {"groq/compound","groq/compound-mini"}
+    _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-recovered","knowledge-gap-rescue"}
     _gap_buffer = r23_gap_should_buffer(original_message, profile, already_live=_guard_live, has_images=False)
     _gap_prefix = ""
     _gap_released = not _gap_buffer
@@ -2083,13 +2082,14 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
         yield json.dumps({"token":full}) + "\n"
         _gap_released = True
 
-    # Never surface model-generated tool protocol. Recover with a real full Compound
-    # completion when live evidence/tool execution was requested.
+    # Never surface model-generated tool protocol. If live evidence was already
+    # gathered, retry synthesis with the same evidence-bound main model rather
+    # than relying on a retired provider-side search system.
     if _guard_live and looks_like_internal_tool_payload(full):
         try:
             _recovery_messages = retry_messages or []
-            if _recovery_messages and groq_key_loaded():
-                recovered, used_model = nonstream_with_fallback(RESEARCH_MODEL, "research", _recovery_messages, 1100)
+            if _recovery_messages:
+                recovered, used_model = nonstream_with_fallback(model, "web-synthesis", _recovery_messages, 1100)
                 recovered=(recovered or "").strip()
                 if recovered and not looks_like_internal_tool_payload(recovered):
                     full=recovered
@@ -2488,12 +2488,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 "Executed: " + ", ".join(_tool_run.get("executed") or ["evidence tool"])
             )
         elif _r20.get("needs_live"):
-            task_checkpoint(request_id, "Tool hub", "blocked", "Tool hub returned no live evidence; Compound fallback remains available.")
+            task_checkpoint(request_id, "Tool hub", "blocked", "Tool hub returned no live evidence; RONN will preserve the evidence limitation instead of substituting model memory.")
     except Exception as _tool_exc:
         _tool_run["errors"] = [_tool_exc.__class__.__name__]
         if _r20.get("needs_live"):
             try:
-                task_checkpoint(request_id, "Tool hub", "blocked", "RONN tool hub unavailable; using Compound built-in live tools.")
+                task_checkpoint(request_id, "Tool hub", "blocked", "RONN tool hub unavailable; current claims will remain explicitly unverified.")
             except Exception:
                 pass
 
@@ -2526,20 +2526,21 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             pass
 
     # Tools gather evidence; the R23 main brain keeps ownership of synthesis.
-    # Only if retrieval completely fails do we fall back to Compound's built-in web tools.
+    # A failed retrieval must never be relabeled as live research. Keep a capable
+    # synthesis model but switch to research-limited so prompts/UI/audits preserve
+    # the missing-evidence boundary.
     if _r20.get("needs_live"):
-        if _tool_run.get("evidence"):
-            if not _r20.get("r23"):
-                if groq_key_loaded():
-                    model, route = SMART_MODEL, "web-synthesis"
-                elif openrouter_key_loaded():
-                    model, route = OR_QWEN_MODEL, "web-synthesis"
-                elif nvidia_key_loaded():
-                    model, route = NVIDIA_MODEL, "web-synthesis"
-            else:
-                route = "web-synthesis"
-        elif groq_key_loaded():
-            model, route = RESEARCH_MODEL, "research"
+        model, route = provider_live_synthesis_target(
+            has_evidence=bool(_tool_run.get("evidence")),
+            r23=bool(_r20.get("r23")),
+            current_model=model,
+            groq=groq_key_loaded(),
+            openrouter=openrouter_key_loaded(),
+            nvidia=nvidia_key_loaded(),
+            smart_model=SMART_MODEL,
+            openrouter_model=OR_QWEN_MODEL,
+            nvidia_model=NVIDIA_MODEL,
+        )
 
     messages = build_messages(owner, body, profile, _r20)
     _evidence_contract = (_tool_run.get("evidence_contract") or {}) if _r20.get("r23") else {}
@@ -2574,7 +2575,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         messages[0]["content"] += (
             "\nFor current or research-dependent claims, answer from the retrieved web evidence when it is present. "
             "Treat SOURCE R# [READ PAGE] as retrieved page evidence and SOURCE R# [SEARCH SNIPPET ONLY] as discovery evidence only. "
-            "Do not describe, simulate, request, or print a tool call. If no retrieved evidence is present and the provider supports built-in live tools, it may use them internally. "
+            "Do not describe, simulate, request, or print a tool call. If no retrieved evidence is present, do not substitute model memory for current facts; state the retrieval limitation. "
             "Never expose tool-call JSON, tool names, internal arguments, executed-tools data, or hidden reasoning to the user. "
             "Return only the normal user-facing answer and include useful source links for current claims."
         )
@@ -2628,7 +2629,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "cognitive_os":_os_state,
         "strategy":_strategy,
         "reliability":reliability_flags(body.message, body.files),
-        "evidence_mode":"live" if _r20.get("needs_live") or route in {"live","research","max","tools","r20-current","r20-research"} else "model",
+        "evidence_mode":"live" if bool(_tool_run.get("evidence")) else "model",
         "response_length":_length_policy,
         "reasoning_budget":{
             "depth":_depth,
@@ -3288,6 +3289,14 @@ def capabilities():
         "r23_long_context": r23_context_status(),
         "r23_quality_lab": r23_quality_status(_quality_lab_candidates("main")),
         "r23_release_ready": r23_eval_run().get("all_11_ready",False),
+        "provider_model_compatibility": provider_models_status(API_BASE,{
+            "fast":FAST_MODEL,
+            "smart":SMART_MODEL,
+            "creator":CREATOR_MODEL,
+            "vision":VISION_MODEL,
+            "live":LIVE_MODEL,
+            "research":RESEARCH_MODEL,
+        }),
         "r7_capability_manifest": capability_manifest(),
         "core_api_v1": True,
         "core_conversation_store": True,
@@ -3296,8 +3305,9 @@ def capabilities():
         "skills": sorted([p.name for p in (BASE / "skills").glob("*.md")]),
         "tools": TOOL_CATALOG,
         "tool_routes": {
-            "live": "groq/compound-mini",
-            "research": "groq/compound",
+            "live": LIVE_MODEL,
+            "research": RESEARCH_MODEL,
+            "retrieval": "RONN SearXNG + reader evidence plane",
             "web_search": True,
             "visit_website": True,
             "code_execution": True,
