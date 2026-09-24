@@ -6,6 +6,7 @@ import time
 import threading
 import uuid
 import hashlib
+import hmac
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Generator
@@ -342,9 +343,80 @@ def client_key(request: Request):
         return request.client.host
     return "unknown"
 
+
+_LEGACY_PUBLIC_API_PATHS = {
+    "/api/capabilities",
+    "/api/cognitive-os",
+    "/api/evaluation",
+    "/api/provider-health",
+    "/api/r23/capabilities",
+    "/api/r23/evaluation",
+    "/api/status",
+    "/api/studio/status",
+    "/api/r5-benchmarks",
+    "/api/intelligence/r6-benchmarks",
+    "/api/intelligence/r7-benchmarks",
+}
+
+
+def _core_access_token() -> str:
+    return (os.getenv("RONN_CORE_TOKEN") or "").strip()
+
+
+def _core_bearer_matches(request: Request) -> bool:
+    expected=_core_access_token()
+    if not expected:
+        return False
+    auth=(request.headers.get("authorization") or "").strip()
+    if not auth.lower().startswith("bearer "):
+        return False
+    supplied=auth[7:].strip()
+    return bool(supplied) and hmac.compare_digest(supplied,expected)
+
+
+def _owner_session_matches(request: Request, owner: str | None = None) -> bool:
+    token=(
+        request.headers.get("x-ronn-op-session")
+        or request.cookies.get("ronn_op")
+        or ""
+    ).strip()
+    if not token:
+        return False
+    try:
+        from ecosystem_store import verify_owner_session
+        return bool(verify_owner_session(token,owner))
+    except Exception:
+        return False
+
+
+def _legacy_private_route(path: str) -> bool:
+    path=str(path or "")
+    return (
+        path.startswith("/api/")
+        and not path.startswith("/api/v1/")
+        and path not in _LEGACY_PUBLIC_API_PATHS
+    )
+
+
+def _legacy_owner_authorized(request: Request) -> bool:
+    if not _core_access_token():
+        return True
+    if _core_bearer_matches(request):
+        return True
+    claimed=(request.headers.get("x-ronn-account") or "").strip()
+    owner=claimed if re.fullmatch(r"[A-Za-z0-9_-]{8,80}",claimed) else None
+    return _owner_session_matches(request,owner)
+
+
 @app.middleware("http")
 async def public_guard(request: Request, call_next):
     if request.url.path.startswith("/api/"):
+        if _legacy_private_route(request.url.path) and not _legacy_owner_authorized(request):
+            return JSONResponse(
+                {"detail":"This device needs to reconnect to RONN."},
+                status_code=401,
+            )
+
         cl = request.headers.get("content-length")
         if cl:
             try:
@@ -456,11 +528,19 @@ except Exception as _r21_gate_exc:
 
 def owner_id(request: Request):
     # R10 separates account identity from device/client identity so desktop and mobile can sync.
-    # In this personal build clients explicitly use the same non-secret account id (ronn_primary).
-    # A future public multi-user deployment should replace this header trust with real authenticated accounts.
+    # When Core auth is configured, a caller may select a shared account only after proving
+    # the existing bearer/owner session. This prevents X-RONN-Account header spoofing.
     account = (request.headers.get("x-ronn-account") or "").strip()
     if re.fullmatch(r"[A-Za-z0-9_-]{8,80}", account):
-        return account
+        core_token=_core_access_token()
+        path=str(request.url.path or "")
+        if (
+            not core_token
+            or _core_bearer_matches(request)
+            or _owner_session_matches(request,account)
+            or path in {"/api/v1/owner/unlock","/api/v1/owner/recovery-unlock"}
+        ):
+            return account
     raw = (request.headers.get("x-ronn-client") or request.headers.get("x-nova-client") or "legacy").strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", raw):
         return "legacy"
