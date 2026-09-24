@@ -202,7 +202,7 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         llm=llm,
         browser=browser,
         tools=tools,
-        use_vision="auto",
+        use_vision=False,
         use_thinking=False,
         use_judge=False,
         enable_planning=False,
