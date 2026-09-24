@@ -2092,6 +2092,36 @@ jobs:
           assert reqs["interactive_browser_execution"]["met"] is False
           assert fallback["evidence_sufficiency"]["sufficient"] is False
 
+          # If the safe reader itself fails while Browser Use is unavailable,
+          # do not immediately retry the exact same reader a second time.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          def failing_collect(urls):
+              calls["collect"] += 1
+              raise RuntimeError("reader unavailable")
+          runtime_mod.collect_pages=failing_collect
+          runtime_mod.browser_use_status=lambda: {
+              "ready":False,"installed":False,"enabled":False,"configured":False
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":False,"reason":"should_not_run"}
+          )
+          try:
+              failed_reader=runtime_mod.execute(
+                  "ci","browser-reader-failure",
+                  "Open https://example.com and click More",[],decision
+              )
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["collect"] == 1
+          assert calls["interactive"] == 0
+          assert any(x.startswith("browser:") for x in failed_reader["errors"])
+          assert "browser_fallback" not in failed_reader["planned"]
+
           # Configured/ready can still fail at launch/runtime. In that case,
           # Browser Use is attempted once, then the safe reader supplies
           # read-only evidence without claiming the click succeeded.
