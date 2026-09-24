@@ -17,6 +17,7 @@ _DATABASE_URL=(os.getenv("DATABASE_URL") or "").strip()
 _SYNC_SECONDS=max(20,int(os.getenv("RONN_CLOUD_SYNC_SECONDS","45") or "45"))
 _MAX_EVENTS_PER_OWNER=max(200,min(10000,int(os.getenv("RONN_CLOUD_MAX_EVENTS_PER_OWNER","2000") or "2000")))
 _EVENT_RETENTION_SECONDS=max(7*86400,min(365*86400,int(os.getenv("RONN_CLOUD_EVENT_RETENTION_DAYS","90") or "90")*86400))
+_MAX_SNAPSHOTS_PER_PROJECT=max(5,min(100,int(os.getenv("RONN_SNAPSHOT_MAX_PER_PROJECT","20") or "20")))
 _STOP=threading.Event()
 _THREAD=None
 _LAST={}
@@ -127,6 +128,29 @@ def _stable_bytes(path: Path):
         try: os.unlink(tmp)
         except OSError: pass
 
+def _prune_cloud_snapshot_rows(c):
+    rows=c.execute(
+        "SELECT name,updated_at FROM ronn_cloud_files WHERE name LIKE %s",
+        ("snapshots/%",),
+    ).fetchall()
+    groups={}
+    for name,updated in rows:
+        rel=_safe_relative_name(str(name))
+        parts=PurePosixPath(rel).parts if rel else ()
+        if len(parts)<4 or parts[0]!="snapshots":
+            continue
+        parent="/".join(parts[:-1])
+        groups.setdefault(parent,[]).append((int(updated or 0),rel))
+    removed=0
+    for items in groups.values():
+        items.sort(key=lambda x:(x[0],x[1]),reverse=True)
+        for _updated,rel in items[_MAX_SNAPSHOTS_PER_PROJECT:]:
+            c.execute("DELETE FROM ronn_cloud_files WHERE name=%s",(rel,))
+            _LAST.pop(rel,None)
+            removed+=1
+    return removed
+
+
 def restore_directory(data_dir):
     """Restore durable database/json files before RONN starts using them."""
     root=Path(data_dir)
@@ -135,6 +159,7 @@ def restore_directory(data_dir):
     root.mkdir(parents=True,exist_ok=True)
     restored=0
     with _connect() as c:
+        _prune_cloud_snapshot_rows(c)
         rows=c.execute("SELECT name,sha256,payload,updated_at FROM ronn_cloud_files").fetchall()
     for name,sha,payload,updated in rows:
         rel=_safe_relative_name(str(name))
@@ -180,7 +205,10 @@ def snapshot_directory(data_dir):
                 (rel,sha,data,int(time.time())))
         _LAST[rel]=sha
         uploaded+=1
-    return {"configured":True,"uploaded":uploaded,"durable":True}
+    pruned_cloud=0
+    with _connect() as c:
+        pruned_cloud=_prune_cloud_snapshot_rows(c)
+    return {"configured":True,"uploaded":uploaded,"pruned_cloud_snapshots":pruned_cloud,"durable":True}
 
 def _prune_events(c, owner: str, now: int | None=None):
     now=int(time.time()) if now is None else int(now)
@@ -247,6 +275,7 @@ def status():
         "nested_snapshot_sync":True,
         "max_events_per_owner":_MAX_EVENTS_PER_OWNER,
         "event_retention_seconds":_EVENT_RETENTION_SECONDS,
+        "max_snapshots_per_project":_MAX_SNAPSHOTS_PER_PROJECT,
         "thread_alive":bool(_THREAD and _THREAD.is_alive()),
         "error":error,
     }
