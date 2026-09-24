@@ -263,6 +263,80 @@ jobs:
           print("core auth boundary: ok")
           PY
 
+      - name: R23 research relevance smoke
+        run: |
+          python - <<'PY'
+          import r23_research as rr
+
+          query="python asyncio taskgroup exception handling"
+          relevant={
+              "title":"Python asyncio TaskGroup exception handling",
+              "url":"https://example.dev/python/asyncio/taskgroup",
+              "snippet":"TaskGroup cancels sibling tasks and groups exceptions when async work fails.",
+          }
+          irrelevant_official={
+              "title":"Official tax documentation",
+              "url":"https://agency.gov/forms/reference",
+              "snippet":"Government forms, filing dates, and tax reference material.",
+          }
+          assert rr._source_score(query,relevant) > rr._source_score(query,irrelevant_official)
+
+          page=(
+              "General introduction with unrelated navigation and boilerplate.\n\n"
+              + ("Generic filler paragraph.\n\n"*20)
+              + "## TaskGroup exception handling\n"
+                "Python asyncio TaskGroup cancels sibling tasks when one task fails and "
+                "preserves the resulting exception information for the caller.\n\n"
+              + ("More unrelated footer text.\n\n"*10)
+          )
+          excerpt=rr._relevant_excerpt(query,page,1200)
+          assert "TaskGroup exception handling" in excerpt
+          assert "cancels sibling tasks" in excerpt
+
+          # Regression: a diverse page selected for reading may sit beyond the
+          # first N discovery rows. It still must reach R23 evidence.
+          old_search,old_read=rr.web_search,rr.web_read
+          calls={"n":0}
+          def fake_search(q,limit):
+              calls["n"]+=1
+              if calls["n"] <= 2:
+                  return [
+                      {
+                          "title":f"Alpha reference {calls['n']}-{i}",
+                          "url":f"https://same.example/item-{calls['n']}-{i}",
+                          "snippet":"alpha reference material",
+                      }
+                      for i in range(8)
+                  ]
+              return [
+                  {
+                      "title":f"Alpha independent source {i}",
+                      "url":f"https://independent{i}.example/alpha",
+                      "snippet":"alpha independent evidence",
+                  }
+                  for i in range(8)
+              ]
+          def fake_read(url,max_chars):
+              return {
+                  "url":url,
+                  "title":"Read alpha page",
+                  "markdown":"Alpha evidence from the successfully read page.\n\nRelevant alpha details.",
+              }
+          rr.web_search,rr.web_read=fake_search,fake_read
+          try:
+              result=rr.research("alpha",depth="deep")
+          finally:
+              rr.web_search,rr.web_read=old_search,old_read
+
+          assert result["ok"] is True
+          assert result["read_count"] >= 2
+          read_urls={s["url"] for s in result["sources"] if s.get("read")}
+          assert any("independent" in url for url in read_urls)
+          assert "Alpha evidence from the successfully read page." in result["evidence"]
+          assert rr.status()["version"] == "R23-RESEARCH-3"
+          print("r23 research relevance/evidence preservation: ok")
+          PY
+
       - name: Reader resilience smoke
         run: |
           python - <<'PY'
