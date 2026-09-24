@@ -99,6 +99,51 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Rate limiter hardening smoke
+        run: |
+          python - <<'PY'
+          import time
+          from collections import deque
+          from starlette.requests import Request
+          import app
+
+          def request(xff):
+              return Request({
+                  "type":"http",
+                  "http_version":"1.1",
+                  "method":"POST",
+                  "scheme":"https",
+                  "path":"/api/v1/chat",
+                  "raw_path":b"/api/v1/chat",
+                  "query_string":b"",
+                  "headers":[(b"x-forwarded-for",xff.encode())],
+                  "client":("10.0.0.10",12345),
+                  "server":("testserver",443),
+              })
+
+          # Ignore spoofed left-side prefixes and use the rightmost public hop.
+          assert app.client_key(request("1.1.1.1, 8.8.8.8")) == "8.8.8.8"
+          # Skip private proxy hops while walking back toward the real public client.
+          assert app.client_key(request("1.1.1.1, 10.0.0.2")) == "1.1.1.1"
+
+          now=time.time()
+          app._rate_hits.clear()
+          for i in range(app.RATE_LIMIT_MAX_KEYS + 250):
+              app._rate_hits[f"stale-{i}"]=deque([now-120])
+          app._rate_hits["live"]=deque([now])
+          app._prune_rate_hits(now)
+          assert "live" in app._rate_hits
+          assert len(app._rate_hits) <= app.RATE_LIMIT_MAX_KEYS
+
+          # Overflow cleanup must evict oldest active identities, not grow forever.
+          app._rate_hits.clear()
+          for i in range(app.RATE_LIMIT_MAX_KEYS + 50):
+              app._rate_hits[f"k-{i}"]=deque([now+i/100000.0])
+          app._prune_rate_hits(now)
+          assert len(app._rate_hits) == app.RATE_LIMIT_MAX_KEYS
+          print("rate limiter hardening: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
