@@ -245,7 +245,82 @@ jobs:
               app._rate_hits[f"k-{i}"]=deque([now+i/100000.0])
           app._prune_rate_hits(now)
           assert len(app._rate_hits) == app.RATE_LIMIT_MAX_KEYS
+
+          # Owner/recovery reconnect attempts are always throttled, even when
+          # normal chat runs in private mode. Keep their bucket isolated.
+          app._rate_hits.clear()
+          auth_key="auth:8.8.8.8"
+          for _ in range(app.OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE):
+              assert app._consume_rate_limit(auth_key,app.OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE,now) is True
+          assert app._consume_rate_limit(auth_key,app.OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE,now) is False
+          assert app._consume_rate_limit("expensive:8.8.8.8",1,now) is True
           print("rate limiter hardening: ok")
+          PY
+
+      - name: Runtime state guard smoke
+        run: |
+          python - <<'PY'
+          import time
+          import app
+          import r20_web_tools
+
+          # Expired Studio plans must disappear even if no newer plan was made,
+          # and a burst of pending plans must stay bounded.
+          now=time.time()
+          with app._studio_plan_lock:
+              app._studio_plans.clear()
+              app._studio_plans["expired"]={
+                  "owner":"ci","plan":{},"task":"x",
+                  "created_at":now-app.STUDIO_PLAN_TTL_SECONDS-1,
+              }
+              for i in range(app.STUDIO_PLAN_MAX_PENDING+25):
+                  app._studio_plans[f"p-{i}"]={
+                      "owner":"ci","plan":{},"task":"x",
+                      "created_at":now-(app.STUDIO_PLAN_MAX_PENDING+25-i)/1000.0,
+                  }
+              app._prune_studio_plans_locked(now)
+              assert "expired" not in app._studio_plans
+              assert len(app._studio_plans) == app.STUDIO_PLAN_MAX_PENDING
+              assert "p-0" not in app._studio_plans
+              assert f"p-{app.STUDIO_PLAN_MAX_PENDING+24}" in app._studio_plans
+              app._studio_plans.clear()
+
+          # Search health must not call a reachable-but-unusable 4xx service healthy.
+          original_get=r20_web_tools.requests.get
+          class FakeResponse:
+              def __init__(self,status,data=None):
+                  self.status_code=status
+                  self.ok=200 <= status < 400
+                  self._data=data or {}
+              def json(self):
+                  return self._data
+
+          try:
+              def bad_search(url,*args,**kwargs):
+                  if url.endswith("/health"):
+                      return FakeResponse(200,{"ok":True})
+                  return FakeResponse(403)
+              r20_web_tools.requests.get=bad_search
+              r20_web_tools._HEALTH_CACHE["at"]=0
+              r20_web_tools._HEALTH_CACHE["value"]={}
+              unhealthy=r20_web_tools.status(force=True)
+              assert unhealthy["searxng"] is False
+              assert unhealthy["crawl4ai"] is True
+
+              def good_services(url,*args,**kwargs):
+                  if url.endswith("/health"):
+                      return FakeResponse(200,{"ok":True})
+                  return FakeResponse(200)
+              r20_web_tools.requests.get=good_services
+              healthy=r20_web_tools.status(force=True)
+              assert healthy["searxng"] is True
+              assert healthy["crawl4ai"] is True
+          finally:
+              r20_web_tools.requests.get=original_get
+              r20_web_tools._HEALTH_CACHE["at"]=0
+              r20_web_tools._HEALTH_CACHE["value"]={}
+
+          print("runtime state guards: ok")
           PY
 
       - name: Core auth boundary smoke
