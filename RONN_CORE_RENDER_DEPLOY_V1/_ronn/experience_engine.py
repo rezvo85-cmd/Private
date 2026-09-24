@@ -61,14 +61,24 @@ def finish_run(request_id,latency,response_chars,status="complete",model=None,ro
             c.execute("UPDATE runs SET latency=?,response_chars=?,status=?,finished=? WHERE request_id=?",
                       (float(latency),int(response_chars),status,time.time(),request_id))
 
-def add_feedback(request_id,rating,note=""):
+def add_feedback(request_id,rating,note="",owner=None):
+    """Record feedback only for an existing run, optionally enforcing ownership."""
     rating=1 if int(rating)>0 else -1
+    request_id=str(request_id)
     with _db() as c:
+        if owner is None:
+            run=c.execute("SELECT * FROM runs WHERE request_id=?",(request_id,)).fetchone()
+        else:
+            run=c.execute(
+                "SELECT * FROM runs WHERE request_id=? AND owner=?",
+                (request_id,str(owner)),
+            ).fetchone()
+        if not run:
+            return None
         c.execute("""INSERT INTO feedback(request_id,rating,note,created) VALUES(?,?,?,?)
         ON CONFLICT(request_id) DO UPDATE SET rating=excluded.rating,note=excluded.note,created=excluded.created""",
         (request_id,rating,(note or "")[:1200],time.time()))
-        run=c.execute("SELECT * FROM runs WHERE request_id=?",(request_id,)).fetchone()
-    return dict(run) if run else None
+    return dict(run)
 
 def observed_model_scores():
     with _db() as c:
