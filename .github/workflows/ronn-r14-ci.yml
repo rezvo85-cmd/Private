@@ -2148,8 +2148,11 @@ jobs:
           assert st["lazy_loaded"] is True
 
           # Constructor-only smoke: no network, LLM call, or browser process.
+          assert adapter.DEFAULT_MODEL == "openai/gpt-oss-120b"
+          assert st["model"] == "openai/gpt-oss-120b"
+
           llm=ChatGroq(
-              model="meta-llama/llama-4-maverick-17b-128e-instruct",
+              model="openai/gpt-oss-120b",
               api_key="ci-not-used",
               temperature=0.0,
               max_retries=1,
