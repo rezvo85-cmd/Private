@@ -156,12 +156,38 @@ def contradiction_scan(texts):
     return conflicts[:12]
 
 
+def internal_payload_signal(answer: str):
+    raw=(answer or '').strip()
+    low=raw.lower()
+    if not raw:
+        return {'detected':False,'reason':''}
+    jsonish=raw.startswith('{') or raw.startswith('[') or raw.startswith('```json')
+    protocol=(
+        ('"tool"' in low or "'tool'" in low or 'tool_call' in low)
+        and ('"args"' in low or "'args'" in low or '"arguments"' in low or "'arguments'" in low)
+    )
+    planner=bool(
+        jsonish and re.search(
+            r'(?i)["\'](?:queries|search_queries|searches|query_plan|search_plan|search_query|search_urls)["\']\s*:',
+            raw
+        )
+    )
+    if protocol:
+        return {'detected':True,'reason':'tool_protocol'}
+    if planner:
+        return {'detected':True,'reason':'search_planner_json'}
+    return {'detected':False,'reason':''}
+
+
 def answer_audit(message: str, answer: str, profile: str='', runtime_verified=False, evidence_mode='model'):
     completion=completion_claim_scan(answer)
     current=current_information_risk(message)
     domain=domain_risk(message)
     coverage=requirement_coverage(message,answer)
     warnings=[]
+    internal=internal_payload_signal(answer)
+    if internal['detected']:
+        warnings.append('Internal tool/search planning payload appeared in the visible answer.')
     if completion and not runtime_verified:
         warnings.append('Answer contains completion/test language without a runtime-verification flag.')
     if current['time_sensitive'] and evidence_mode not in ('live','research','tools'):
@@ -180,6 +206,7 @@ def answer_audit(message: str, answer: str, profile: str='', runtime_verified=Fa
         'domain_risk':domain,
         'runtime_verified':bool(runtime_verified),
         'evidence_mode':evidence_mode,
+        'internal_payload':internal,
         'audited_at':int(time.time()),
     }
 

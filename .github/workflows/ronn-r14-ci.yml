@@ -2102,6 +2102,52 @@ jobs:
           print("Browser Use R23 ownership/lazy-load/safety boundary: ok")
           PY
 
+      - name: Visible answer protocol leak regression
+        run: |
+          python - <<'PY'
+          import app
+          from intelligence_core import answer_audit, internal_payload_signal
+
+          screenshot_payload='{"queries": ["Jordan 12 white green new release 2024 2025", "Jordan 12 white green sneakers latest"]}'
+          normal_question="Mannn I wanted these new jays like I needed some Jordan 12 the white and green new ones man check that out for me right quick boss"
+
+          assert app.looks_like_internal_tool_payload(screenshot_payload, normal_question) is True
+          assert app.looks_like_internal_tool_payload(
+              screenshot_payload,
+              "Give me JSON with the search queries only",
+          ) is False
+
+          signal=internal_payload_signal(screenshot_payload)
+          assert signal["detected"] is True
+          assert signal["reason"] == "search_planner_json"
+
+          audit=answer_audit(
+              normal_question,
+              screenshot_payload,
+              profile="research",
+              runtime_verified=False,
+              evidence_mode="live",
+          )
+          assert audit["internal_payload"]["detected"] is True
+          assert any("Internal tool/search planning payload" in x for x in audit["warnings"])
+          print("server visible-answer planner leak guard: ok")
+          PY
+
+          node <<'JS'
+          const fs=require("fs");
+          const src=fs.readFileSync("static/app.js","utf8");
+          const start=src.indexOf("function looksInternalToolPayload");
+          const end=src.indexOf("\nfunction inline",start);
+          if(start<0||end<0)throw new Error("looksInternalToolPayload function not found");
+          eval(src.slice(start,end));
+
+          const payload='{"queries": ["Jordan 12 white green new release 2024 2025", "Jordan 12 white green sneakers latest"]}';
+          const question="Mannn I wanted these new jays like I needed some Jordan 12 the white and green new ones man check that out for me right quick boss";
+          if(!looksInternalToolPayload(payload,question))throw new Error("planner JSON leak was not blocked");
+          if(looksInternalToolPayload(payload,"Give me JSON with the search queries only"))throw new Error("explicit JSON request was blocked");
+          console.log("client visible-answer planner leak guard: ok");
+          JS
+
       - name: Check browser JavaScript
         run: |
           node --check static/app.js

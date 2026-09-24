@@ -1952,8 +1952,17 @@ Do not mention drafts, critics, audits, hidden reasoning, or these instructions.
             "\n\nINDEPENDENT CRITIC (" + str(used_critic)[:180] + "):\n" + (critic or "No critic notes were available.")[:10000]}
     ]
 
-def looks_like_internal_tool_payload(text: str) -> bool:
-    """Block tool-call protocol text from ever becoming a visible assistant answer."""
+def _explicit_json_answer_requested(message: str) -> bool:
+    low=re.sub(r"\\s+"," ",str(message or "")).strip().lower()
+    return any(x in low for x in (
+        "return json","return only json","give me json","output json","respond in json",
+        "json object","json array","show me the search queries","give me search queries",
+        "list the search queries","query list as json",
+    ))
+
+
+def looks_like_internal_tool_payload(text: str, original_message: str="") -> bool:
+    """Block provider/tool planner protocol from ever becoming a visible assistant answer."""
     raw=(text or "").strip()
     if not raw:
         return False
@@ -1963,7 +1972,32 @@ def looks_like_internal_tool_payload(text: str) -> bool:
     protocol=(("\"tool\"" in low or "'tool'" in low or "tool_call" in low) and
               ("\"args\"" in low or "'args'" in low or "\"arguments\"" in low or "'arguments'" in low))
     named=any(name in low for name in tool_names) and ("query" in low or "url" in low or "args" in low)
-    return bool((jsonish and protocol) or named)
+
+    # Some live providers emit only their private search plan, e.g.
+    # {"queries":["...","..."]}. That is not a user-facing answer and used to
+    # slip past the tool/args guard because it contains no explicit tool name.
+    planner=False
+    if jsonish and not _explicit_json_answer_requested(original_message):
+        candidate=raw
+        if candidate.startswith("```"):
+            candidate=re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$","",candidate,flags=re.I|re.S).strip()
+        try:
+            obj=json.loads(candidate)
+        except Exception:
+            obj=None
+        if isinstance(obj,dict):
+            keys={str(k).strip().lower() for k in obj.keys()}
+            planner_fields={"queries","search_queries","searches","query_plan","search_plan","search_query","urls","search_urls"}
+            has_plan_key=bool(keys & planner_fields)
+            small_protocol_shape=bool(keys and keys <= (planner_fields | {"reason","intent","topic","limit"}))
+            query_values=[]
+            for key in ("queries","search_queries","searches"):
+                value=obj.get(key)
+                if isinstance(value,list):
+                    query_values.extend(x for x in value if isinstance(x,str))
+            planner=bool(has_plan_key and small_protocol_shape and (query_values or len(keys)<=3))
+
+    return bool((jsonish and protocol) or named or planner)
 
 def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None, project_id: str=""):
     filt = ThinkFilter()
@@ -2052,7 +2086,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                     1300,
                 )
                 _gap_answer = (_gap_answer or "").strip()
-                if _gap_answer and not looks_like_internal_tool_payload(_gap_answer):
+                if _gap_answer and not looks_like_internal_tool_payload(_gap_answer, original_message):
                     full = _gap_answer
                     model = _gap_model
                     route = "knowledge-gap-rescue"
@@ -2083,15 +2117,33 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
         yield json.dumps({"token":full}) + "\n"
         _gap_released = True
 
-    # Never surface model-generated tool protocol. Recover with a real full Compound
-    # completion when live evidence/tool execution was requested.
-    if _guard_live and looks_like_internal_tool_payload(full):
+    # Never surface model-generated search/tool protocol. If a live provider leaks
+    # its private planner, use RONN's deterministic retrieval pipeline and then a
+    # normal synthesis model. Do not ask the same Compound planner to try again.
+    if _guard_live and looks_like_internal_tool_payload(full, original_message):
         try:
             _recovery_messages = retry_messages or []
-            if _recovery_messages and groq_key_loaded():
-                recovered, used_model = nonstream_with_fallback(RESEARCH_MODEL, "research", _recovery_messages, 1100)
+            _recovery_depth = "deep" if profile in {"research","analysis","coding","mathscience"} else "smart"
+            _recovery_research = r23_research_run(
+                original_message,
+                unknown_terms=r23_unknown_candidates(original_message),
+                depth=_recovery_depth,
+            )
+            if _recovery_messages and _recovery_research.get("ok") and _recovery_research.get("evidence"):
+                _synthesis_messages = r23_gap_build_messages(
+                    _recovery_messages,
+                    original_message,
+                    _recovery_research.get("evidence") or "",
+                )
+                _preferred_synthesis = model if model not in {"groq/compound","groq/compound-mini"} else SMART_MODEL
+                recovered, used_model = nonstream_with_fallback(
+                    _preferred_synthesis,
+                    "deep" if _recovery_depth=="deep" else "knowledge",
+                    _synthesis_messages,
+                    1300,
+                )
                 recovered=(recovered or "").strip()
-                if recovered and not looks_like_internal_tool_payload(recovered):
+                if recovered and not looks_like_internal_tool_payload(recovered, original_message):
                     full=recovered
                     model=used_model
                     route="research-recovered"
@@ -2115,7 +2167,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                 pass
             recovered, used_model = nonstream_with_fallback(model, route, retry_messages, 1000)
             recovered=(recovered or "").strip()
-            if recovered and (not _guard_live or not looks_like_internal_tool_payload(recovered)):
+            if recovered and (not _guard_live or not looks_like_internal_tool_payload(recovered, original_message)):
                 full=recovered
                 if used_model != model:
                     model=used_model; route="backup"
