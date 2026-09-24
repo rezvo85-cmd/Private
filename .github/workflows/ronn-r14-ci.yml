@@ -323,6 +323,127 @@ jobs:
           print("runtime state guards: ok")
           PY
 
+      - name: Vault durability and SQLite backup smoke
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          import tempfile
+          from pathlib import Path
+
+          import ecosystem_store as store
+
+          old_db=store.DB
+          old_data=store.DATA
+          old_backups=store.BACKUPS
+          old_vault_key=store.VAULT_KEY_FILE
+          old_max=store.MAX_BACKUPS
+          old_render=os.environ.get("RENDER")
+          old_render_id=os.environ.get("RENDER_SERVICE_ID")
+          old_master=os.environ.get("RONN_VAULT_MASTER_KEY")
+          old_session=os.environ.get("RONN_SESSION_SIGNING_KEY")
+          old_core=os.environ.get("RONN_CORE_TOKEN")
+
+          with tempfile.TemporaryDirectory() as td:
+              root=Path(td)
+              data=root/"data"
+              backups=data/"backups"
+              data.mkdir()
+              backups.mkdir()
+              store.DATA=data
+              store.DB=data/"ecosystem_v1.sqlite3"
+              store.BACKUPS=backups
+              store.VAULT_KEY_FILE=data/"vault.key"
+              store.MAX_BACKUPS=3
+
+              try:
+                  # Render Vault must derive a stable, separate Fernet key from
+                  # an existing stable server secret.
+                  os.environ["RENDER"]="true"
+                  os.environ.pop("RENDER_SERVICE_ID",None)
+                  os.environ.pop("RONN_VAULT_MASTER_KEY",None)
+                  os.environ.pop("RONN_SESSION_SIGNING_KEY",None)
+                  os.environ["RONN_CORE_TOKEN"]="ci-stable-server-secret"
+
+                  first=store._vault_key()
+                  assert store.vault_key_status()["durable"] is True
+                  assert store.vault_key_status()["source"] == "server_secret_derived"
+                  item=store.vault_put("ci-owner","Durable note","persists across key-file loss")
+                  assert store.vault_get("ci-owner",item["id"])["text"] == "persists across key-file loss"
+
+                  # Simulate an ephemeral filesystem loss/redeploy. The derived
+                  # key must be identical without relying on vault.key.
+                  store.VAULT_KEY_FILE.unlink(missing_ok=True)
+                  second=store._vault_key()
+                  assert first == second
+                  assert store.vault_get("ci-owner",item["id"])["text"] == "persists across key-file loss"
+
+                  # On Render with no stable secret, refuse a disposable Vault key.
+                  store.VAULT_KEY_FILE.unlink(missing_ok=True)
+                  os.environ.pop("RONN_CORE_TOKEN",None)
+                  unavailable=store.vault_key_status()
+                  assert unavailable["available"] is False
+                  assert unavailable["durable"] is False
+                  try:
+                      store._vault_key()
+                      raise AssertionError("Render accepted an ephemeral Vault key")
+                  except RuntimeError:
+                      pass
+
+                  # Restore a stable server secret for the remaining DB work.
+                  os.environ["RONN_CORE_TOKEN"]="ci-stable-server-secret"
+                  store._vault_key()
+
+                  # Keep a WAL writer open with committed rows, then verify that
+                  # backup_all captures the complete SQLite state via sqlite backup.
+                  conn=sqlite3.connect(store.DB)
+                  conn.execute("PRAGMA journal_mode=WAL")
+                  conn.execute("CREATE TABLE IF NOT EXISTS ci_rows(id INTEGER PRIMARY KEY, value TEXT)")
+                  conn.execute("INSERT INTO ci_rows(value) VALUES('wal-visible')")
+                  conn.commit()
+
+                  first_backup=store.backup_all("ci")
+                  assert first_backup["consistent_sqlite_snapshot"] is True
+                  assert not first_backup["errors"]
+                  backup_db=Path(first_backup["folder"])/store.DB.name
+                  with sqlite3.connect(backup_db) as snap:
+                      assert snap.execute("SELECT value FROM ci_rows").fetchone()[0] == "wal-visible"
+                  conn.close()
+
+                  # Backup history must stay bounded and names must not collide.
+                  names={Path(first_backup["folder"]).name}
+                  for _ in range(5):
+                      b=store.backup_all("ci")
+                      names.add(Path(b["folder"]).name)
+                  assert len(names) == 6
+                  folders=[x for x in store.BACKUPS.iterdir() if x.is_dir()]
+                  assert len(folders) == store.MAX_BACKUPS
+                  listed=store.list_backups(999)
+                  assert len(listed) == store.MAX_BACKUPS
+                  assert all(x.get("consistent_sqlite_snapshot") is True for x in listed)
+              finally:
+                  store.DB=old_db
+                  store.DATA=old_data
+                  store.BACKUPS=old_backups
+                  store.VAULT_KEY_FILE=old_vault_key
+                  store.MAX_BACKUPS=old_max
+
+                  for key,value in (
+                      ("RENDER",old_render),
+                      ("RENDER_SERVICE_ID",old_render_id),
+                      ("RONN_VAULT_MASTER_KEY",old_master),
+                      ("RONN_SESSION_SIGNING_KEY",old_session),
+                      ("RONN_CORE_TOKEN",old_core),
+                  ):
+                      if value is None:
+                          os.environ.pop(key,None)
+                      else:
+                          os.environ[key]=value
+
+          print("vault durability / SQLite backup consistency: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
