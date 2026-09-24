@@ -1072,6 +1072,82 @@ jobs:
           print("feedback/training owner isolation: ok")
           PY
 
+      - name: Same-second retention ordering smoke
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+
+          import r17_jobs as jobs
+          import r18_monitor as monitor
+          import r19_training_data as training
+
+          with tempfile.TemporaryDirectory() as td:
+              root=Path(td)
+              owner="ci-owner"
+
+              # R17 completed jobs: same timestamp, newest insertions must survive.
+              jobs.DB=root/"jobs.sqlite3"
+              jobs.MAX_COMPLETED_JOBS_PER_OWNER=3
+              with jobs._db() as c:
+                  for i in range(5):
+                      c.execute(
+                          "INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
+                          (f"job-{i}",owner,"ci","{}","completed",100,"{}","",1000,1000),
+                      )
+                  jobs._prune_owner(c,owner)
+                  rows=c.execute(
+                      "SELECT id FROM jobs WHERE owner=? AND status='completed' ORDER BY rowid",
+                      (owner,),
+                  ).fetchall()
+              assert [r["id"] for r in rows] == ["job-2","job-3","job-4"]
+
+              # R18 alerts: random text IDs must never decide which same-second row is newest.
+              monitor.DB=root/"monitor.sqlite3"
+              monitor.MAX_ALERTS_PER_OWNER=3
+              with monitor._db() as c:
+                  for i in range(5):
+                      c.execute(
+                          "INSERT INTO alerts VALUES(?,?,?,?,?,0)",
+                          (f"alert-{i}","watch",owner,f"message-{i}",1000),
+                      )
+                  monitor._alert(c,{"id":"watch","owner":owner},"newest")
+                  rows=c.execute(
+                      "SELECT id,message FROM alerts WHERE owner=? ORDER BY rowid",
+                      (owner,),
+                  ).fetchall()
+              assert len(rows) == 3
+              assert [r["id"] for r in rows[:2]] == ["alert-3","alert-4"]
+              assert rows[-1]["message"] == "newest"
+
+              # R19 pending/examples: newest insertion wins on timestamp ties.
+              training.DB=root/"training.sqlite3"
+              training.MAX_PENDING_PER_OWNER=3
+              training.MAX_EXAMPLES_PER_OWNER=3
+              training.PENDING_TTL_SECONDS=100000
+              with training._db() as c:
+                  for i in range(5):
+                      c.execute(
+                          "INSERT INTO pending VALUES(?,?,?,?,?,?,?)",
+                          (f"req-{i}",owner,"general","p","r","m",1000),
+                      )
+                      c.execute(
+                          "INSERT INTO examples VALUES(?,?,?,?,?,?,?,?)",
+                          (f"ex-{i}",owner,"general","p","r","m","ci",1000),
+                      )
+                  training._prune(c,owner,now=1000)
+                  pending=c.execute(
+                      "SELECT request_id FROM pending WHERE owner=? ORDER BY rowid",(owner,)
+                  ).fetchall()
+                  examples=c.execute(
+                      "SELECT id FROM examples WHERE owner=? ORDER BY rowid",(owner,)
+                  ).fetchall()
+              assert [r["request_id"] for r in pending] == ["req-2","req-3","req-4"]
+              assert [r["id"] for r in examples] == ["ex-2","ex-3","ex-4"]
+
+          print("same-second retention ordering: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'

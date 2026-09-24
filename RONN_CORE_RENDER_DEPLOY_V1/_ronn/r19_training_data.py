@@ -43,10 +43,10 @@ def _prune(c,owner=None,now=None):
     owner=str(owner)
     c.execute("DELETE FROM pending WHERE owner=? AND created_at<?",(owner,cutoff))
     c.execute("""DELETE FROM pending WHERE owner=? AND request_id NOT IN (
-        SELECT request_id FROM pending WHERE owner=? ORDER BY created_at DESC,request_id DESC LIMIT ?
+        SELECT request_id FROM pending WHERE owner=? ORDER BY created_at DESC,rowid DESC LIMIT ?
     )""",(owner,owner,MAX_PENDING_PER_OWNER))
     c.execute("""DELETE FROM examples WHERE owner=? AND id NOT IN (
-        SELECT id FROM examples WHERE owner=? ORDER BY created_at DESC,id DESC LIMIT ?
+        SELECT id FROM examples WHERE owner=? ORDER BY created_at DESC,rowid DESC LIMIT ?
     )""",(owner,owner,MAX_EXAMPLES_PER_OWNER))
 
 
