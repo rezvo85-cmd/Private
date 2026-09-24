@@ -103,16 +103,11 @@ def _allowed_domains(task: str) -> list[str]:
     for raw in _urls(task):
         _public_http_url(raw)
         host = (urlparse(raw).hostname or "").lower()
-        candidates=[host]
-        if host.startswith("www.") and host.count(".") >= 2:
-            candidates.append(host[4:])
-        for candidate in list(candidates):
-            if candidate:
-                candidates.append("*."+candidate)
-        for candidate in candidates:
-            if candidate and candidate not in hosts:
-                hosts.append(candidate)
-    return hosts[:16]
+        # Keep Browser Use confined to the exact host R23 approved. Do not
+        # broaden an explicit host into wildcard sibling/subdomain access.
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts[:8]
 
 
 def requested(message: str) -> bool:
