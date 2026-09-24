@@ -159,7 +159,45 @@ jobs:
           assert "qwen/qwen3.6-27b" not in app_src
           assert "qwen/qwen3.6-27b" not in controller_src
           assert "research-limited" in app_src
-          print("provider model retirement/live-evidence guard: ok")
+
+          # Vision fallback must never route image-bearing requests into text-only
+          # GPT-OSS models, and a reachable provider catalog must be authoritative.
+          old_or=app.openrouter_key_loaded
+          old_groq=app.groq_key_loaded
+          old_nv=app.nvidia_key_loaded
+          old_catalog=app.groq_model_catalog
+          try:
+              app.openrouter_key_loaded=lambda: False
+              app.groq_key_loaded=lambda: True
+              app.nvidia_key_loaded=lambda: False
+              app.groq_model_catalog=lambda ttl=300: [
+                  app.VISION_MODEL,app.SMART_MODEL,app.FAST_MODEL
+              ]
+              vision_order=app.model_fallback_order(app.VISION_MODEL,"vision")
+              assert vision_order == [app.VISION_MODEL], vision_order
+
+              # If Groq says the configured vision model is absent, do not
+              # re-add it or substitute text-only models.
+              app.groq_model_catalog=lambda ttl=300: [
+                  app.SMART_MODEL,app.FAST_MODEL
+              ]
+              vision_missing=app.model_fallback_order(app.VISION_MODEL,"vision")
+              assert vision_missing == [], vision_missing
+
+              # With OpenRouter available, only its declared Qwen vision model
+              # may be used as the cross-provider fallback.
+              app.openrouter_key_loaded=lambda: True
+              vision_cross=app.model_fallback_order(app.VISION_MODEL,"vision")
+              assert vision_cross == [app.OR_QWEN_MODEL], vision_cross
+              assert app.SMART_MODEL not in vision_cross
+              assert app.FAST_MODEL not in vision_cross
+          finally:
+              app.openrouter_key_loaded=old_or
+              app.groq_key_loaded=old_groq
+              app.nvidia_key_loaded=old_nv
+              app.groq_model_catalog=old_catalog
+
+          print("provider model retirement/live-evidence/vision fallback guard: ok")
           PY
 
       - name: Integrity and health truthfulness smoke
