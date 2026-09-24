@@ -10,3 +10,7 @@ python-pptx
 cryptography
 psycopg[binary]
 openai-agents
+
+# External capability helpers; R23 remains the single brain.
+docling-slim[format-pdf,format-office,format-web]==2.130.0
+langgraph==1.2.12
