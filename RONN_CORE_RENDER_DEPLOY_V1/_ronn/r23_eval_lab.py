@@ -43,6 +43,13 @@ from r23_quality_lab import (
     status as quality_status,
 )
 from r23_confidence import apply_confidence_governor, status as confidence_status
+from r23_task_graph import (
+    build_task_graph as task_graph_build,
+    reconcile_task_graph as task_graph_reconcile,
+    recovery_decision as task_graph_recovery_decision,
+    mark_recovery_attempted as task_graph_mark_recovery,
+    status as task_graph_status,
+)
 from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import (
     ensure_project, remember, retrieve, export_project, import_project, set_model_score,
@@ -304,6 +311,106 @@ def run():
     requirement_contract=requirement_plan.get("requirement_contract") or {}
     requirement_prompt=brain_directive(requirement_plan)
 
+    task_graph_simple=plan("hi").get("task_graph") or {}
+    task_graph_hard=hard_plan.get("task_graph") or {}
+
+    task_graph_research_decision={
+        "difficulty":5,
+        "profile":"research",
+        "needs_live":True,
+        "needs_tools":True,
+        "verify":True,
+        "depth":"deep",
+        "capabilities":{
+            "agent_runtime":True,
+            "universal_retrieval":True,
+            "autonomous_research":True,
+            "retrieval":{"required":True,"unknown_terms":[]},
+        },
+        "requirement_contract":{"count":1,"hard_count":1,"density":"medium"},
+    }
+    task_graph_research=task_graph_build(
+        "Research the current API behavior and verify it before answering.",
+        task_graph_research_decision,
+        file_names=[],
+        has_project=False,
+    )
+    task_graph_failed=task_graph_reconcile(
+        task_graph_research,
+        {
+            "planned":["autonomous_research"],
+            "executed":[],
+            "research":{"ok":False,"read_count":0,"source_count":0},
+            "evidence_contract":{
+                "retrieval":{"read_page_count":0,"explicit_browser_pages_read":0},
+                "structured_live_data":False,
+                "runtime_execution":{"verified_success":False},
+            },
+            "evidence_sufficiency":{
+                "sufficient":False,
+                "gaps":["live_source_evidence"],
+            },
+        },
+        task_graph_research_decision,
+    )
+    task_graph_recovery=task_graph_recovery_decision(
+        task_graph_failed,
+        task_graph_research_decision,
+        has_files=False,
+    )
+    task_graph_recovery_marked=task_graph_mark_recovery(task_graph_failed)
+    task_graph_recovered=task_graph_reconcile(
+        task_graph_recovery_marked,
+        {
+            "planned":["autonomous_research"],
+            "executed":["autonomous_research"],
+            "research":{"ok":True,"read_count":2,"source_count":3},
+            "evidence_contract":{
+                "retrieval":{"read_page_count":2,"explicit_browser_pages_read":0},
+                "structured_live_data":False,
+                "runtime_execution":{"verified_success":False},
+            },
+            "evidence_sufficiency":{
+                "sufficient":True,
+                "gaps":[],
+            },
+        },
+        task_graph_research_decision,
+    )
+
+    task_graph_dead_decision={
+        "difficulty":5,
+        "profile":"analysis",
+        "needs_live":False,
+        "needs_tools":True,
+        "verify":True,
+        "depth":"deep",
+        "capabilities":{"agent_runtime":True,"computer_requested":True},
+        "requirement_contract":{"count":0,"hard_count":0,"density":"none"},
+    }
+    task_graph_dead=task_graph_reconcile(
+        task_graph_build(
+            "Inspect the connected computer and verify the observed state.",
+            task_graph_dead_decision,
+            file_names=[],
+            has_project=False,
+        ),
+        {
+            "planned":["computer_runtime"],
+            "executed":[],
+            "evidence_contract":{
+                "retrieval":{"read_page_count":0,"explicit_browser_pages_read":0},
+                "computer_observation_verified":False,
+                "runtime_execution":{"verified_success":False},
+            },
+            "evidence_sufficiency":{
+                "sufficient":False,
+                "gaps":["computer_observation"],
+            },
+        },
+        task_graph_dead_decision,
+    )
+
     arena_memory_source="arena-memory-eval-source"
     arena_memory_restored="arena-memory-eval-restored"
     set_model_score(arena_memory_source,"main",100,.21,8)
@@ -460,6 +567,31 @@ def run():
                   and brain_status().get("reasoning_budget_decoupled_from_visible_brevity") is True
                   and brain_status().get("confidence_governor") is True
                   and brain_status().get("requirement_contract") is True
+                  and brain_status().get("task_graph") is True
+                  and task_graph_status().get("bounded_replanning") is True
+                  and task_graph_status().get("max_recovery_passes")==1
+                  and task_graph_simple.get("active") is False
+                  and task_graph_hard.get("active") is True
+                  and len(task_graph_hard.get("nodes") or [])>=4
+                  and any(
+                      "map_dependencies" in (x.get("depends_on") or [])
+                      for x in task_graph_hard.get("nodes") or []
+                      if x.get("id")=="execute_verify"
+                  )
+                  and task_graph_failed.get("replanned") is True
+                  and task_graph_failed.get("recovery_kind")=="research"
+                  and task_graph_failed.get("revision")==1
+                  and "understand" in task_graph_failed.get("completed_nodes",[])
+                  and task_graph_recovery is not None
+                  and task_graph_recovery.get("depth")=="apex"
+                  and task_graph_recovery.get("capabilities",{}).get("autonomous_research") is True
+                  and task_graph_recovered.get("recovery_attempted") is True
+                  and "gather_evidence" in task_graph_recovered.get("completed_nodes",[])
+                  and "recover_research" in task_graph_recovered.get("completed_nodes",[])
+                  and task_graph_recovered.get("dead_end") is False
+                  and task_graph_dead.get("dead_end") is True
+                  and "computer observation" in task_graph_dead.get("dead_end_reason","")
+                  and task_graph_dead.get("completion_proof",{}).get("unresolved")
                   and requirement_contract.get("count",0)>=4
                   and requirement_contract.get("hard_count",0)>=3
                   and requirement_contract.get("density")=="high"
