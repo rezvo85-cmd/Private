@@ -16,6 +16,7 @@ DB = DATA / "ecosystem_v1.sqlite3"
 VAULT_KEY_FILE = DATA / "vault.key"
 BACKUPS = DATA / "backups"
 BACKUPS.mkdir(parents=True, exist_ok=True)
+BACKUP_MAX_SETS=max(2,min(50,int(os.getenv("RONN_BACKUP_MAX_SETS","12") or "12")))
 PLUGIN_DIR = BASE / "plugins"
 PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -671,23 +672,71 @@ def consume_credit(owner, amount=1):
 
 
 # ---------- backups / plugins / status ----------
+def _backup_sqlite(src: Path, dest: Path):
+    """Create a transaction-consistent SQLite backup, including WAL state."""
+    tmp=dest.with_suffix(dest.suffix+".tmp")
+    try:
+        if tmp.exists():
+            tmp.unlink()
+        source=sqlite3.connect(str(src),timeout=10)
+        target=sqlite3.connect(str(tmp))
+        try:
+            source.backup(target)
+            target.commit()
+        finally:
+            target.close()
+            source.close()
+        tmp.replace(dest)
+        return True
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+def _prune_backups():
+    folders=sorted(
+        [x for x in BACKUPS.iterdir() if x.is_dir()],
+        key=lambda x:x.stat().st_mtime,
+        reverse=True,
+    )
+    removed=0
+    for p in folders[BACKUP_MAX_SETS:]:
+        try:
+            shutil.rmtree(p)
+            removed+=1
+        except OSError:
+            pass
+    return removed
+
+
 def backup_all(label="auto"):
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    folder = BACKUPS / f"{stamp}-{label}"
-    folder.mkdir(parents=True, exist_ok=True)
+    safe_label="".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(label or "auto"))[:40] or "auto"
+    folder = BACKUPS / f"{stamp}-{int(time.time()*1000)%1000:03d}-{uuid.uuid4().hex[:6]}-{safe_label}"
+    folder.mkdir(parents=True, exist_ok=False)
     copied = []
+    errors = []
+    seen=set()
     for p in list(DATA.glob("*.sqlite3")) + list(DATA.glob("*.db")):
+        if p in seen or not p.is_file():
+            continue
+        seen.add(p)
         try:
-            shutil.copy2(p, folder / p.name)
+            _backup_sqlite(p,folder/p.name)
             copied.append(p.name)
-        except Exception:
-            pass
-    meta = {"created": time.time(), "files": copied}
+        except Exception as exc:
+            errors.append({"file":p.name,"error":exc.__class__.__name__})
+    meta = {"created": time.time(), "files": copied, "errors": errors, "consistent_sqlite": True}
     (folder / "backup.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return {"folder": str(folder), "files": copied, "created": meta["created"]}
+    pruned=_prune_backups()
+    return {"folder": str(folder), "files": copied, "errors":errors, "created": meta["created"],"pruned":pruned,"consistent_sqlite":True}
 
 
 def list_backups(limit=20):
+    limit=max(1,min(int(limit),BACKUP_MAX_SETS))
     out = []
     for p in sorted([x for x in BACKUPS.iterdir() if x.is_dir()], key=lambda x: x.name, reverse=True)[:limit]:
         try:
