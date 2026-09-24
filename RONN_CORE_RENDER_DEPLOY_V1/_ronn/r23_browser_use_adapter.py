@@ -59,8 +59,12 @@ def _groq_key() -> str:
     # CLOUD_API_KEY is only safe to reuse when the configured cloud endpoint is
     # actually Groq. RONN can point CLOUD_API_BASE at other OpenAI-compatible
     # providers, and sending that key to Groq would be both incorrect and unsafe.
-    base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip().lower()
-    if "api.groq.com" in base:
+    base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip()
+    try:
+        host=(urlparse(base).hostname or "").strip().lower()
+    except Exception:
+        host=""
+    if host == "api.groq.com":
         return (os.getenv("CLOUD_API_KEY") or "").strip()
     return ""
 
