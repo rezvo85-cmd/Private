@@ -35,10 +35,21 @@ def normalize_url(url):
     if not u:raise ValueError("URL is required.")
     if "://" not in u:u="https://"+u
     p=urlparse(u)
-    if p.scheme not in {"http","https"} or not p.hostname:raise ValueError("Only public http/https URLs are allowed.")
-    return u
+    if p.scheme not in {"http","https"} or not p.hostname:
+        raise ValueError("Only public http/https URLs are allowed.")
+    if p.username is not None or p.password is not None:
+        raise ValueError("URL credentials are not allowed.")
+    try:
+        port=p.port
+    except ValueError:
+        raise ValueError("Invalid URL port.")
+    expected_port=443 if p.scheme=="https" else 80
+    if port is not None and port!=expected_port:
+        raise ValueError("Only standard web ports are allowed.")
+    return p.geturl()
 
 def _public_host(url):
+    url=normalize_url(url)
     p=urlparse(url)
     host=p.hostname
     if not host:raise ValueError("URL has no host.")
@@ -56,53 +67,74 @@ def _public_host(url):
 def fetch(url,timeout=12):
     url=normalize_url(url)
     started=time.time()
-    r=None
-    for _hop in range(6):
-        _public_host(url)
-        r=requests.get(url,headers={"User-Agent":UA,"Accept":"text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2"},
-                       timeout=max(3,min(int(timeout),20)),allow_redirects=False,stream=True)
-        if r.status_code in {301,302,303,307,308} and r.headers.get("location"):
-            nxt=urljoin(url,r.headers["location"])
+    with requests.Session() as session:
+        session.trust_env=False
+        r=None
+        for _hop in range(6):
+            _public_host(url)
+            r=session.get(
+                url,
+                headers={"User-Agent":UA,"Accept":"text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2"},
+                timeout=max(3,min(int(timeout),20)),
+                allow_redirects=False,
+                stream=True,
+            )
+            if r.status_code in {301,302,303,307,308} and r.headers.get("location"):
+                nxt=urljoin(url,r.headers["location"])
+                r.close()
+                url=normalize_url(nxt)
+                continue
+            break
+
+        if r is None:
+            raise ValueError("Browser request could not start.")
+        if r.status_code in {301,302,303,307,308}:
             r.close()
-            url=normalize_url(nxt)
-            continue
-        break
-    if r is None:
-        raise ValueError("Browser request could not start.")
-    if r.status_code in {301,302,303,307,308}:
-        r.close()
-        raise ValueError("Too many redirects.")
-    final=normalize_url(r.url); _public_host(final)
-    chunks=[]; total=0
-    for chunk in r.iter_content(65536):
-        if not chunk:continue
-        total+=len(chunk)
-        if total>MAX_BYTES:break
-        chunks.append(chunk)
-    raw=b"".join(chunks)
-    ctype=(r.headers.get("content-type") or "").lower()
-    enc=r.encoding or "utf-8"
-    text=raw.decode(enc,errors="replace")
-    if "html" in ctype or "<html" in text[:1000].lower():
-        x=Extractor(); x.feed(text)
-        body="\n".join(x.text)
-        links=[]
-        seen=set()
-        for href,label in x.links:
-            absolute=urljoin(final,href)
-            if absolute in seen:continue
-            if urlparse(absolute).scheme not in {"http","https"}:continue
-            seen.add(absolute); links.append({"text":label or absolute,"url":absolute})
-            if len(links)>=80:break
-        title=x.title[:300]
-    else:
-        body=text; links=[]; title=""
-    body=re.sub(r"\n{3,}","\n\n",body)[:MAX_TEXT]
-    out={"ok":bool(r.ok),"status_code":r.status_code,"url":final,"title":title,
-         "text":body,"links":links,"bytes":len(raw),"content_type":ctype,
-         "elapsed_ms":round((time.time()-started)*1000,2)}
-    r.close()
-    return out
+            raise ValueError("Too many redirects.")
+
+        try:
+            final=normalize_url(r.url)
+            _public_host(final)
+            chunks=[]; total=0
+            for chunk in r.iter_content(65536):
+                if not chunk:continue
+                total+=len(chunk)
+                if total>MAX_BYTES:break
+                chunks.append(chunk)
+            raw=b"".join(chunks)
+            ctype=(r.headers.get("content-type") or "").lower()
+            enc=r.encoding or "utf-8"
+            text=raw.decode(enc,errors="replace")
+            if "html" in ctype or "<html" in text[:1000].lower():
+                x=Extractor(); x.feed(text)
+                body="\n".join(x.text)
+                links=[]
+                seen=set()
+                for href,label in x.links:
+                    try:
+                        absolute=normalize_url(urljoin(final,href))
+                    except ValueError:
+                        continue
+                    if absolute in seen:continue
+                    seen.add(absolute); links.append({"text":label or absolute,"url":absolute})
+                    if len(links)>=80:break
+                title=x.title[:300]
+            else:
+                body=text; links=[]; title=""
+            body=re.sub(r"\n{3,}","\n\n",body)[:MAX_TEXT]
+            return {
+                "ok":bool(r.ok),
+                "status_code":r.status_code,
+                "url":final,
+                "title":title,
+                "text":body,
+                "links":links,
+                "bytes":len(raw),
+                "content_type":ctype,
+                "elapsed_ms":round((time.time()-started)*1000,2),
+            }
+        finally:
+            r.close()
 
 def follow(page,index):
     links=page.get("links") or []

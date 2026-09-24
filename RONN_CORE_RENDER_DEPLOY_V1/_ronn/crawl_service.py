@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 _CRAWL4AI_COMPONENTS = None
 MAX_FETCH_BYTES = 3_000_000
 MAX_REDIRECTS = 4
-USER_AGENT = "RONN-Reader/1.3"
+USER_AGENT = "RONN-Reader/1.4"
 READER_TOKEN = os.getenv("RONN_READER_TOKEN", "").strip()
-BROWSER_ENABLED = os.getenv("RONN_READER_BROWSER", "true").strip().lower() in {"1","true","yes","on"}
+BROWSER_ENABLED = os.getenv("RONN_READER_BROWSER", "false").strip().lower() in {"1","true","yes","on"}
 
 
 def _crawler_components():
@@ -29,7 +29,7 @@ def _crawler_components():
     return _CRAWL4AI_COMPONENTS
 
 
-app = FastAPI(title="RONN Reader", version="1.3")
+app = FastAPI(title="RONN Reader", version="1.4")
 
 
 class CrawlBody(BaseModel):
@@ -48,6 +48,15 @@ def _public_url(url: str) -> str:
     parsed = urlparse((url or "").strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HTTPException(status_code=400, detail="Only public http/https URLs are supported.")
+    if parsed.username is not None or parsed.password is not None:
+        raise HTTPException(status_code=400, detail="URL credentials are not allowed.")
+    try:
+        port=parsed.port
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid URL port.")
+    expected_port=443 if parsed.scheme=="https" else 80
+    if port is not None and port!=expected_port:
+        raise HTTPException(status_code=400, detail="Only standard web ports are allowed.")
     host = parsed.hostname.strip().lower()
     if host in {"localhost"} or host.endswith(".local"):
         raise HTTPException(status_code=400, detail="Local addresses are blocked.")
@@ -176,6 +185,7 @@ def _http_fallback(url: str, max_chars: int) -> dict:
     """Browser-independent reader used when Chromium/Crawl4AI is unavailable."""
     current=_public_url(url)
     session=requests.Session()
+    session.trust_env=False
     response=None
     headers={
         "User-Agent":USER_AGENT,
@@ -263,9 +273,10 @@ async def _crawl4ai_read(url: str, max_chars: int) -> dict:
     if not text.strip():
         raise RuntimeError("empty_page")
 
+    final_url=_public_url(getattr(result,"url",url))
     return {
         "ok":True,
-        "url":getattr(result,"url",url),
+        "url":final_url,
         "title":(getattr(result,"metadata",{}) or {}).get("title",""),
         "markdown":text[:max_chars],
         "links":(getattr(result,"links",{}) or {}).get("internal",[])[:40],
@@ -275,7 +286,7 @@ async def _crawl4ai_read(url: str, max_chars: int) -> dict:
 
 @app.get("/")
 async def root():
-    return {"ok":True,"service":"RONN Reader","version":"1.3"}
+    return {"ok":True,"service":"RONN Reader","version":"1.4"}
 
 
 @app.head("/")
@@ -292,6 +303,9 @@ async def health():
         "browser_enabled":BROWSER_ENABLED,
         "http_fallback":True,
         "auth_required":bool(READER_TOKEN),
+        "standard_ports_only":True,
+        "url_credentials_blocked":True,
+        "environment_proxies_disabled":True,
     }
 
 
