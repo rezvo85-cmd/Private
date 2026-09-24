@@ -76,6 +76,26 @@ def run():
     except Exception as exc:
         add("database_blueprint_binding",False,str(exc)[:240])
 
+    try:
+        nested_blueprint=(ROOT/"render.yaml").read_text(encoding="utf-8")
+        required_render_keys=(
+            "key: DATABASE_URL",
+            "fromDatabase:",
+            "name: RONN_MEMORY",
+            "property: connectionString",
+            "key: CLOUD_API_KEY",
+            "key: RONN_CORE_TOKEN",
+            "key: RONN_PUBLIC_MODE",
+        )
+        nested_ok=all(x in nested_blueprint for x in required_render_keys)
+        add(
+            "render_blueprints_consistent",
+            bool(binding_ok and nested_ok),
+            "Both Render blueprints declare provider auth, private API auth, and durable Postgres binding",
+        )
+    except Exception as exc:
+        add("render_blueprints_consistent",False,str(exc)[:240])
+
     # Provider model IDs age independently from RONN code. Detect stale Groq
     # environment overrides explicitly so runtime migration cannot hide a
     # production configuration that should be cleaned up.
