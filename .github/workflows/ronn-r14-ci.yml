@@ -541,6 +541,133 @@ jobs:
           print("training/monitor retention bounds: ok")
           PY
 
+      - name: Cloud snapshot and task retention smoke
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import tempfile
+          import time
+          from pathlib import Path
+          from types import SimpleNamespace
+
+          import r15_cloud_brain as cloud
+          import snapshot_engine as snaps
+          import task_engine as tasks
+
+          with tempfile.TemporaryDirectory() as td:
+              root=Path(td)
+              db=root/"state.sqlite3"
+              conn=sqlite3.connect(db)
+              conn.execute("PRAGMA journal_mode=WAL")
+              conn.execute("CREATE TABLE t(v INTEGER)")
+              conn.execute("INSERT INTO t VALUES(42)")
+              conn.commit()
+
+              snap_path=root/"snapshots"/"owner"/"project"/"s1.json"
+              snap_path.parent.mkdir(parents=True)
+              snap_path.write_text('{"ok":true}',encoding="utf-8")
+              backup_path=root/"backups"/"old"/"copy.sqlite3"
+              backup_path.parent.mkdir(parents=True)
+              backup_path.write_bytes(b"do-not-cloud-sync")
+              (root/"vault.key").write_text("secret",encoding="utf-8")
+
+              names={p.relative_to(root).as_posix() for p in cloud._iter_sync_files(root)}
+              assert "state.sqlite3" in names
+              assert "snapshots/owner/project/s1.json" in names
+              assert "backups/old/copy.sqlite3" not in names
+              assert "vault.key" not in names
+              assert cloud._safe_relative_name("../escape.db") is None
+              assert cloud._safe_relative_name("/absolute.db") is None
+              assert cloud._safe_relative_name("backups/x.db") is None
+
+              stable=cloud._stable_bytes(db)
+              copy=root/"stable.sqlite3"
+              copy.write_bytes(stable)
+              with sqlite3.connect(copy) as check:
+                  assert check.execute("SELECT v FROM t").fetchone()[0] == 42
+              conn.close()
+
+          class Result:
+              def __init__(self,rows): self.rows=list(rows)
+              def fetchall(self): return list(self.rows)
+
+          class FakeCloud:
+              def __init__(self,rows=None):
+                  self.rows=list(rows or [])
+                  self.calls=[]
+              def execute(self,sql,params=()):
+                  self.calls.append((sql,params))
+                  if sql.strip().upper().startswith("SELECT"):
+                      return Result(self.rows)
+                  return Result([])
+
+          old_cloud_max=cloud._MAX_SNAPSHOTS_PER_PROJECT
+          cloud._MAX_SNAPSHOTS_PER_PROJECT=2
+          try:
+              fake=FakeCloud([
+                  ("snapshots/o/p/a.json",1),
+                  ("snapshots/o/p/b.json",2),
+                  ("snapshots/o/p/c.json",3),
+                  ("snapshots/o/q/a.json",1),
+              ])
+              assert cloud._prune_cloud_snapshot_rows(fake) == 1
+              assert any("DELETE FROM ronn_cloud_files" in sql for sql,_ in fake.calls)
+
+              events=FakeCloud()
+              cloud._prune_events(events,"owner",1_000_000)
+              deletes=[x for x in events.calls if x[0].strip().upper().startswith("DELETE")]
+              assert len(deletes) == 2
+              assert any(cloud._MAX_EVENTS_PER_OWNER in params for _,params in deletes)
+          finally:
+              cloud._MAX_SNAPSHOTS_PER_PROJECT=old_cloud_max
+
+          with tempfile.TemporaryDirectory() as td:
+              old_root,old_max=snaps.ROOT,snaps.MAX_SNAPSHOTS_PER_PROJECT
+              snaps.ROOT=Path(td)/"snapshots"
+              snaps.ROOT.mkdir(parents=True)
+              snaps.MAX_SNAPSHOTS_PER_PROJECT=3
+              try:
+                  for i in range(5):
+                      snaps.create_snapshot(
+                          "owner","project",
+                          [SimpleNamespace(name="file.txt",content=f"value-{i}")],
+                          f"checkpoint-{i}",
+                      )
+                      time.sleep(0.003)
+                  assert len(snaps.list_snapshots("owner","project",99)) == 3
+                  assert len(list((snaps.ROOT/"owner"/"project").glob("*.json"))) == 3
+              finally:
+                  snaps.ROOT,snaps.MAX_SNAPSHOTS_PER_PROJECT=old_root,old_max
+
+          with tempfile.TemporaryDirectory() as td:
+              old_db=tasks.DB
+              old_tasks=tasks.MAX_TASKS_PER_OWNER
+              old_cp=tasks.MAX_CHECKPOINTS_PER_TASK
+              tasks.DB=Path(td)/"tasks.sqlite3"
+              tasks.MAX_TASKS_PER_OWNER=3
+              tasks.MAX_CHECKPOINTS_PER_TASK=3
+              try:
+                  for i in range(5):
+                      tid=f"task-{i}"
+                      tasks.start_task(tid,"owner","project",f"prompt-{i}","general",2,"sig",{})
+                      for j in range(5):
+                          tasks.checkpoint(tid,f"phase-{j}","complete",str(j))
+                      tasks.finish_task(tid,"complete")
+                  with tasks._db() as c:
+                      task_count=c.execute("SELECT COUNT(*) FROM tasks WHERE owner='owner'").fetchone()[0]
+                      max_cp=c.execute(
+                          "SELECT COALESCE(MAX(n),0) FROM (SELECT COUNT(*) n FROM checkpoints GROUP BY task_id)"
+                      ).fetchone()[0]
+                  assert task_count == 3
+                  assert max_cp <= 3
+              finally:
+                  tasks.DB=old_db
+                  tasks.MAX_TASKS_PER_OWNER=old_tasks
+                  tasks.MAX_CHECKPOINTS_PER_TASK=old_cp
+
+          print("cloud snapshot / task retention hardening: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
