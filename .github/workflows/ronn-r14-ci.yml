@@ -1909,22 +1909,32 @@ jobs:
           import os
           from pathlib import Path
 
+          import r23_agent_runtime as agent_runtime
           import r23_browser_use_adapter as browser_use
           from r23_capabilities import capability_plan
-          from r23_agent_runtime import status as agent_status
 
           os.environ.pop("RONN_BROWSER_USE_ENABLED",None)
+          os.environ.pop("RONN_BROWSER_USE_MODEL",None)
           st=browser_use.status()
           print("browser-use core status:",st)
+          assert st["version"] == "R23-BROWSER-USE-2"
           assert st["enabled"] is False
+          assert st["model"] == "openai/gpt-oss-120b"
           assert st["scope"] == "bounded_browser_executor"
           assert st["r23_final_answer_owner"] is True
           assert st["lazy_loaded"] is True
+          assert st["internal_planning"] is False
+          assert st["internal_judge"] is False
+          assert st["local_file_actions_blocked"] is True
+          assert st["downloads_blocked"] is True
           assert st["local_private_network_blocked"] is True
           assert st["irreversible_final_submit_blocked"] is True
 
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
+          domains=browser_use._allowed_domains("Open https://www.example.com/path and click More")
+          assert domains == ["www.example.com"], domains
+          assert not any(x.startswith("*.") for x in domains)
 
           for unsafe in (
               "http://127.0.0.1",
@@ -1958,12 +1968,75 @@ jobs:
           assert computer["computer_requested"] is True
           assert computer["browser_interactive"] is False
 
+          # Interactive Browser Use must replace, not duplicate, the old text-reader pass.
+          calls={"reader":0,"automation":0}
+          old_collect=agent_runtime.collect_pages
+          old_automation=agent_runtime.browser_use_execute
+          try:
+              def fake_collect(urls):
+                  calls["reader"]+=1
+                  return [{"url":urls[0],"text":"reader evidence","status":200}]
+              def fake_automation(message,depth="smart"):
+                  calls["automation"]+=1
+                  return {
+                      "ok":True,
+                      "done":True,
+                      "successful":True,
+                      "result":"clicked",
+                      "urls":["https://example.com"],
+                      "actions":["click"],
+                      "steps":1,
+                      "errors":[],
+                  }
+              agent_runtime.collect_pages=fake_collect
+              agent_runtime.browser_use_execute=fake_automation
+
+              decision={
+                  "needs_live":False,
+                  "capabilities":{
+                      "agent_runtime":True,
+                      "browser_url":True,
+                      "browser_interactive":True,
+                      "retrieval":{},
+                  },
+              }
+              run=agent_runtime.execute(
+                  "ci-owner","ci-browser-interactive",
+                  "Open https://example.com and click the More information link",
+                  [],decision,depth="smart",
+              )
+              assert calls == {"reader":0,"automation":1}, calls
+              assert "browser" not in run["planned"]
+              assert "browser_automation" in run["executed"]
+              assert run["evidence_sufficiency"]["sufficient"] is True
+
+              calls={"reader":0,"automation":0}
+              read_decision={
+                  "needs_live":False,
+                  "capabilities":{
+                      "agent_runtime":True,
+                      "browser_url":True,
+                      "browser_interactive":False,
+                      "retrieval":{},
+                  },
+              }
+              read_run=agent_runtime.execute(
+                  "ci-owner","ci-browser-read",
+                  "Read https://example.com and summarize it",
+                  [],read_decision,depth="smart",
+              )
+              assert calls == {"reader":1,"automation":0}, calls
+              assert "browser" in read_run["executed"]
+          finally:
+              agent_runtime.collect_pages=old_collect
+              agent_runtime.browser_use_execute=old_automation
+
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain
-          runtime=agent_status()
-          assert runtime["version"] == "R23-AGENT-3"
+          runtime=agent_runtime.status()
+          assert runtime["version"] == "R23-AGENT-4"
           assert runtime["browser_use"]["scope"] == "bounded_browser_executor"
-          print("Browser Use R23 ownership/lazy-load/safety boundary: ok")
+          print("Browser Use R23 ownership/no-overlap/safety boundary: ok")
           PY
 
       - name: Check browser JavaScript
@@ -2015,7 +2088,7 @@ jobs:
           import importlib.metadata
 
           import r23_browser_use_adapter as adapter
-          from browser_use import Agent, Browser, BrowserProfile, ChatGroq
+          from browser_use import Agent, Browser, BrowserProfile, ChatGroq, Tools
 
           version=importlib.metadata.version("browser-use")
           print("browser-use version:",version)
@@ -2024,12 +2097,18 @@ jobs:
           st=adapter.status()
           print("adapter status:",st)
           assert st["installed"] is True
+          assert st["version"] == "R23-BROWSER-USE-2"
+          assert st["model"] == "openai/gpt-oss-120b"
           assert st["scope"] == "bounded_browser_executor"
           assert st["lazy_loaded"] is True
+          assert st["internal_planning"] is False
+          assert st["internal_judge"] is False
+          assert st["local_file_actions_blocked"] is True
+          assert st["downloads_blocked"] is True
 
           # Constructor-only smoke: no network, LLM call, or browser process.
           llm=ChatGroq(
-              model="meta-llama/llama-4-maverick-17b-128e-instruct",
+              model=adapter.DEFAULT_MODEL,
               api_key="ci-not-used",
               temperature=0.0,
               max_retries=1,
@@ -2040,12 +2119,50 @@ jobs:
               block_ip_addresses=True,
               keep_alive=False,
               enable_default_extensions=False,
+              accept_downloads=False,
+              auto_download_pdfs=False,
+              captcha_solver=False,
+              permissions=[],
           )
           browser=Browser(browser_profile=profile)
+          browser_tools=Tools(exclude_actions=list(adapter._FORBIDDEN_ACTIONS))
+          agent=Agent(
+              task="Open https://example.com and click More information.",
+              llm=llm,
+              browser=browser,
+              tools=browser_tools,
+              use_vision=False,
+              use_thinking=False,
+              use_judge=False,
+              enable_planning=False,
+              available_file_paths=[],
+              display_files_in_done_text=False,
+              max_actions_per_step=3,
+              max_failures=3,
+              final_response_after_failure=False,
+              generate_gif=False,
+          )
+
           assert llm.provider == "groq"
           assert browser.browser_profile.block_ip_addresses is True
           assert browser.browser_profile.enable_default_extensions is False
-          assert "example.com" in browser.browser_profile.allowed_domains
+          assert browser.browser_profile.accept_downloads is False
+          assert browser.browser_profile.auto_download_pdfs is False
+          assert browser.browser_profile.captcha_solver is False
+          assert browser.browser_profile.permissions == []
+          assert browser.browser_profile.allowed_domains == ["example.com"]
+
+          actions=agent.tools.registry.registry.actions
+          for forbidden in adapter._FORBIDDEN_ACTIONS:
+              assert forbidden not in actions, (forbidden,sorted(actions))
+          assert "screenshot" not in actions
+          assert "click" in actions
+          assert "input" in actions
+          assert agent.settings.use_vision is False
+          assert agent.settings.use_thinking is False
+          assert agent.settings.use_judge is False
+          assert agent.settings.enable_planning is False
+          assert agent.available_file_paths == []
 
           # The combined dependency environment must still import the actual RONN
           # application and pass the R23 benchmark. This catches transitive package
