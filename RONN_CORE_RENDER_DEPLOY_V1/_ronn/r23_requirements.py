@@ -22,7 +22,7 @@ _HARD_PATTERNS=(
 _SOFT_PATTERNS=(
     ("required", re.compile(r"\b(?:must|need to|needs to|required|make sure|ensure)\b",re.I)),
     ("format", re.compile(r"\b(?:reply|respond|return|format|output|short|brief|concise|paragraph|bullet|json|table)\b",re.I)),
-    ("inclusion", re.compile(r"\b(?:include|add|use|with|contain)\b",re.I)),
+    ("inclusion", re.compile(r"\b(?:include|add|use|contain)\b",re.I)),
 )
 
 
