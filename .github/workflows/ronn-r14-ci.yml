@@ -99,6 +99,80 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Core auth boundary smoke
+        run: |
+          python - <<'PY'
+          import os
+          from starlette.requests import Request
+          import app
+          from ecosystem_store import create_owner_session, revoke_owner_session
+
+          old = os.environ.get("RONN_CORE_TOKEN")
+          os.environ["RONN_CORE_TOKEN"] = "ci-core-secret"
+
+          def request(path, headers=None):
+              pairs=[]
+              for k,v in (headers or {}).items():
+                  pairs.append((k.lower().encode(), str(v).encode()))
+              return Request({
+                  "type":"http",
+                  "http_version":"1.1",
+                  "method":"GET",
+                  "scheme":"https",
+                  "path":path,
+                  "raw_path":path.encode(),
+                  "query_string":b"",
+                  "headers":pairs,
+                  "client":("127.0.0.1",12345),
+                  "server":("testserver",443),
+              })
+
+          try:
+              forged=request("/api/memory",{
+                  "x-ronn-account":"ronn_primary",
+                  "x-ronn-client":"client123",
+              })
+              assert app.owner_id(forged) == "client123"
+              assert app._legacy_private_route("/api/memory") is True
+              assert app._legacy_private_route("/api/chat") is True
+              assert app._legacy_private_route("/api/status") is False
+              assert app._legacy_private_route("/api/v1/chat") is False
+              assert app._legacy_owner_authorized(forged) is False
+
+              bearer=request("/api/memory",{
+                  "x-ronn-account":"ronn_primary",
+                  "x-ronn-client":"client123",
+                  "authorization":"Bearer ci-core-secret",
+              })
+              assert app.owner_id(bearer) == "ronn_primary"
+              assert app._legacy_owner_authorized(bearer) is True
+
+              unlock=request("/api/v1/owner/unlock",{
+                  "x-ronn-account":"ronn_primary",
+                  "x-ronn-client":"client123",
+              })
+              assert app.owner_id(unlock) == "ronn_primary"
+
+              token,_ = create_owner_session("ronn_primary","client123","device123",1)
+              try:
+                  session=request("/api/memory",{
+                      "x-ronn-account":"ronn_primary",
+                      "x-ronn-client":"client123",
+                      "cookie":"ronn_op="+token,
+                  })
+                  assert app.owner_id(session) == "ronn_primary"
+                  assert app._legacy_owner_authorized(session) is True
+              finally:
+                  revoke_owner_session(token)
+          finally:
+              if old is None:
+                  os.environ.pop("RONN_CORE_TOKEN",None)
+              else:
+                  os.environ["RONN_CORE_TOKEN"]=old
+
+          print("core auth boundary: ok")
+          PY
+
       - name: Reader resilience smoke
         run: |
           python - <<'PY'
