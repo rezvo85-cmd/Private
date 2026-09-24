@@ -7,7 +7,7 @@ separately at runtime.
 from __future__ import annotations
 
 from r23_brain import (
-    plan, resolve_route, status as brain_status, competition_pair,
+    plan, resolve_route, status as brain_status, directive as brain_directive, competition_pair,
     reasoning_effort_for_depth, reasoning_effort_for_route,
     reasoning_completion_budget, reasoning_contract,
 )
@@ -293,6 +293,17 @@ def run():
         },
     )
 
+    requirement_plan=plan(
+        hard
+        + " Keep the public endpoint /v1/chat stable."
+        + " Do not rename public fields."
+        + " Use exactly 3 validation stages."
+        + " Only return JSON from the parser.",
+        has_project=True,
+    )
+    requirement_contract=requirement_plan.get("requirement_contract") or {}
+    requirement_prompt=brain_directive(requirement_plan)
+
     arena_memory_source="arena-memory-eval-source"
     arena_memory_restored="arena-memory-eval-restored"
     set_model_score(arena_memory_source,"main",100,.21,8)
@@ -448,6 +459,16 @@ def run():
                   and brain_status().get("provider_reasoning_effort") is True
                   and brain_status().get("reasoning_budget_decoupled_from_visible_brevity") is True
                   and brain_status().get("confidence_governor") is True
+                  and brain_status().get("requirement_contract") is True
+                  and requirement_contract.get("count",0)>=4
+                  and requirement_contract.get("hard_count",0)>=3
+                  and requirement_contract.get("density")=="high"
+                  and requirement_plan.get("verify") is True
+                  and requirement_plan.get("prompt_policy",{}).get("include_requirement_contract") is True
+                  and requirement_plan.get("prompt_policy",{}).get("include_verification_directive") is True
+                  and "RONN REQUIREMENT CONTRACT" in requirement_prompt
+                  and "/v1/chat" in requirement_prompt
+                  and "Only return JSON" in requirement_prompt
                   and confidence_status().get("enabled") is True
                   and confidence_low_result.get("score",1)<.38
                   and confidence_low_result.get("applied") is True

@@ -2368,6 +2368,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "evidence_sufficiency":_evidence_sufficiency,
         "tool_arbitration":_r20.get("tool_arbitration") or {},
         "main_brain_confidence":_r20.get("main_brain_confidence") or {},
+        "requirement_contract":_r20.get("requirement_contract") or {},
         "tool_hub":{
             "planned":_tool_run.get("planned") or [],
             "executed":_tool_run.get("executed") or [],
