@@ -2102,6 +2102,67 @@ jobs:
           print("Browser Use R23 ownership/lazy-load/safety boundary: ok")
           PY
 
+      - name: Natural live-search intent regression
+        run: |
+          python - <<'PY'
+          from r20_controller import deterministic_plan
+          from r23_capabilities import capability_plan, retrieval_reason
+          from r23_knowledge_rescue import gap_signal, should_buffer
+
+          jordan="Mannn I wanted these new jays like I needed some Jordan 12 the white and green new ones man check that out for me right quick boss"
+
+          # Exact user wording should infer that current external information is needed.
+          r20=deterministic_plan(jordan,history=[],file_names=[],has_images=False,has_project=False,agent_mode=True)
+          assert r20["needs_live"] is True, r20
+          assert r20["tool_mode"] == "live", r20
+
+          rr=retrieval_reason(jordan,profile="chat",has_files=False)
+          assert rr["required"] is True, rr
+          assert rr["lookup"] is True, rr
+          assert rr["current"] is True, rr
+
+          caps=capability_plan(
+              {"difficulty":1,"profile":"chat","followup":False},
+              jordan,
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=True,
+          )
+          assert caps["universal_retrieval"] is True, caps
+          assert caps["agent_runtime"] is True, caps
+
+          # Self-rescue: if any normal model still admits it cannot access live/current
+          # web information, RONN should hold that draft and retrieve instead.
+          denial="I don't have live web access in this chat, so I can't confirm the current release."
+          assert should_buffer(jordan,"chat",already_live=False,has_images=False) is True
+          sig=gap_signal(denial,jordan,"chat")
+          assert sig["required"] is True, sig
+          assert sig["reason"] in {"no_live_web_access","cannot_confirm_current"}, sig
+
+          # Stable writing/local-file work should not get sent to the web merely
+          # because the user says "check".
+          writing="Check this paragraph for me and fix the grammar."
+          r20_write=deterministic_plan(writing,history=[],file_names=[],has_images=False,has_project=False,agent_mode=True)
+          assert r20_write["profile"] == "writing", r20_write
+          assert r20_write["needs_live"] is False, r20_write
+
+          code="Check this code for me and fix the bug."
+          r20_code=deterministic_plan(code,history=[],file_names=["app.py"],has_images=False,has_project=False,agent_mode=True)
+          assert r20_code["profile"] == "coding", r20_code
+          assert r20_code["needs_live"] is False, r20_code
+
+          code_caps=capability_plan(
+              {"difficulty":2,"profile":"coding","followup":False},
+              code,
+              history=[],file_names=["app.py"],has_images=False,has_project=False,agent_mode=True,
+          )
+          assert code_caps["retrieval"]["required"] is False, code_caps
+
+          # Explicit freshness should still search even in technical/product domains.
+          latest="What's the latest Python version right now?"
+          assert deterministic_plan(latest,history=[],file_names=[],has_images=False,has_project=False,agent_mode=True)["needs_live"] is True
+
+          print("natural live-search intent + self-rescue + false-positive controls: ok")
+          PY
+
       - name: Visible answer protocol leak regression
         run: |
           python - <<'PY'
