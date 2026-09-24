@@ -49,10 +49,13 @@ def extract_requirements(message: str, max_items: int=MAX_ITEMS) -> dict[str,Any
     for segment in _segments(message):
         kinds=[]
         hard=False
+        hard_hits=0
         for kind,pattern in _HARD_PATTERNS:
-            if pattern.search(segment):
+            matches=pattern.findall(segment)
+            if matches:
                 kinds.append(kind)
                 hard=True
+                hard_hits+=len(matches)
         for kind,pattern in _SOFT_PATTERNS:
             if pattern.search(segment):
                 kinds.append(kind)
