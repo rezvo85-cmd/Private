@@ -1926,7 +1926,14 @@ jobs:
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
 
-          for unsafe in ("http://127.0.0.1","http://localhost","http://[::1]"):
+          for unsafe in (
+              "http://127.0.0.1",
+              "http://localhost",
+              "http://[::1]",
+              "https://user:pass@example.com/path",
+              "https://example.com:8443/path",
+              "http://example.com:8080/path",
+          ):
               try:
                   browser_use._public_http_url(unsafe)
                   raise AssertionError("unsafe Browser Use target accepted: "+unsafe)
@@ -2008,7 +2015,7 @@ jobs:
           import importlib.metadata
 
           import r23_browser_use_adapter as adapter
-          from browser_use import Agent, Browser, ChatGroq
+          from browser_use import Agent, Browser, BrowserProfile, ChatGroq
 
           version=importlib.metadata.version("browser-use")
           print("browser-use version:",version)
@@ -2027,14 +2034,17 @@ jobs:
               temperature=0.0,
               max_retries=1,
           )
-          browser=Browser(
+          profile=BrowserProfile(
               headless=True,
               allowed_domains=["example.com"],
               block_ip_addresses=True,
               keep_alive=False,
+              enable_default_extensions=False,
           )
+          browser=Browser(browser_profile=profile)
           assert llm.provider == "groq"
           assert browser.browser_profile.block_ip_addresses is True
+          assert browser.browser_profile.enable_default_extensions is False
           assert "example.com" in browser.browser_profile.allowed_domains
 
           # Importing the adapter must never pull Browser Use into the main brain.
