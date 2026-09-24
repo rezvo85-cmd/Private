@@ -6,10 +6,13 @@ on:
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
       - ".github/workflows/ronn-r14-ci.yml"
+      - "render.yaml"
   pull_request:
     branches: [main]
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
+      - ".github/workflows/ronn-r14-ci.yml"
+      - "render.yaml"
 
 permissions:
   contents: read
