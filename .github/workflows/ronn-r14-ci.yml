@@ -1925,6 +1925,12 @@ jobs:
 
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
+          assert browser_use._allowed_domains(
+              "Open https://www.example.com/path and click the button"
+          ) == ["www.example.com"]
+          assert browser_use._allowed_domains(
+              "Open https://accounts.example.com/login and click Continue"
+          ) == ["accounts.example.com"]
 
           # Provider isolation: CLOUD_API_KEY may belong to a non-Groq
           # OpenAI-compatible endpoint and must never be forwarded to Groq.
