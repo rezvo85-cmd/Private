@@ -197,7 +197,9 @@ def status(force=False):
     }
     try:
         r = requests.get(SEARXNG_URL + "/", timeout=(4, 8), headers={"User-Agent": "RONN/20 health"})
-        out["searxng"] = r.status_code < 500
+        # A 4xx response means the service is reachable but not usable by RONN.
+        # Do not report auth/routing/configuration failures as healthy.
+        out["searxng"] = bool(r.ok)
     except Exception:
         pass
     try:

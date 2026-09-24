@@ -250,7 +250,10 @@ RESEARCH_MODEL = os.getenv("RONN_RESEARCH_MODEL", "groq/compound").strip()
 PUBLIC_MODE = os.getenv("RONN_PUBLIC_MODE", "false").strip().lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RONN_RATE_LIMIT_PER_MINUTE", "10"))
 RATE_LIMIT_MAX_KEYS = max(100, int(os.getenv("RONN_RATE_LIMIT_MAX_KEYS", "5000")))
+OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE = max(3, min(30, int(os.getenv("RONN_OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE", "8"))))
 MAX_BODY_BYTES = int(os.getenv("RONN_MAX_BODY_BYTES", str(40 * 1024 * 1024)))
+STUDIO_PLAN_TTL_SECONDS = 3600
+STUDIO_PLAN_MAX_PENDING = 128
 
 FALLBACK_REPLY = "RONN could not get a final answer from any configured AI route. Open Diagnostics to test the provider connection and available models."
 
@@ -396,6 +399,39 @@ def _prune_rate_hits(now: float) -> None:
             _rate_hits.pop(key,None)
 
 
+def _consume_rate_limit(key: str, limit: int, now: float | None = None) -> bool:
+    now=time.time() if now is None else float(now)
+    limit=max(1,int(limit))
+    with _rate_lock:
+        _prune_rate_hits(now)
+        q=_rate_hits[str(key)[:256]]
+        while q and now-q[0]>60:
+            q.popleft()
+        if len(q)>=limit:
+            return False
+        q.append(now)
+        return True
+
+
+def _prune_studio_plans_locked(now: float | None = None) -> None:
+    now=time.time() if now is None else float(now)
+    stale=[
+        pid for pid,p in _studio_plans.items()
+        if now-float(p.get("created_at") or 0)>STUDIO_PLAN_TTL_SECONDS
+    ]
+    for pid in stale:
+        _studio_plans.pop(pid,None)
+
+    overflow=len(_studio_plans)-STUDIO_PLAN_MAX_PENDING
+    if overflow>0:
+        oldest=sorted(
+            _studio_plans.items(),
+            key=lambda item: float((item[1] or {}).get("created_at") or 0),
+        )
+        for pid,_ in oldest[:overflow]:
+            _studio_plans.pop(pid,None)
+
+
 _LEGACY_PUBLIC_API_PATHS = {
     "/api/capabilities",
     "/api/cognitive-os",
@@ -477,26 +513,34 @@ async def public_guard(request: Request, call_next):
             except ValueError:
                 pass
 
+        # Owner unlock endpoints must stay reachable before a session exists, but
+        # they still need a dedicated brute-force throttle even in private mode.
+        auth_sensitive = request.url.path in {
+            "/api/v1/owner/unlock",
+            "/api/v1/owner/recovery-unlock",
+        }
+        if auth_sensitive:
+            key="auth:"+client_key(request)
+            if not _consume_rate_limit(key,OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE):
+                return JSONResponse(
+                    {"detail":"Too many reconnect attempts. Wait about a minute and try again."},
+                    status_code=429,
+                    headers={"Retry-After":"60"},
+                )
+
         # IMPORTANT:
         # Private RONN constantly polls /api/status and /api/studio/status.
         # Those background reads must never consume the user's chat quota.
-        # Rate limiting is only for public deployments and only for expensive generation calls.
+        # Public request limiting remains scoped to expensive generation calls.
         expensive = request.url.path in {"/api/chat", "/api/studio/plan", "/api/v1/chat", "/api/v1/chat/complete", "/api/v1/chat/sse", "/api/v1/research", "/api/r14/sandbox", "/api/r14/agent/execute"}
         if PUBLIC_MODE and expensive:
-            key = client_key(request)
-            now = time.time()
-            with _rate_lock:
-                _prune_rate_hits(now)
-                q = _rate_hits[key]
-                while q and now - q[0] > 60:
-                    q.popleft()
-                if len(q) >= RATE_LIMIT_PER_MINUTE:
-                    return JSONResponse(
-                        {"detail": "RONN reached this website's request limit. Wait about a minute and try again."},
-                        status_code=429,
-                        headers={"Retry-After": "60"},
-                    )
-                q.append(now)
+            key="expensive:"+client_key(request)
+            if not _consume_rate_limit(key,RATE_LIMIT_PER_MINUTE):
+                return JSONResponse(
+                    {"detail": "RONN reached this website's request limit. Wait about a minute and try again."},
+                    status_code=429,
+                    headers={"Retry-After": "60"},
+                )
 
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -3077,14 +3121,12 @@ Preserve good work and fix mistakes. Do not output markdown."""
             "created_at":int(time.time()),
             "task":body.task[:10000],
         }
-        # trim stale plans
-        stale = [pid for pid,p in _studio_plans.items() if time.time() - p["created_at"] > 3600]
-        for pid in stale:
-            _studio_plans.pop(pid,None)
+        _prune_studio_plans_locked()
     return {"plan_id":plan_id,"plan":plan,"snapshot_available":bool(snapshot)}
 
 def approve_studio_plan(owner: str, plan_id: str):
     with _studio_plan_lock:
+        _prune_studio_plans_locked()
         saved = _studio_plans.get(plan_id)
     if not saved or saved.get("owner") != owner:
         raise ValueError("Studio plan was not found or expired.")
