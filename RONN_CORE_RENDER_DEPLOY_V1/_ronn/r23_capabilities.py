@@ -116,6 +116,10 @@ def retrieval_reason(message: str, *, profile: str="", has_files: bool=False) ->
         r"\bwhat(?:'s| is) new with\b",
     )
     natural_lookup=any(re.search(pat,low,re.I) for pat in lookup_patterns)
+    if p in {"writing","creative"}:
+        natural_lookup=False
+    if p=="coding" and has_files and not explicit:
+        natural_lookup=False
 
     freshness_patterns=(
         r"\b(?:latest|newest|current|currently|today|tonight|this week|recent|recently|breaking)\b",
