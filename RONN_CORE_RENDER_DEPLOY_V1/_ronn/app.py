@@ -168,6 +168,8 @@ def verify_package_integrity():
     patch_exemptions={
         "_ronn/app.py",
         "_ronn/core_api.py",
+        "_ronn/core_store.py",
+        "_ronn/core_store_pg.py",
         "_ronn/ecosystem_api.py",
         "_ronn/ecosystem_store.py",
         "_ronn/owner_auth.py",
