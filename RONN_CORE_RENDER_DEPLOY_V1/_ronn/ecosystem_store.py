@@ -1,6 +1,8 @@
+import base64
+import hashlib
 import json
 import os
-import shutil
+import re
 import sqlite3
 import time
 import uuid
@@ -16,6 +18,7 @@ DB = DATA / "ecosystem_v1.sqlite3"
 VAULT_KEY_FILE = DATA / "vault.key"
 BACKUPS = DATA / "backups"
 BACKUPS.mkdir(parents=True, exist_ok=True)
+MAX_BACKUPS = max(3, min(100, int(os.getenv("RONN_MAX_LOCAL_BACKUPS", "20") or "20")))
 PLUGIN_DIR = BASE / "plugins"
 PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -311,27 +314,124 @@ def mark_undone(owner, action_id):
 
 
 # ---------- encrypted vault ----------
-def _vault_key():
-    env = (os.getenv("RONN_VAULT_MASTER_KEY") or "").strip().encode()
-    if env:
+def _derived_fernet_key(secret: str) -> bytes:
+    digest = hashlib.sha256(("RONN-VAULT-V1\0" + str(secret or "")).encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest)
+
+
+def _stable_vault_key():
+    master = (os.getenv("RONN_VAULT_MASTER_KEY") or "").strip()
+    if master:
+        raw = master.encode("utf-8")
         try:
-            Fernet(env)
-            return env
+            Fernet(raw)
+            return raw, "vault_master_key"
         except Exception:
-            pass
-    if VAULT_KEY_FILE.exists():
+            return _derived_fernet_key(master), "vault_master_secret"
+
+    shared = (
+        (os.getenv("RONN_SESSION_SIGNING_KEY") or "").strip()
+        or (os.getenv("RONN_CORE_TOKEN") or "").strip()
+    )
+    if shared:
+        return _derived_fernet_key(shared), "server_secret_derived"
+    return None, ""
+
+
+def _read_local_vault_key():
+    if not VAULT_KEY_FILE.exists():
+        return None
+    try:
         key = VAULT_KEY_FILE.read_bytes().strip()
-        try:
-            Fernet(key)
-            return key
-        except Exception:
-            pass
-    key = Fernet.generate_key()
+        Fernet(key)
+        return key
+    except Exception:
+        return None
+
+
+def _write_local_vault_key(key: bytes):
+    VAULT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
     VAULT_KEY_FILE.write_bytes(key)
     try:
         os.chmod(VAULT_KEY_FILE, 0o600)
     except Exception:
         pass
+
+
+def _migrate_vault_ciphertexts(old_key: bytes, new_key: bytes) -> bool:
+    if old_key == new_key:
+        return True
+    with _db() as c:
+        rows = c.execute("SELECT id,ciphertext FROM vault_items").fetchall()
+        converted = []
+        try:
+            old = Fernet(old_key)
+            new = Fernet(new_key)
+            for row in rows:
+                plain = old.decrypt(row["ciphertext"].encode("ascii"))
+                converted.append((new.encrypt(plain).decode("ascii"), row["id"]))
+        except Exception:
+            return False
+        if converted:
+            c.executemany("UPDATE vault_items SET ciphertext=? WHERE id=?", converted)
+    return True
+
+
+def vault_key_status():
+    stable, source = _stable_vault_key()
+    local = _read_local_vault_key()
+    on_render = bool((os.getenv("RENDER") or "").strip() or (os.getenv("RENDER_SERVICE_ID") or "").strip())
+    if stable:
+        return {
+            "available": True,
+            "durable": True,
+            "source": source,
+            "legacy_local_key": bool(local and local != stable),
+            "render_guarded": on_render,
+        }
+    if local:
+        return {
+            "available": True,
+            "durable": not on_render,
+            "source": "local_file",
+            "legacy_local_key": False,
+            "render_guarded": on_render,
+        }
+    return {
+        "available": not on_render,
+        "durable": False,
+        "source": "local_generated" if not on_render else "unconfigured",
+        "legacy_local_key": False,
+        "render_guarded": on_render,
+    }
+
+
+def _vault_key():
+    stable, _source = _stable_vault_key()
+    local = _read_local_vault_key()
+
+    if stable:
+        if local and local != stable:
+            # Local/offline installations may already have encrypted items.
+            # Migrate them atomically before switching to the stable server key.
+            if not _migrate_vault_ciphertexts(local, stable):
+                return local
+        _write_local_vault_key(stable)
+        return stable
+
+    if local:
+        if (os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID")):
+            raise RuntimeError("Vault encryption requires a stable server key on Render.")
+        return local
+
+    if (os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID")):
+        raise RuntimeError(
+            "Vault encryption is unavailable until RONN_VAULT_MASTER_KEY, "
+            "RONN_SESSION_SIGNING_KEY, or RONN_CORE_TOKEN is configured."
+        )
+
+    key = Fernet.generate_key()
+    _write_local_vault_key(key)
     return key
 
 
@@ -671,23 +771,77 @@ def consume_credit(owner, amount=1):
 
 
 # ---------- backups / plugins / status ----------
-def backup_all(label="auto"):
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    folder = BACKUPS / f"{stamp}-{label}"
-    folder.mkdir(parents=True, exist_ok=True)
-    copied = []
-    for p in list(DATA.glob("*.sqlite3")) + list(DATA.glob("*.db")):
+def _backup_sqlite(source: Path, destination: Path):
+    src = sqlite3.connect(str(source), timeout=10)
+    dst = sqlite3.connect(str(destination), timeout=10)
+    try:
+        src.backup(dst)
+        dst.commit()
+    finally:
+        dst.close()
+        src.close()
+
+
+def _prune_backups(limit=None):
+    keep = MAX_BACKUPS if limit is None else max(1, min(int(limit), 100))
+    folders = sorted(
+        [x for x in BACKUPS.iterdir() if x.is_dir()],
+        key=lambda x: x.name,
+        reverse=True,
+    )
+    removed = []
+    for folder in folders[keep:]:
         try:
-            shutil.copy2(p, folder / p.name)
+            for child in folder.iterdir():
+                if child.is_file():
+                    child.unlink()
+            folder.rmdir()
+            removed.append(folder.name)
+        except OSError:
+            continue
+    return removed
+
+
+def backup_all(label="auto"):
+    safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(label or "auto")).strip("-")[:40] or "auto"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = BACKUPS / f"{stamp}-{safe_label}-{uuid.uuid4().hex[:6]}"
+    folder.mkdir(parents=True, exist_ok=False)
+
+    copied = []
+    errors = []
+    seen = set()
+    for p in list(DATA.glob("*.sqlite3")) + list(DATA.glob("*.db")):
+        if p.name in seen or not p.is_file():
+            continue
+        seen.add(p.name)
+        try:
+            _backup_sqlite(p, folder / p.name)
             copied.append(p.name)
-        except Exception:
-            pass
-    meta = {"created": time.time(), "files": copied}
+        except Exception as exc:
+            errors.append({"file": p.name, "error": exc.__class__.__name__})
+
+    meta = {
+        "created": time.time(),
+        "files": copied,
+        "errors": errors,
+        "consistent_sqlite_snapshot": True,
+    }
     (folder / "backup.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return {"folder": str(folder), "files": copied, "created": meta["created"]}
+    removed = _prune_backups()
+    return {
+        "folder": str(folder),
+        "files": copied,
+        "errors": errors,
+        "created": meta["created"],
+        "consistent_sqlite_snapshot": True,
+        "retention_limit": MAX_BACKUPS,
+        "pruned": removed,
+    }
 
 
 def list_backups(limit=20):
+    limit = max(1, min(int(limit), 100))
     out = []
     for p in sorted([x for x in BACKUPS.iterdir() if x.is_dir()], key=lambda x: x.name, reverse=True)[:limit]:
         try:
@@ -723,7 +877,9 @@ def status(owner, owner_unlimited=False):
         "sync_cursor": sync,
         "flags": flags(owner),
         "credits": credits(owner, owner_unlimited),
-        "vault_available": True,
+        "vault_available": bool(vault_key_status().get("available")),
+        "vault_key": vault_key_status(),
+        "local_backup_retention": MAX_BACKUPS,
         "plugins": len(plugin_manifests()),
         "cloud_ready": True,
     }
