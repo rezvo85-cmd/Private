@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: RONN_CORE
+    runtime: python
+    repo: https://github.com/rezvo85-cmd/Private
+    branch: main
+    plan: free
+    region: oregon
+    rootDir: RONN_CORE_RENDER_DEPLOY_V1/_ronn
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: RONN_MEMORY
+          property: connectionString
+
+databases:
+  - name: RONN_MEMORY
+    plan: free
+    region: oregon
+    postgresMajorVersion: "18"
