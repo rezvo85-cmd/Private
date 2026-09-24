@@ -162,7 +162,7 @@ def _timeout_seconds() -> int:
 
 async def _run(task: str, depth: str) -> dict[str, Any]:
     # Imports stay inside the execution path by design.
-    from browser_use import Agent, Browser, ChatGroq
+    from browser_use import Agent, Browser, BrowserProfile, ChatGroq
 
     key = _groq_key()
     if not key:
@@ -173,12 +173,14 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
     max_steps = _max_steps(depth)
     started = time.time()
 
-    browser = Browser(
+    profile = BrowserProfile(
         headless=True,
         allowed_domains=domains or None,
         block_ip_addresses=True,
         keep_alive=False,
+        enable_default_extensions=False,
     )
+    browser = Browser(browser_profile=profile)
     llm = ChatGroq(
         model=model,
         api_key=key,
