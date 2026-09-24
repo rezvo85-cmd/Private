@@ -7,21 +7,64 @@ document routing system is introduced.
 from __future__ import annotations
 
 import base64
+import binascii
 import io
 import re
+import zipfile
 from pathlib import Path
 
 from docling_adapter import extract as docling_extract, status as docling_status, supported as docling_supported
 
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
-VERSION = "R23-DOCUMENT-ENGINE-2"
+MAX_OFFICE_ARCHIVE_ENTRIES = 5000
+MAX_OFFICE_UNCOMPRESSED_BYTES = 150 * 1024 * 1024
+MAX_OFFICE_MEMBER_BYTES = 64 * 1024 * 1024
+VERSION = "R23-DOCUMENT-ENGINE-3"
 
 
 def _decode_data_url(data):
     value = str(data or "")
     if "," in value:
         value = value.split(",", 1)[1]
-    return base64.b64decode(value)
+    value = re.sub(r"\s+", "", value)
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Document payload is not valid base64.") from exc
+
+
+def _validate_office_archive(
+    ext: str,
+    raw: bytes,
+    *,
+    max_entries: int = MAX_OFFICE_ARCHIVE_ENTRIES,
+    max_uncompressed: int = MAX_OFFICE_UNCOMPRESSED_BYTES,
+    max_member: int = MAX_OFFICE_MEMBER_BYTES,
+):
+    """Reject malformed/oversized Office ZIP containers before any parser opens them."""
+    if ext not in {".docx", ".xlsx", ".pptx"}:
+        return
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            infos = archive.infolist()
+            if len(infos) > max_entries:
+                raise ValueError("Office document contains too many archive entries.")
+
+            total = 0
+            for info in infos:
+                if info.flag_bits & 0x1:
+                    raise ValueError("Encrypted Office documents are not supported.")
+                name = str(info.filename or "").replace("\\", "/")
+                if name.startswith("/") or ".." in Path(name).parts:
+                    raise ValueError("Office document contains an unsafe archive path.")
+                if int(info.file_size or 0) > max_member:
+                    raise ValueError("Office document contains an oversized archive member.")
+                total += int(info.file_size or 0)
+                if total > max_uncompressed:
+                    raise ValueError("Office document expands beyond the safe extraction limit.")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Office document archive is invalid.") from exc
 
 
 def _legacy_extract(filename: str, raw: bytes, max_chars: int):
@@ -90,6 +133,7 @@ def extract_document(filename, data_url, max_chars=80000):
         raise ValueError("Document exceeds the 25 MB extraction limit.")
 
     ext = Path(filename or "").suffix.lower()
+    _validate_office_archive(ext, raw)
     docling_result = None
     if docling_supported(filename):
         docling_result = docling_extract(filename, raw, max_chars=max_chars, max_pages=120)
@@ -121,6 +165,9 @@ def status():
         "version": VERSION,
         "single_interface": True,
         "max_document_bytes": MAX_DOCUMENT_BYTES,
+        "max_office_uncompressed_bytes": MAX_OFFICE_UNCOMPRESSED_BYTES,
+        "office_archive_guard": True,
+        "strict_base64": True,
         "docling": docling_status(),
         "fallback_formats": [".pdf", ".docx", ".xlsx", ".pptx", "text/utf8"],
         "owns_final_answer": False,
