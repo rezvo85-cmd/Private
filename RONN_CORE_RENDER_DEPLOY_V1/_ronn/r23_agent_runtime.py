@@ -159,7 +159,16 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
 
     if caps.get("browser_url"):
         read_pages=int(retrieval.get("explicit_browser_pages_read") or 0)
-        require("explicit_url_read",read_pages>=1,f"{read_pages} explicit URL page(s) successfully read")
+        interactive_verified=bool(contract.get("interactive_browser_verified"))
+        require(
+            "explicit_url_read",
+            bool(read_pages>=1 or interactive_verified),
+            (
+                f"{read_pages} explicit URL page(s) successfully read"
+                if read_pages>=1 else
+                ("interactive browser execution verified" if interactive_verified else "explicit URL was not successfully read or interacted with")
+            ),
+        )
 
     if caps.get("browser_interactive"):
         require(
