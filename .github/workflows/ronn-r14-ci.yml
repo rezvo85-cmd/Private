@@ -102,6 +102,40 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Integrity and health truthfulness smoke
+        run: |
+          python - <<'PY'
+          import json
+          import app
+
+          integrity=app.verify_package_integrity()
+          print("integrity:",integrity)
+          assert integrity["verified"] is True, integrity
+
+          healthy=app.health()
+          assert isinstance(healthy,dict)
+          assert healthy["ok"] is True
+          assert healthy["integrity_ok"] is True
+
+          original=app.verify_package_integrity
+          try:
+              app.verify_package_integrity=lambda: {
+                  "verified":False,
+                  "reason":"forced-ci-failure",
+                  "checked":1,
+                  "mismatches":[{"file":"forced","state":"modified"}],
+              }
+              unhealthy=app.health()
+              assert getattr(unhealthy,"status_code",None) == 503
+              body=json.loads(unhealthy.body.decode("utf-8"))
+              assert body["ok"] is False
+              assert body["integrity_ok"] is False
+          finally:
+              app.verify_package_integrity=original
+
+          print("integrity/health truthfulness: ok")
+          PY
+
       - name: Render database binding smoke
         run: |
           python - <<'PY'
