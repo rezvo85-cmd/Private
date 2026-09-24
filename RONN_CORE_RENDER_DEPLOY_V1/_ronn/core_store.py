@@ -127,16 +127,17 @@ def ensure_conversation(owner, conversation_id=None, project_id="default", title
 
 
 def list_conversations(owner, project_id=None, limit=100):
+    limit=max(1,min(int(limit),200))
     with _db() as c:
         if project_id:
             rows = c.execute(
                 "SELECT * FROM conversations WHERE owner=? AND project_id=? ORDER BY updated DESC LIMIT ?",
-                (owner, project_id, int(limit)),
+                (owner, project_id, limit),
             ).fetchall()
         else:
             rows = c.execute(
                 "SELECT * FROM conversations WHERE owner=? ORDER BY updated DESC LIMIT ?",
-                (owner, int(limit)),
+                (owner, limit),
             ).fetchall()
     return [dict(r) for r in rows]
 

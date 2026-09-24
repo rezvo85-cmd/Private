@@ -124,14 +124,15 @@ def ensure_conversation(owner,conversation_id=None,project_id="default",title="N
     return create_conversation(owner,project_id,title)
 
 def list_conversations(owner,project_id=None,limit=100):
+    limit=max(1,min(int(limit),200))
     with _db() as c:
         with c.cursor() as cur:
             if project_id:
                 cur.execute("""SELECT * FROM core_conversations WHERE owner=%s AND project_id=%s
-                               ORDER BY updated DESC LIMIT %s""",(owner,project_id,int(limit)))
+                               ORDER BY updated DESC LIMIT %s""",(owner,project_id,limit))
             else:
                 cur.execute("""SELECT * FROM core_conversations WHERE owner=%s
-                               ORDER BY updated DESC LIMIT %s""",(owner,int(limit)))
+                               ORDER BY updated DESC LIMIT %s""",(owner,limit))
             return list(cur.fetchall())
 
 def get_conversation(owner,conversation_id,include_messages=True):
