@@ -69,6 +69,7 @@ def _pack(x):
 
     for string_limit,item_limit in (
         (20000,120),(10000,100),(5000,80),(2000,60),(800,40),(300,25),
+        (160,16),(96,10),(48,6),
     ):
         bounded=_bounded_value(x,string_limit,item_limit)
         raw=json.dumps(bounded,ensure_ascii=False)
