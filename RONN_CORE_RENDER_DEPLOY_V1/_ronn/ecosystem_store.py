@@ -22,6 +22,10 @@ MAX_BACKUPS = max(3, min(100, int(os.getenv("RONN_MAX_LOCAL_BACKUPS", "20") or "
 MAX_CLIPBOARD_PER_OWNER = max(20, min(5000, int(os.getenv("RONN_MAX_CLIPBOARD_PER_OWNER", "300") or "300")))
 MAX_READ_NOTIFICATIONS_PER_OWNER = max(100, min(10000, int(os.getenv("RONN_MAX_READ_NOTIFICATIONS_PER_OWNER", "2000") or "2000")))
 MAX_UNREAD_NOTIFICATIONS_PER_OWNER = max(100, min(10000, int(os.getenv("RONN_MAX_UNREAD_NOTIFICATIONS_PER_OWNER", "2000") or "2000")))
+MAX_SYNC_EVENTS_PER_OWNER = max(1000, min(50000, int(os.getenv("RONN_MAX_SYNC_EVENTS_PER_OWNER", "10000") or "10000")))
+MAX_ACTIONS_PER_OWNER = max(500, min(20000, int(os.getenv("RONN_MAX_ACTIONS_PER_OWNER", "5000") or "5000")))
+MAX_CLAIMED_HANDOFFS_PER_OWNER = max(100, min(5000, int(os.getenv("RONN_MAX_CLAIMED_HANDOFFS_PER_OWNER", "1000") or "1000")))
+MAX_OWNER_SESSIONS_PER_OWNER = max(10, min(500, int(os.getenv("RONN_MAX_OWNER_SESSIONS_PER_OWNER", "100") or "100")))
 MAX_ROUTINE_INTERVAL_MINUTES = max(1440, min(10 * 525600, int(os.getenv("RONN_MAX_ROUTINE_INTERVAL_MINUTES", str(5 * 525600)) or str(5 * 525600))))
 PLUGIN_DIR = BASE / "plugins"
 PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
@@ -183,6 +187,18 @@ def _prune_expired_sessions(c, now=None):
     c.execute("DELETE FROM owner_sessions WHERE expires<?",(now,))
 
 
+def _prune_owner_sessions(c, owner):
+    c.execute(
+        """DELETE FROM owner_sessions
+           WHERE owner=? AND token_hash NOT IN (
+             SELECT token_hash FROM owner_sessions
+             WHERE owner=? AND revoked=0
+             ORDER BY created DESC,rowid DESC LIMIT ?
+           )""",
+        (owner, owner, MAX_OWNER_SESSIONS_PER_OWNER),
+    )
+
+
 def create_owner_session(owner, client_id="", device_id="", days=180):
     now = time.time()
     days = max(1, min(int(days), 365))
@@ -194,6 +210,7 @@ def create_owner_session(owner, client_id="", device_id="", days=180):
             "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,0)",
             (hash_token(token), owner, (client_id or "")[:120], (device_id or "")[:120], now, exp),
         )
+        _prune_owner_sessions(c, owner)
     return token, exp
 
 
@@ -264,27 +281,67 @@ def use_recovery_code(owner, code):
 
 
 # ---------- sync / audit / undo ----------
+def _prune_sync_events(c, owner):
+    c.execute(
+        """DELETE FROM sync_events
+           WHERE owner=? AND seq NOT IN (
+             SELECT seq FROM sync_events WHERE owner=?
+             ORDER BY seq DESC LIMIT ?
+           )""",
+        (owner, owner, MAX_SYNC_EVENTS_PER_OWNER),
+    )
+
+
 def record_sync(owner, resource_type, resource_id, op, payload):
     with _db() as c:
         cur = c.execute(
             "INSERT INTO sync_events(owner,resource_type,resource_id,op,payload_json,created) VALUES(?,?,?,?,?,?)",
             (owner, resource_type, resource_id, op, _j(payload), time.time()),
         )
+        _prune_sync_events(c, owner)
         return int(cur.lastrowid)
 
 
 def pull_sync(owner, since=0, limit=500):
+    since=max(0,int(since))
+    limit=max(1,min(int(limit),1000))
     with _db() as c:
+        _prune_sync_events(c,owner)
+        oldest_row=c.execute(
+            "SELECT MIN(seq) AS oldest, MAX(seq) AS newest FROM sync_events WHERE owner=?",
+            (owner,),
+        ).fetchone()
+        oldest=int(oldest_row["oldest"] or 0)
+        newest=int(oldest_row["newest"] or 0)
         rows = c.execute(
             "SELECT * FROM sync_events WHERE owner=? AND seq>? ORDER BY seq ASC LIMIT ?",
-            (owner, int(since), max(1, min(int(limit), 1000))),
+            (owner, since, limit),
         ).fetchall()
+    reset_required=bool(since and oldest and since < oldest-1)
     events = []
     for r in rows:
         d = dict(r)
         d["payload"] = _loads(d.pop("payload_json"), {})
         events.append(d)
-    return {"events": events, "cursor": events[-1]["seq"] if events else int(since)}
+    cursor=events[-1]["seq"] if events else min(max(since,oldest-1 if oldest else since),newest or since)
+    return {
+        "events": events,
+        "cursor": cursor,
+        "oldest_cursor": max(0,oldest-1) if oldest else 0,
+        "newest_cursor": newest,
+        "reset_required": reset_required,
+    }
+
+
+def _prune_actions(c, owner):
+    c.execute(
+        """DELETE FROM actions
+           WHERE owner=? AND id NOT IN (
+             SELECT id FROM actions WHERE owner=?
+             ORDER BY id DESC LIMIT ?
+           )""",
+        (owner, owner, MAX_ACTIONS_PER_OWNER),
+    )
 
 
 def log_action(owner, action_type, resource="", detail=None, inverse=None):
@@ -294,6 +351,7 @@ def log_action(owner, action_type, resource="", detail=None, inverse=None):
             "INSERT INTO actions(owner,action_type,resource,detail_json,inverse_json,reversible,undone,created) VALUES(?,?,?,?,?,?,0,?)",
             (owner, action_type, (resource or "")[:220], _j(detail or {}), _j(inv), 1 if inv else 0, time.time()),
         )
+        _prune_actions(c, owner)
         return int(cur.lastrowid)
 
 
@@ -493,6 +551,18 @@ def vault_delete(owner, item_id):
 
 
 # ---------- handoff / clipboard / notifications ----------
+def _prune_claimed_handoffs(c, owner):
+    c.execute(
+        """DELETE FROM handoffs
+           WHERE owner=? AND status!='pending' AND id NOT IN (
+             SELECT id FROM handoffs
+             WHERE owner=? AND status!='pending'
+             ORDER BY COALESCE(claimed,created) DESC,rowid DESC LIMIT ?
+           )""",
+        (owner, owner, MAX_CLAIMED_HANDOFFS_PER_OWNER),
+    )
+
+
 def create_handoff(owner, source_device, kind, payload, target_device=""):
     hid = _id("handoff")
     now = time.time()
@@ -501,6 +571,7 @@ def create_handoff(owner, source_device, kind, payload, target_device=""):
             "INSERT INTO handoffs(id,owner,source_device,target_device,kind,payload_json,status,created,claimed) VALUES(?,?,?,?,?,?,?, ?,0)",
             (hid, owner, source_device or "", target_device or "", kind or "context", _j(payload), "pending", now),
         )
+        _prune_claimed_handoffs(c, owner)
     record_sync(owner, "handoff", hid, "create", {"kind": kind, "source_device": source_device, "target_device": target_device})
     return hid
 
@@ -525,6 +596,7 @@ def claim_handoff(owner, handoff_id, device_id=""):
             "UPDATE handoffs SET status='claimed',target_device=CASE WHEN target_device='' THEN ? ELSE target_device END,claimed=? WHERE owner=? AND id=?",
             (device_id, time.time(), owner, handoff_id),
         )
+        _prune_claimed_handoffs(c, owner)
     d = dict(r)
     d["payload"] = _loads(d.pop("payload_json"), {})
     return d
@@ -931,4 +1003,10 @@ def status(owner, owner_unlimited=False):
         "max_routine_interval_minutes": MAX_ROUTINE_INTERVAL_MINUTES,
         "plugins": len(plugin_manifests()),
         "cloud_ready": True,
+        "retention": {
+            "sync_events_per_owner": MAX_SYNC_EVENTS_PER_OWNER,
+            "actions_per_owner": MAX_ACTIONS_PER_OWNER,
+            "claimed_handoffs_per_owner": MAX_CLAIMED_HANDOFFS_PER_OWNER,
+            "owner_sessions_per_owner": MAX_OWNER_SESSIONS_PER_OWNER,
+        },
     }
