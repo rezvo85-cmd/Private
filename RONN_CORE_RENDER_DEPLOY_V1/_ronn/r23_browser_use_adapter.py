@@ -68,6 +68,15 @@ def _public_http_url(url: str, *, allow_blank: bool = False) -> bool:
     p = urlparse(value)
     if p.scheme not in {"http", "https"} or not p.hostname:
         raise ValueError("Browser Use navigation is limited to public HTTP(S) pages.")
+    if p.username is not None or p.password is not None:
+        raise ValueError("Credential-bearing browser URLs are blocked.")
+    try:
+        port = p.port
+    except ValueError as exc:
+        raise ValueError("Invalid browser URL port.") from exc
+    expected_port = 443 if p.scheme == "https" else 80
+    if port is not None and port != expected_port:
+        raise ValueError("Only standard public web ports are allowed.")
     host = p.hostname.strip().lower()
     if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
         raise ValueError("Local/private browser targets are blocked.")
@@ -87,9 +96,16 @@ def _allowed_domains(task: str) -> list[str]:
     for raw in _urls(task):
         _public_http_url(raw)
         host = (urlparse(raw).hostname or "").lower()
-        if host and host not in hosts:
-            hosts.append(host)
-    return hosts[:8]
+        candidates=[host]
+        if host.startswith("www.") and host.count(".") >= 2:
+            candidates.append(host[4:])
+        for candidate in list(candidates):
+            if candidate:
+                candidates.append("*."+candidate)
+        for candidate in candidates:
+            if candidate and candidate not in hosts:
+                hosts.append(candidate)
+    return hosts[:16]
 
 
 def requested(message: str) -> bool:
@@ -99,7 +115,9 @@ def requested(message: str) -> bool:
     interactive = any(word in low for word in _INTERACTIVE_WORDS)
     # Normal URL reading/search stays on RONN's existing safe browser/research path.
     # Browser Use is reserved for interaction, not duplicate retrieval.
-    return bool(interactive and (_urls(message) or "browser" in low or "website" in low or "site" in low))
+    # Require an explicit URL so R23, not the external executor, chooses the
+    # website scope. Open-ended discovery remains on R23 research.
+    return bool(interactive and _urls(message))
 
 
 def status() -> dict[str, Any]:
