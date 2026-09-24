@@ -980,6 +980,97 @@ jobs:
           print("storage limits / Vault migration fail-safe: ok")
           PY
 
+      - name: V1 ecosystem auth boundary smoke
+        run: |
+          python - <<'PY'
+          import os
+          from starlette.requests import Request
+          import app
+          import ecosystem_api
+
+          bootstrap={
+              "/api/v1/health",
+              "/api/v1/owner/status",
+              "/api/v1/owner/unlock",
+              "/api/v1/owner/recovery-unlock",
+          }
+          chat_owned={
+              "/api/v1/chat",
+              "/api/v1/chat/complete",
+              "/api/v1/chat/sse",
+              "/api/v1/research",
+          }
+
+          assert app._V1_PUBLIC_BOOTSTRAP_PATHS == bootstrap
+          assert app._V1_CHAT_AUTH_PATHS == chat_owned
+          for path in bootstrap | chat_owned:
+              assert app._v1_private_route(path) is False
+
+          # Every ecosystem route other than the explicit bootstrap endpoints is
+          # centrally private even when its function does not declare Depends().
+          eco_paths={getattr(route,"path","") for route in ecosystem_api.router.routes}
+          assert "/api/v1/clipboard" in eco_paths
+          assert "/api/v1/sync/push" in eco_paths
+          assert "/api/v1/workflows" in eco_paths
+          assert "/api/v1/ecosystem/status" in eco_paths
+          for path in eco_paths:
+              if path in bootstrap:
+                  assert app._v1_private_route(path) is False, path
+              else:
+                  assert app._v1_private_route(path) is True, path
+
+          old=os.environ.get("RONN_CORE_TOKEN")
+          os.environ["RONN_CORE_TOKEN"]="ci-v1-private-secret"
+
+          def request(path,headers=None):
+              pairs=[
+                  (str(k).lower().encode(),str(v).encode())
+                  for k,v in (headers or {}).items()
+              ]
+              return Request({
+                  "type":"http",
+                  "http_version":"1.1",
+                  "method":"GET",
+                  "scheme":"https",
+                  "path":path,
+                  "raw_path":path.encode(),
+                  "query_string":b"",
+                  "headers":pairs,
+                  "client":("8.8.8.8",12345),
+                  "server":("testserver",443),
+              })
+
+          try:
+              unauth=request("/api/v1/clipboard",{
+                  "x-ronn-client":"client123",
+              })
+              assert app._v1_private_route(unauth.url.path) is True
+              assert app._legacy_owner_authorized(unauth) is False
+
+              bearer=request("/api/v1/clipboard",{
+                  "x-ronn-client":"client123",
+                  "authorization":"Bearer ci-v1-private-secret",
+              })
+              assert app._legacy_owner_authorized(bearer) is True
+
+              # Bootstrap remains reachable so the web/mobile client can discover
+              # auth state and reconnect before it has a session.
+              assert app._v1_private_route("/api/v1/owner/status") is False
+              assert app._v1_private_route("/api/v1/health") is False
+
+              # Public chat keeps its existing _chat_auth policy instead of being
+              # accidentally forced through the ecosystem/admin guard.
+              for path in chat_owned:
+                  assert app._v1_private_route(path) is False
+          finally:
+              if old is None:
+                  os.environ.pop("RONN_CORE_TOKEN",None)
+              else:
+                  os.environ["RONN_CORE_TOKEN"]=old
+
+          print("v1 ecosystem auth boundary: ok")
+          PY
+
       - name: External capability ownership smoke
         run: |
           python - <<'PY'
