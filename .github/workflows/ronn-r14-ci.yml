@@ -102,6 +102,66 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Provider model retirement and live-evidence smoke
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import app
+          import provider_models
+
+          assert app.FAST_MODEL == "openai/gpt-oss-20b"
+          assert app.SMART_MODEL == "openai/gpt-oss-120b"
+          assert app.CREATOR_MODEL == "qwen/qwen3.8-27b"
+          assert app.VISION_MODEL == "qwen/qwen3.8-27b"
+          assert app.LIVE_MODEL == "openai/gpt-oss-20b"
+          assert app.RESEARCH_MODEL == "openai/gpt-oss-120b"
+
+          groq="https://api.groq.com/openai/v1"
+          assert provider_models.normalize_groq_model("qwen/qwen3.6-27b",groq) == "qwen/qwen3.8-27b"
+          assert provider_models.normalize_groq_model("groq/compound-mini",groq) == "openai/gpt-oss-20b"
+          assert provider_models.normalize_groq_model("groq/compound",groq) == "openai/gpt-oss-120b"
+          # Custom OpenAI-compatible providers retain their explicit IDs.
+          assert provider_models.normalize_groq_model(
+              "groq/compound","https://example-provider.invalid/v1"
+          ) == "groq/compound"
+
+          payload=app.request_payload(
+              app.RESEARCH_MODEL,"research",
+              [{"role":"user","content":"test"}],128,False,
+          )
+          assert payload["model"] == "openai/gpt-oss-120b"
+          assert "compound_custom" not in payload
+
+          model,route=provider_models.live_synthesis_target(
+              has_evidence=False,r23=True,current_model=app.RESEARCH_MODEL,
+              groq=True,openrouter=False,nvidia=False,
+              smart_model=app.SMART_MODEL,openrouter_model=app.OR_QWEN_MODEL,
+              nvidia_model=app.NVIDIA_MODEL,
+          )
+          assert model == app.SMART_MODEL
+          assert route == "research-limited"
+
+          model,route=provider_models.live_synthesis_target(
+              has_evidence=True,r23=True,current_model=app.RESEARCH_MODEL,
+              groq=True,openrouter=False,nvidia=False,
+              smart_model=app.SMART_MODEL,openrouter_model=app.OR_QWEN_MODEL,
+              nvidia_model=app.NVIDIA_MODEL,
+          )
+          assert model == app.RESEARCH_MODEL
+          assert route == "web-synthesis"
+
+          app_src=Path("app.py").read_text(encoding="utf-8")
+          controller_src=Path("r20_controller.py").read_text(encoding="utf-8")
+          assert "groq/compound-mini" not in app_src
+          assert '"groq/compound"' not in app_src
+          assert "qwen/qwen3.6-27b" not in app_src
+          assert "qwen/qwen3.6-27b" not in controller_src
+          assert "research-limited" in app_src
+          print("provider model retirement/live-evidence guard: ok")
+          PY
+
       - name: Integrity and health truthfulness smoke
         run: |
           python - <<'PY'
@@ -171,6 +231,7 @@ jobs:
           assert healthy["ok"] is True
           assert checks["database_runtime_binding"]["passed"] is True
           assert checks["external_capability_boundaries"]["passed"] is True
+          assert checks["provider_models_current"]["passed"] is True
 
           os.environ["DATABASE_URL"]=""
           missing=r21_release_gate.run()
