@@ -42,6 +42,7 @@ from r23_quality_lab import (
     quality_signal,
     status as quality_status,
 )
+from r23_confidence import apply_confidence_governor, status as confidence_status
 from r16_simulation import project_model, simulate as simulate_changes
 from project_brain import (
     ensure_project, remember, retrieve, export_project, import_project, set_model_score,
@@ -243,6 +244,55 @@ def run():
         force=True,
     )
 
+    confidence_low={
+        "explicit_mode":"auto","difficulty":6,"depth":"smart","verify":False,
+        "use_council":False,"second_pass":False,"needs_live":False,
+        "specialist":"","prompt_policy":{},"profile":"analysis",
+    }
+    confidence_low_result=apply_confidence_governor(
+        confidence_low,"confidence-model",0,{
+            "arena":{"ready":False,"scores":{}},
+            "domain_arena":{"ready":False,"scores":{}},
+            "outcomes":{"ready":False,"scores":{}},
+            "quality_lab":{"ready":False,"scores":{}},
+        },
+    )
+    confidence_fast={
+        "explicit_mode":"fast","difficulty":6,"depth":"fast","verify":False,
+        "use_council":False,"second_pass":False,"needs_live":False,
+        "specialist":"","prompt_policy":{},"profile":"analysis",
+    }
+    confidence_fast_result=apply_confidence_governor(
+        confidence_fast,"confidence-model",0,{
+            "arena":{"ready":False,"scores":{}},
+            "domain_arena":{"ready":False,"scores":{}},
+            "outcomes":{"ready":False,"scores":{}},
+            "quality_lab":{"ready":False,"scores":{}},
+        },
+    )
+    confidence_high={
+        "explicit_mode":"auto","difficulty":3,"depth":"smart","verify":False,
+        "use_council":False,"second_pass":False,"needs_live":False,
+        "specialist":"","prompt_policy":{},"profile":"analysis",
+    }
+    confidence_high_result=apply_confidence_governor(
+        confidence_high,"confidence-model",0,{
+            "arena":{"ready":True,"scores":{
+                "confidence-model":{"score":100},"confidence-backup":{"score":60},
+            }},
+            "domain_arena":{"ready":True,"scores":{
+                "confidence-model":{"score":100},"confidence-backup":{"score":40},
+            }},
+            "outcomes":{"ready":True,"scores":{
+                "confidence-model":{"avg_rating":1.0,"ratings":3},
+                "confidence-backup":{"avg_rating":0.0,"ratings":3},
+            }},
+            "quality_lab":{"ready":True,"scores":{
+                "confidence-model":{"score":100},"confidence-backup":{"score":75},
+            }},
+        },
+    )
+
     arena_memory_source="arena-memory-eval-source"
     arena_memory_restored="arena-memory-eval-restored"
     set_model_score(arena_memory_source,"main",100,.21,8)
@@ -397,6 +447,23 @@ def run():
                   and "two plausible" in reasoning_contract({"depth":"apex"}).lower()
                   and brain_status().get("provider_reasoning_effort") is True
                   and brain_status().get("reasoning_budget_decoupled_from_visible_brevity") is True
+                  and brain_status().get("confidence_governor") is True
+                  and confidence_status().get("enabled") is True
+                  and confidence_low_result.get("score",1)<.38
+                  and confidence_low_result.get("applied") is True
+                  and confidence_low.get("depth")=="apex"
+                  and confidence_low.get("verify") is True
+                  and confidence_low.get("use_council") is True
+                  and confidence_low.get("second_pass") is False
+                  and confidence_low.get("prompt_policy",{}).get("include_verification_directive") is True
+                  and confidence_fast_result.get("reason")=="explicit_mode_preserved"
+                  and confidence_fast.get("depth")=="fast"
+                  and confidence_fast.get("verify") is False
+                  and confidence_fast.get("use_council") is False
+                  and confidence_high_result.get("level")=="high"
+                  and confidence_high_result.get("applied") is False
+                  and confidence_high.get("depth")=="smart"
+                  and confidence_high.get("verify") is False
                   and arena_domain_signal([
                       domain_models["or_nemotron"],domain_models["nvidia"],domain_models["smart"]
                   ],"coding")["ready"]
