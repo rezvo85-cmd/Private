@@ -19,6 +19,10 @@ VAULT_KEY_FILE = DATA / "vault.key"
 BACKUPS = DATA / "backups"
 BACKUPS.mkdir(parents=True, exist_ok=True)
 MAX_BACKUPS = max(3, min(100, int(os.getenv("RONN_MAX_LOCAL_BACKUPS", "20") or "20")))
+MAX_CLIPBOARD_PER_OWNER = max(20, min(5000, int(os.getenv("RONN_MAX_CLIPBOARD_PER_OWNER", "300") or "300")))
+MAX_READ_NOTIFICATIONS_PER_OWNER = max(100, min(10000, int(os.getenv("RONN_MAX_READ_NOTIFICATIONS_PER_OWNER", "2000") or "2000")))
+MAX_UNREAD_NOTIFICATIONS_PER_OWNER = max(100, min(10000, int(os.getenv("RONN_MAX_UNREAD_NOTIFICATIONS_PER_OWNER", "2000") or "2000")))
+MAX_ROUTINE_INTERVAL_MINUTES = max(1440, min(10 * 525600, int(os.getenv("RONN_MAX_ROUTINE_INTERVAL_MINUTES", str(5 * 525600)) or str(5 * 525600))))
 PLUGIN_DIR = BASE / "plugins"
 PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -39,6 +43,7 @@ def _db():
         CREATE TABLE IF NOT EXISTS owner_sessions(
           token_hash TEXT PRIMARY KEY, owner TEXT NOT NULL, client_id TEXT, device_id TEXT,
           created REAL NOT NULL, expires REAL NOT NULL, revoked INTEGER DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS idx_owner_sessions_expires ON owner_sessions(expires);
         CREATE TABLE IF NOT EXISTS recovery_codes(
           code_hash TEXT PRIMARY KEY, owner TEXT NOT NULL, created REAL NOT NULL, used REAL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS sync_events(
@@ -59,9 +64,11 @@ def _db():
         CREATE TABLE IF NOT EXISTS clipboard(
           id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, device_id TEXT DEFAULT '', kind TEXT DEFAULT 'text',
           payload TEXT NOT NULL, created REAL NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_clipboard_owner_id ON clipboard(owner,id DESC);
         CREATE TABLE IF NOT EXISTS notifications(
           id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
           category TEXT DEFAULT 'general', read INTEGER DEFAULT 0, created REAL NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_notifications_owner_read_id ON notifications(owner,read,id DESC);
         CREATE TABLE IF NOT EXISTS workflows(
           id TEXT PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL, steps_json TEXT NOT NULL,
           enabled INTEGER DEFAULT 1, created REAL NOT NULL, updated REAL NOT NULL);
@@ -171,12 +178,18 @@ def list_permissions(owner, device_id):
     return [{**dict(r), "allowed": bool(r["allowed"])} for r in rows]
 
 
+def _prune_expired_sessions(c, now=None):
+    now=time.time() if now is None else float(now)
+    c.execute("DELETE FROM owner_sessions WHERE expires<?",(now,))
+
+
 def create_owner_session(owner, client_id="", device_id="", days=180):
     now = time.time()
     days = max(1, min(int(days), 365))
     exp = now + days * 86400
     token = new_session_token(owner, client_id, device_id, days)
     with _db() as c:
+        _prune_expired_sessions(c,now)
         c.execute(
             "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,0)",
             (hash_token(token), owner, (client_id or "")[:120], (device_id or "")[:120], now, exp),
@@ -188,14 +201,16 @@ def verify_owner_session(token, owner=None):
     if not token:
         return False
 
+    now=time.time()
     signed = verify_signed_session(token, owner)
     with _db() as c:
+        _prune_expired_sessions(c,now)
         r = c.execute("SELECT * FROM owner_sessions WHERE token_hash=?", (hash_token(token),)).fetchone()
 
     # New signed sessions survive Render deploys even if the local SQLite file
     # is replaced. When the local record exists, still honor revocation.
     if signed:
-        if r and (r["revoked"] or r["expires"] < time.time()):
+        if r and (r["revoked"] or r["expires"] < now):
             return False
         device_id = str(signed.get("d") or "")
         signed_owner = str(signed.get("o") or owner or "")
@@ -206,7 +221,7 @@ def verify_owner_session(token, owner=None):
         return True
 
     # Legacy opaque sessions remain valid until they expire.
-    if not r or r["revoked"] or r["expires"] < time.time():
+    if not r or r["revoked"] or r["expires"] < now:
         return False
     if owner and r["owner"] != owner:
         return False
@@ -515,6 +530,24 @@ def claim_handoff(owner, handoff_id, device_id=""):
     return d
 
 
+def _prune_clipboard(c,owner):
+    owner=str(owner)
+    c.execute("""DELETE FROM clipboard WHERE owner=? AND id NOT IN (
+        SELECT id FROM clipboard WHERE owner=? ORDER BY id DESC LIMIT ?
+    )""",(owner,owner,MAX_CLIPBOARD_PER_OWNER))
+
+
+def _prune_notifications(c,owner):
+    owner=str(owner)
+    for read_flag,limit in (
+        (0,MAX_UNREAD_NOTIFICATIONS_PER_OWNER),
+        (1,MAX_READ_NOTIFICATIONS_PER_OWNER),
+    ):
+        c.execute("""DELETE FROM notifications WHERE owner=? AND read=? AND id NOT IN (
+            SELECT id FROM notifications WHERE owner=? AND read=? ORDER BY id DESC LIMIT ?
+        )""",(owner,read_flag,owner,read_flag,limit))
+
+
 def clipboard_push(owner, device_id, payload, kind="text"):
     with _db() as c:
         cur = c.execute(
@@ -522,6 +555,7 @@ def clipboard_push(owner, device_id, payload, kind="text"):
             (owner, device_id or "", kind or "text", (payload or "")[:200000], time.time()),
         )
         cid = int(cur.lastrowid)
+        _prune_clipboard(c,owner)
     record_sync(owner, "clipboard", str(cid), "create", {"device_id": device_id, "kind": kind})
     return cid
 
@@ -538,21 +572,27 @@ def notification_add(owner, title, body, category="general"):
             "INSERT INTO notifications(owner,title,body,category,read,created) VALUES(?,?,?,?,0,?)",
             (owner, (title or "RONN")[:180], (body or "")[:4000], category or "general", time.time()),
         )
-        return int(cur.lastrowid)
+        nid=int(cur.lastrowid)
+        _prune_notifications(c,owner)
+        return nid
 
 
 def notifications(owner, unread_only=False, limit=100):
+    limit=max(1,min(int(limit),500))
     with _db() as c:
+        _prune_notifications(c,owner)
         if unread_only:
-            rows = c.execute("SELECT * FROM notifications WHERE owner=? AND read=0 ORDER BY id DESC LIMIT ?", (owner, int(limit))).fetchall()
+            rows = c.execute("SELECT * FROM notifications WHERE owner=? AND read=0 ORDER BY id DESC LIMIT ?", (owner, limit)).fetchall()
         else:
-            rows = c.execute("SELECT * FROM notifications WHERE owner=? ORDER BY id DESC LIMIT ?", (owner, int(limit))).fetchall()
+            rows = c.execute("SELECT * FROM notifications WHERE owner=? ORDER BY id DESC LIMIT ?", (owner, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
 def notification_read(owner, nid):
     with _db() as c:
         cur = c.execute("UPDATE notifications SET read=1 WHERE owner=? AND id=?", (owner, int(nid)))
+        if cur.rowcount:
+            _prune_notifications(c,owner)
     return cur.rowcount > 0
 
 
@@ -597,7 +637,7 @@ def workflow_get(owner, workflow_id):
 def routine_save(owner, name, interval_minutes, prompt="", workflow_id="", routine_id=None):
     rid = routine_id or _id("routine")
     now = time.time()
-    mins = max(60, int(interval_minutes or 60))
+    mins = max(60, min(int(interval_minutes or 60), MAX_ROUTINE_INTERVAL_MINUTES))
     with _db() as c:
         c.execute(
             """INSERT INTO routines(id,owner,name,workflow_id,prompt,interval_minutes,enabled,next_run,last_run,created,updated)
@@ -883,6 +923,12 @@ def status(owner, owner_unlimited=False):
         "vault_available": bool(vault_key_status().get("available")),
         "vault_key": vault_key_status(),
         "local_backup_retention": MAX_BACKUPS,
+        "clipboard_retention_per_owner": MAX_CLIPBOARD_PER_OWNER,
+        "notification_retention": {
+            "unread_per_owner": MAX_UNREAD_NOTIFICATIONS_PER_OWNER,
+            "read_per_owner": MAX_READ_NOTIFICATIONS_PER_OWNER,
+        },
+        "max_routine_interval_minutes": MAX_ROUTINE_INTERVAL_MINUTES,
         "plugins": len(plugin_manifests()),
         "cloud_ready": True,
     }
