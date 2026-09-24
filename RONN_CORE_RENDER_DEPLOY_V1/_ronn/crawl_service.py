@@ -8,7 +8,20 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+_CRAWL4AI_COMPONENTS = None
+
+
+def _crawler_components():
+    """Load Crawl4AI only when a crawl is actually requested.
+
+    Render can start and health-check the Reader without importing the entire
+    browser/crawler stack. Python caches the imported modules after first use.
+    """
+    global _CRAWL4AI_COMPONENTS
+    if _CRAWL4AI_COMPONENTS is None:
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+        _CRAWL4AI_COMPONENTS=(AsyncWebCrawler,BrowserConfig,CrawlerRunConfig,CacheMode)
+    return _CRAWL4AI_COMPONENTS
 
 app = FastAPI(title="RONN Reader", version="1.0")
 
@@ -48,11 +61,22 @@ def _markdown_text(value) -> str:
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "reader": "crawl4ai"}
+    return {
+        "ok": True,
+        "reader": "crawl4ai",
+        "crawler_load": "ready" if _CRAWL4AI_COMPONENTS is not None else "lazy",
+    }
 
 @app.post("/crawl")
 async def crawl(body: CrawlBody):
     url = _public_url(body.url)
+    try:
+        AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode = _crawler_components()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Crawl4AI runtime is unavailable: {exc.__class__.__name__}",
+        )
     browser = BrowserConfig(browser_type="chromium", headless=True, verbose=False)
     run = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
