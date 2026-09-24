@@ -84,6 +84,12 @@ def extract(filename: str, raw: bytes, max_chars: int = 80000, max_pages: int = 
                 "truncated": len(markdown) > max_chars,
             },
         }
+    except ModuleNotFoundError as exc:
+        return {
+            "ok": False,
+            "reason": "ModuleNotFoundError:" + str(getattr(exc, "name", "") or "unknown"),
+            "backend": "docling",
+        }
     except Exception as exc:
         return {
             "ok": False,
