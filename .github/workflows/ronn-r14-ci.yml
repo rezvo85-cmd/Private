@@ -91,6 +91,56 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Reader resilience smoke
+        run: |
+          python - <<'PY'
+          import crawl_service
+
+          assert crawl_service._CRAWL4AI_COMPONENTS is None
+          parsed = crawl_service._parse_html(
+              "<html><head><title>RONN Reader</title></head>"
+              "<body><script>ignore me</script><h1>Hello</h1>"
+              "<a href='/docs'>Docs</a></body></html>",
+              "https://example.com/start",
+              5000,
+          )
+          assert parsed["title"] == "RONN Reader"
+          assert "Hello" in parsed["markdown"]
+          assert "ignore me" not in parsed["markdown"]
+          assert parsed["links"][0]["href"] == "https://example.com/docs"
+
+          class FakeResponse:
+              status_code = 200
+              headers = {"Content-Type": "text/html; charset=utf-8"}
+              encoding = "utf-8"
+              def iter_content(self, chunk_size=65536):
+                  yield b"<html><head><title>Fallback</title></head><body>Recovered page</body></html>"
+              def raise_for_status(self):
+                  return None
+              def close(self):
+                  return None
+
+          class FakeSession:
+              def get(self, *args, **kwargs):
+                  return FakeResponse()
+
+          original_session = crawl_service.requests.Session
+          original_public_url = crawl_service._public_url
+          crawl_service.requests.Session = lambda: FakeSession()
+          crawl_service._public_url = lambda url: url
+          try:
+              fallback = crawl_service._http_fallback("https://example.com", 5000)
+          finally:
+              crawl_service.requests.Session = original_session
+              crawl_service._public_url = original_public_url
+
+          assert fallback["ok"] is True
+          assert fallback["reader"] == "http-fallback"
+          assert fallback["title"] == "Fallback"
+          assert "Recovered page" in fallback["markdown"]
+          print("reader resilience: ok")
+          PY
+
       - name: Check browser JavaScript
         run: |
           node --check static/app.js
