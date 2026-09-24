@@ -28,7 +28,7 @@ def _prune_owner(c,owner):
         ("failed",MAX_FAILED_JOBS_PER_OWNER),
     ):
         c.execute("""DELETE FROM jobs WHERE owner=? AND status=? AND id NOT IN (
-            SELECT id FROM jobs WHERE owner=? AND status=? ORDER BY updated_at DESC,id DESC LIMIT ?
+            SELECT id FROM jobs WHERE owner=? AND status=? ORDER BY updated_at DESC,rowid DESC LIMIT ?
         )""",(owner,status,owner,status,limit))
 
 def _bounded_value(value,string_limit=20000,item_limit=120,depth=0):
@@ -147,7 +147,7 @@ def get(jid):
     return d
 
 def list_jobs(owner,limit=40):
-    with _db() as c:rows=c.execute("SELECT id FROM jobs WHERE owner=? ORDER BY created_at DESC LIMIT ?",(str(owner),max(1,min(int(limit),100)))).fetchall()
+    with _db() as c:rows=c.execute("SELECT id FROM jobs WHERE owner=? ORDER BY created_at DESC,rowid DESC LIMIT ?",(str(owner),max(1,min(int(limit),100)))).fetchall()
     return [get(r["id"]) for r in rows]
 
 def stats(owner=None):
