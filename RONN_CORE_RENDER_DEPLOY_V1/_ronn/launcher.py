@@ -140,6 +140,7 @@ def clean_env_file():
         "RONN_CONTROLLER_OPENROUTER_MODEL",
         "RONN_FAST_MODEL", "RONN_SMART_MODEL", "RONN_CREATOR_MODEL",
         "RONN_VISION_MODEL", "RONN_LIVE_MODEL", "RONN_RESEARCH_MODEL",
+        "RONN_ALLOW_RETIRED_GROQ_MODELS",
 
         # Core auth/security and desktop behavior. Stable signing/vault keys must
         # never be stripped or older encrypted Vault data can become unreadable.
@@ -242,6 +243,7 @@ def clean_env_file():
         "RONN_CONTROLLER_OPENROUTER_MODEL",
         "RONN_FAST_MODEL", "RONN_SMART_MODEL", "RONN_CREATOR_MODEL",
         "RONN_VISION_MODEL", "RONN_LIVE_MODEL", "RONN_RESEARCH_MODEL",
+        "RONN_ALLOW_RETIRED_GROQ_MODELS",
         "RONN_CORE_TOKEN", "RONN_SESSION_SIGNING_KEY", "RONN_VAULT_MASTER_KEY",
         "RONN_CORS_ORIGINS", "RONN_RATE_LIMIT_PER_MINUTE", "RONN_RATE_LIMIT_MAX_KEYS",
         "RONN_OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
