@@ -814,6 +814,95 @@ jobs:
           print("core auth boundary: ok")
           PY
 
+      - name: Storage limit and Vault migration smoke
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          import time
+          from pathlib import Path
+
+          import core_store
+          import core_store_pg
+          import ecosystem_store
+
+          # SQLite conversation storage must clamp internally, not only at API routes.
+          old_db=core_store.DB
+          with tempfile.TemporaryDirectory() as td:
+              core_store.DB=Path(td)/"core.sqlite3"
+              now=time.time()
+              with core_store._db() as c:
+                  c.executemany(
+                      "INSERT INTO conversations(owner,conversation_id,project_id,title,created,updated) VALUES(?,?,?,?,?,?)",
+                      [
+                          ("owner",f"conv-{i}","default",f"title-{i}",now+i,now+i)
+                          for i in range(205)
+                      ],
+                  )
+              assert len(core_store.list_conversations("owner",limit=-999)) == 1
+              assert len(core_store.list_conversations("owner",limit=99999)) == 200
+          core_store.DB=old_db
+
+          # Postgres path must also clamp before sending LIMIT to psycopg.
+          captured=[]
+          class FakeCursor:
+              def __enter__(self): return self
+              def __exit__(self,*args): return False
+              def execute(self,sql,params=()):
+                  captured.append(tuple(params))
+              def fetchall(self): return []
+          class FakeDB:
+              def __enter__(self): return self
+              def __exit__(self,*args): return False
+              def cursor(self): return FakeCursor()
+
+          old_pg=core_store_pg._db
+          core_store_pg._db=lambda:FakeDB()
+          try:
+              core_store_pg.list_conversations("owner",limit=-5)
+              assert captured[-1][-1] == 1
+              core_store_pg.list_conversations("owner",limit=9999)
+              assert captured[-1][-1] == 200
+          finally:
+              core_store_pg._db=old_pg
+
+          # On Render, failed migration from a legacy local Vault key to a
+          # durable server key must fail closed rather than continue on the
+          # ephemeral legacy key.
+          old_stable=ecosystem_store._stable_vault_key
+          old_local=ecosystem_store._read_local_vault_key
+          old_migrate=ecosystem_store._migrate_vault_ciphertexts
+          old_render=os.environ.get("RENDER")
+          old_render_id=os.environ.get("RENDER_SERVICE_ID")
+          try:
+              stable=ecosystem_store._derived_fernet_key("stable-ci")
+              legacy=ecosystem_store._derived_fernet_key("legacy-ci")
+              ecosystem_store._stable_vault_key=lambda:(stable,"ci")
+              ecosystem_store._read_local_vault_key=lambda:legacy
+              ecosystem_store._migrate_vault_ciphertexts=lambda old,new:False
+              os.environ["RENDER"]="true"
+              os.environ.pop("RENDER_SERVICE_ID",None)
+              try:
+                  ecosystem_store._vault_key()
+                  raise AssertionError("Render silently kept a legacy Vault key")
+              except RuntimeError as exc:
+                  assert "migration failed" in str(exc).lower()
+          finally:
+              ecosystem_store._stable_vault_key=old_stable
+              ecosystem_store._read_local_vault_key=old_local
+              ecosystem_store._migrate_vault_ciphertexts=old_migrate
+              if old_render is None:
+                  os.environ.pop("RENDER",None)
+              else:
+                  os.environ["RENDER"]=old_render
+              if old_render_id is None:
+                  os.environ.pop("RENDER_SERVICE_ID",None)
+              else:
+                  os.environ["RENDER_SERVICE_ID"]=old_render_id
+
+          print("storage limits / Vault migration fail-safe: ok")
+          PY
+
       - name: External capability ownership smoke
         run: |
           python - <<'PY'
