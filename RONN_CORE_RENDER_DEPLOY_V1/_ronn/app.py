@@ -7,6 +7,7 @@ import threading
 import uuid
 import hashlib
 import hmac
+import ipaddress
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Generator
@@ -232,6 +233,7 @@ RESEARCH_MODEL = os.getenv("RONN_RESEARCH_MODEL", "groq/compound").strip()
 
 PUBLIC_MODE = os.getenv("RONN_PUBLIC_MODE", "false").strip().lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RONN_RATE_LIMIT_PER_MINUTE", "10"))
+RATE_LIMIT_MAX_KEYS = max(100, int(os.getenv("RONN_RATE_LIMIT_MAX_KEYS", "5000")))
 MAX_BODY_BYTES = int(os.getenv("RONN_MAX_BODY_BYTES", str(25 * 1024 * 1024)))
 
 FALLBACK_REPLY = "RONN could not get a final answer from any configured AI route. Open Diagnostics to test the provider connection and available models."
@@ -336,12 +338,46 @@ if not STUDIO_BRIDGE_TOKEN and _studio_token_path.exists():
 # ---------------- public guard ----------------
 
 def client_key(request: Request):
-    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    forwarded=[x.strip() for x in request.headers.get("x-forwarded-for","").split(",") if x.strip()]
+    # Proxies append hops to X-Forwarded-For. Walk from the trusted edge side so a
+    # caller-supplied prefix cannot cheaply rotate the public rate-limit identity.
+    for raw in reversed(forwarded):
+        candidate=raw
+        if candidate.startswith("[") and "]" in candidate:
+            candidate=candidate[1:candidate.index("]")]
+        elif candidate.count(":")==1 and candidate.rsplit(":",1)[1].isdigit():
+            candidate=candidate.rsplit(":",1)[0]
+        try:
+            ip=ipaddress.ip_address(candidate)
+            if ip.is_global:
+                return str(ip)
+        except ValueError:
+            continue
     if forwarded:
-        return forwarded[:128]
+        return forwarded[-1][:128]
     if request.client:
         return request.client.host
     return "unknown"
+
+
+def _prune_rate_hits(now: float) -> None:
+    stale=[]
+    for key,q in list(_rate_hits.items()):
+        while q and now-q[0]>60:
+            q.popleft()
+        if not q:
+            stale.append(key)
+    for key in stale:
+        _rate_hits.pop(key,None)
+
+    overflow=len(_rate_hits)-RATE_LIMIT_MAX_KEYS
+    if overflow>0:
+        oldest=sorted(
+            _rate_hits.items(),
+            key=lambda item: item[1][-1] if item[1] else 0,
+        )
+        for key,_ in oldest[:overflow]:
+            _rate_hits.pop(key,None)
 
 
 _LEGACY_PUBLIC_API_PATHS = {
@@ -434,6 +470,7 @@ async def public_guard(request: Request, call_next):
             key = client_key(request)
             now = time.time()
             with _rate_lock:
+                _prune_rate_hits(now)
                 q = _rate_hits[key]
                 while q and now - q[0] > 60:
                     q.popleft()
