@@ -1007,6 +1007,71 @@ jobs:
           print("valid bounded JSON storage: ok")
           PY
 
+      - name: Feedback and training owner-isolation smoke
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+
+          import experience_engine as experience
+          import r19_training_data as training
+
+          with tempfile.TemporaryDirectory() as td:
+              root=Path(td)
+              experience.DB=root/"experience.sqlite3"
+              training.DB=root/"training.sqlite3"
+
+              request_id="req-owner-a"
+              experience.start_run(
+                  request_id,"owner-a","project","prompt","general",
+                  "smart","model-a","strategy",2,
+              )
+              assert training.stage(
+                  request_id,"owner-a","prompt","answer","general","model-a"
+              ) is True
+
+              # A different owner cannot create feedback against the run.
+              assert experience.add_feedback(
+                  request_id,1,"cross-owner",owner="owner-b"
+              ) is None
+              with experience._db() as c:
+                  count=c.execute(
+                      "SELECT COUNT(*) n FROM feedback WHERE request_id=?",
+                      (request_id,),
+                  ).fetchone()["n"]
+              assert count == 0
+
+              # Nor can that owner inspect, promote, or discard the staged example.
+              assert training.pending_example(request_id,owner="owner-b") is None
+              assert training.promote(request_id,owner="owner-b") is None
+              assert training.discard(request_id,owner="owner-b") is False
+              assert training.pending_example(request_id,owner="owner-a") is not None
+
+              # Missing runs cannot create orphan feedback rows either.
+              assert experience.add_feedback(
+                  "missing-request",-1,"no-run",owner="owner-a"
+              ) is None
+              with experience._db() as c:
+                  total=c.execute("SELECT COUNT(*) n FROM feedback").fetchone()["n"]
+              assert total == 0
+
+              # The real owner can rate and promote normally.
+              run=experience.add_feedback(
+                  request_id,1,"good",owner="owner-a"
+              )
+              assert run and run["owner"] == "owner-a"
+              example_id=training.promote(request_id,owner="owner-a")
+              assert example_id
+              assert training.pending_example(request_id,owner="owner-a") is None
+              with training._db() as c:
+                  row=c.execute(
+                      "SELECT owner FROM examples WHERE id=?",(example_id,)
+                  ).fetchone()
+              assert row and row["owner"] == "owner-a"
+
+          print("feedback/training owner isolation: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
