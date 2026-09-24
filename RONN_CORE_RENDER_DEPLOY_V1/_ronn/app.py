@@ -162,9 +162,9 @@ def verify_package_integrity():
     except Exception as exc:
         return {"verified":False,"reason":"manifest_invalid","checked":0,"mismatches":[str(exc)[:160]]}
     mismatches=[]; checked=0
-    # R11 is a signed-in-place upgrade over the original R10 package. These
-    # files are intentionally modified by the R11 upgrade; the rest of the
-    # original package remains hash-checked against the shipped manifest.
+    # The shipped manifest predates R22/R23. Keep verification meaningful by
+    # explicitly listing intentional post-manifest modifications while still
+    # hash-checking every unchanged deployed file.
     patch_exemptions={
         "_ronn/app.py",
         "_ronn/core_api.py",
@@ -185,8 +185,32 @@ def verify_package_integrity():
         "_ronn/r23_research.py",
         "_ronn/r23_agent_runtime.py",
         "_ronn/r23_eval_lab.py",
+
+        # Legitimate post-R21 files still tracked by the original manifest.
+        # Keep them explicit so integrity remains meaningful for every other
+        # manifest-tracked file instead of disabling verification globally.
+        "_ronn/crawl_requirements.txt",
+        "_ronn/crawl_service.py",
+        "_ronn/document_engine.py",
+        "_ronn/experience_engine.py",
+        "_ronn/project_brain.py",
+        "_ronn/r20_web_tools.py",
+        "_ronn/r21_release_gate.py",
+        "_ronn/requirements.txt",
     } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE","R23-ALL-11")) else set()
+
+    # These were R21 ZIP/desktop-launcher packaging files, not deployed Core
+    # runtime files, and were intentionally removed from the repository.
+    retired_manifest_entries={
+        ".env.example",
+        "README.txt",
+        "RONN_R10_30_SYSTEMS_COVERAGE.txt",
+        "START_RONN.bat",
+    }
+
     for rel, expected in (manifest.get("files") or {}).items():
+        if rel in retired_manifest_entries:
+            continue
         fp=BASE.parent / rel
         if not fp.exists() or not fp.is_file():
             mismatches.append({"file":rel,"state":"missing"}); continue
@@ -200,6 +224,7 @@ def verify_package_integrity():
         "base_manifest_build":manifest.get("build"),
         "checked":checked,
         "patch_exemptions":sorted(patch_exemptions),
+        "retired_manifest_entries":sorted(retired_manifest_entries),
         "mismatches":mismatches[:20],
     }
 
@@ -3971,7 +3996,11 @@ def status(request: Request):
 @app.get("/health")
 def health():
     integrity=verify_package_integrity()
-    return {"ok":True,"name":"RONN","build":BUILD_ID,"integrity_ok":integrity.get("verified",False),"integrity":integrity}
+    ok=bool(integrity.get("verified",False))
+    payload={"ok":ok,"name":"RONN","build":BUILD_ID,"integrity_ok":ok,"integrity":integrity}
+    if not ok:
+        return JSONResponse(payload,status_code=503)
+    return payload
 
 def _r14_require_owner(request: Request):
     try:
