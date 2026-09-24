@@ -31,6 +31,13 @@ _GAP_PATTERNS=(
     ("unknown_named_thing", r"\bunknown (?:term|package|library|api|error|tool|framework)\b"),
 )
 
+_LOOKUP_QUESTION_PATTERNS=(
+    r"\bcheck (?:that|this|it|those|these) out\b",
+    r"\b(?:can you |could you )?(?:find|look up|look into|check for|see if)\b",
+    r"\bfind me\b",
+    r"\bwhere (?:can|could) i (?:buy|get|find)\b",
+)
+
 _FALSE_POSITIVE_CONTEXT=(
     "which do you prefer",
     "what do you prefer",
@@ -56,6 +63,8 @@ def should_buffer(question: str, profile: str="", *, already_live=False, has_ima
     if p in {"creative","writing"}:
         return False
     if p in _FACTUAL_PROFILES:
+        return True
+    if any(re.search(pattern,q,re.I) for pattern in _LOOKUP_QUESTION_PATTERNS):
         return True
     # Catch ordinary factual question shapes that may have been classified as chat.
     return bool(re.match(r"^(what|who|where|when|why|how|which|is|are|does|do|can)\b",q))
