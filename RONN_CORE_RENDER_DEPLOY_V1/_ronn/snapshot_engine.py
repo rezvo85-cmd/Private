@@ -1,11 +1,13 @@
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
 BASE=Path(__file__).resolve().parent
 ROOT=BASE/'data'/'snapshots'
 ROOT.mkdir(parents=True,exist_ok=True)
+MAX_SNAPSHOTS_PER_PROJECT=max(5,min(100,int(os.getenv("RONN_SNAPSHOT_MAX_PER_PROJECT","20") or "20")))
 
 
 def _safe(value):
@@ -14,6 +16,22 @@ def _safe(value):
 
 def _sha(text):
     return hashlib.sha256((text or '').encode('utf-8',errors='ignore')).hexdigest()
+
+
+def _prune_folder(folder: Path):
+    files=sorted(
+        [p for p in folder.glob("*.json") if p.is_file()],
+        key=lambda p:p.stat().st_mtime,
+        reverse=True,
+    )
+    removed=0
+    for p in files[MAX_SNAPSHOTS_PER_PROJECT:]:
+        try:
+            p.unlink()
+            removed+=1
+        except OSError:
+            pass
+    return removed
 
 
 def create_snapshot(owner,project_id,files,label='checkpoint'):
@@ -29,12 +47,14 @@ def create_snapshot(owner,project_id,files,label='checkpoint'):
     payload={'snapshot_id':sid,'owner':owner,'project_id':project_id,'label':label[:120],'created':time.time(),'files':rows}
     path=folder/f'{sid}.json'
     path.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')
-    return {'snapshot_id':sid,'label':label,'files':len(rows),'path':str(path),'created':payload['created']}
+    pruned=_prune_folder(folder)
+    return {'snapshot_id':sid,'label':label,'files':len(rows),'path':str(path),'created':payload['created'],'pruned':pruned}
 
 
 def list_snapshots(owner,project_id,limit=30):
     folder=ROOT/_safe(owner)/_safe(project_id)
     if not folder.exists():return []
+    limit=max(1,min(int(limit),MAX_SNAPSHOTS_PER_PROJECT))
     out=[]
     for p in sorted(folder.glob('*.json'),key=lambda x:x.stat().st_mtime,reverse=True)[:limit]:
         try:
