@@ -287,6 +287,29 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
             except Exception as exc:
                 out["errors"].append("browser_automation:"+exc.__class__.__name__)
 
+    # A configured Browser Use runtime can still fail at launch/runtime
+    # (for example, missing Chromium). Fall back to the safe read-only browser
+    # after the failed attempt, but never claim the requested interaction ran.
+    if (
+        urls
+        and caps.get("agent_runtime")
+        and caps.get("browser_interactive")
+        and "browser_automation" not in out["executed"]
+        and not out.get("browser_pages")
+        and "browser" not in out["executed"]
+    ):
+        out["planned"].append("browser_fallback")
+        try:
+            pages=collect_pages(urls[:4])
+            out["browser_pages"]=pages
+            out["executed"].append("browser")
+            evidence.append(
+                "RONN BROWSER FALLBACK EVIDENCE (read-only; requested interaction was not verified):\n"+
+                json.dumps(pages,ensure_ascii=False)[:30000]
+            )
+        except Exception as exc:
+            out["errors"].append("browser_fallback:"+exc.__class__.__name__)
+
     # Weather stays structured instead of using generic search.
     low=str(message or "").lower()
     if decision.get("needs_live") and ("weather" in low or "forecast" in low):
