@@ -238,7 +238,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
 
     # 2) Full agent runtime: inspect explicit URLs with the safe browser.
     urls=extract_urls(message)
-    if urls and caps.get("agent_runtime"):
+    if urls and caps.get("agent_runtime") and not caps.get("browser_interactive"):
         out["planned"].append("browser")
         try:
             pages=collect_pages(urls[:4])
