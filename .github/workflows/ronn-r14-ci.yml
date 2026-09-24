@@ -1903,6 +1903,62 @@ jobs:
           print("reader resilience/auth/url-safety/fast-path: ok")
           PY
 
+      - name: Browser Use R23 boundary smoke
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import r23_browser_use_adapter as browser_use
+          from r23_capabilities import capability_plan
+          from r23_agent_runtime import status as agent_status
+
+          os.environ.pop("RONN_BROWSER_USE_ENABLED",None)
+          st=browser_use.status()
+          print("browser-use core status:",st)
+          assert st["enabled"] is False
+          assert st["scope"] == "bounded_browser_executor"
+          assert st["r23_final_answer_owner"] is True
+          assert st["lazy_loaded"] is True
+          assert st["local_private_network_blocked"] is True
+          assert st["irreversible_final_submit_blocked"] is True
+
+          assert browser_use.requested("Open https://example.com and click the More information link") is True
+          assert browser_use.requested("Read https://example.com and summarize it") is False
+
+          for unsafe in ("http://127.0.0.1","http://localhost","http://[::1]"):
+              try:
+                  browser_use._public_http_url(unsafe)
+                  raise AssertionError("unsafe Browser Use target accepted: "+unsafe)
+              except ValueError:
+                  pass
+
+          base={"difficulty":3,"profile":"knowledge","followup":False}
+          interactive=capability_plan(
+              base,
+              "Open https://example.com and click the More information link",
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=True,
+          )
+          assert interactive["browser_interactive"] is True
+          assert interactive["computer_requested"] is False
+          assert interactive["agent_runtime"] is True
+
+          computer=capability_plan(
+              base,
+              "Use my computer and inspect my screen",
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=True,
+          )
+          assert computer["computer_requested"] is True
+          assert computer["browser_interactive"] is False
+
+          brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
+          assert "browser_use" not in brain
+          runtime=agent_status()
+          assert runtime["version"] == "R23-AGENT-3"
+          assert runtime["browser_use"]["scope"] == "bounded_browser_executor"
+          print("Browser Use R23 ownership/lazy-load/safety boundary: ok")
+          PY
+
       - name: Check browser JavaScript
         run: |
           node --check static/app.js
@@ -1924,6 +1980,68 @@ jobs:
             exit 1
           fi
           echo "secret-pattern scan: ok"
+
+  external_browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/_ronn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Core plus Browser Use
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r browser_requirements.txt
+
+      - name: Browser Use compatibility smoke
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+
+          import r23_browser_use_adapter as adapter
+          from browser_use import Agent, Browser, ChatGroq
+
+          version=importlib.metadata.version("browser-use")
+          print("browser-use version:",version)
+          assert version == "0.13.10"
+
+          st=adapter.status()
+          print("adapter status:",st)
+          assert st["installed"] is True
+          assert st["scope"] == "bounded_browser_executor"
+          assert st["lazy_loaded"] is True
+
+          # Constructor-only smoke: no network, LLM call, or browser process.
+          llm=ChatGroq(
+              model="meta-llama/llama-4-maverick-17b-128e-instruct",
+              api_key="ci-not-used",
+              temperature=0.0,
+              max_retries=1,
+          )
+          browser=Browser(
+              headless=True,
+              allowed_domains=["example.com"],
+              block_ip_addresses=True,
+              keep_alive=False,
+          )
+          assert llm.provider == "groq"
+          assert browser.browser_profile.block_ip_addresses is True
+          assert "example.com" in browser.browser_profile.allowed_domains
+
+          # Importing the adapter must never pull Browser Use into the main brain.
+          import r23_brain
+          assert "browser_use" not in open("r23_brain.py",encoding="utf-8").read().lower()
+          print("Browser Use dependency/API compatibility: ok")
+          PY
 
   external_eval:
     runs-on: ubuntu-latest
