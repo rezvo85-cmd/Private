@@ -24,7 +24,18 @@ _GAP_PATTERNS=(
     ("cannot_determine_reference", r"\bi (?:cannot|can't) determine what .{0,90}? refers to\b"),
     ("not_sure_reference", r"\bi(?:'m| am) not sure what .{1,90}? (?:means|is|refers to)\b"),
     ("missing_information", r"\bi (?:do not|don't) have (?:enough )?(?:information|reliable information) (?:about|on)\b"),
+    ("no_live_web_access", r"\bi (?:do not|don't) have (?:live |current )?web (?:access|browsing)\b"),
+    ("cannot_browse_live", r"\bi (?:cannot|can't) (?:browse|search|access) (?:the )?(?:live )?web\b"),
+    ("cannot_confirm_current", r"\bi (?:cannot|can't) confirm (?:the )?(?:current|latest|new|recent)\b"),
+    ("cannot_check_current", r"\bi (?:cannot|can't) (?:check|verify) (?:the )?(?:current|latest|new|recent)\b"),
     ("unknown_named_thing", r"\bunknown (?:term|package|library|api|error|tool|framework)\b"),
+)
+
+_LOOKUP_QUESTION_PATTERNS=(
+    r"\bcheck (?:that|this|it|those|these) out\b",
+    r"\b(?:can you |could you )?(?:find|look up|look into|check for|see if)\b",
+    r"\bfind me\b",
+    r"\bwhere (?:can|could) i (?:buy|get|find)\b",
 )
 
 _FALSE_POSITIVE_CONTEXT=(
@@ -52,6 +63,8 @@ def should_buffer(question: str, profile: str="", *, already_live=False, has_ima
     if p in {"creative","writing"}:
         return False
     if p in _FACTUAL_PROFILES:
+        return True
+    if any(re.search(pattern,q,re.I) for pattern in _LOOKUP_QUESTION_PATTERNS):
         return True
     # Catch ordinary factual question shapes that may have been classified as chat.
     return bool(re.match(r"^(what|who|where|when|why|how|which|is|are|does|do|can)\b",q))

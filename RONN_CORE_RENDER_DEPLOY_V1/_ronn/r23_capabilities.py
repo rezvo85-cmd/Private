@@ -95,29 +95,71 @@ def unknown_candidates(message: str) -> list[str]:
     return found[:6]
 
 
-def retrieval_reason(message: str) -> dict[str, Any]:
+def retrieval_reason(message: str, *, profile: str="", has_files: bool=False) -> dict[str, Any]:
     low = _norm(message)
     candidates = unknown_candidates(message)
+    p=str(profile or "").strip().lower()
+
     explicit = any(x in low for x in (
         "search the web","look this up","look it up","find out","find sources",
         "research this","check online","search online"
     ))
-    current = any(x in low for x in (
-        "latest","today","right now","currently","current ","this week","news","weather",
-        "forecast","score","standings","schedule","price today","stock price","who won",
-        "release date","current version","open now","breaking","recent update"
-    ))
+
+    # Natural-language lookup intent. This intentionally looks for the meaning
+    # of "go check/find this for me", not one exact command phrase.
+    lookup_patterns=(
+        r"\bcheck (?:that|this|it|those|these) out\b",
+        r"\bcheck (?:that|this|it|those|these) (?:for me|online)\b",
+        r"\b(?:can you |could you )?(?:find|look up|look into|check for|see if)\b",
+        r"\bfind me\b",
+        r"\bwhere (?:can|could) i (?:buy|get|find)\b",
+        r"\bwhat(?:'s| is) new with\b",
+    )
+    natural_lookup=any(re.search(pat,low,re.I) for pat in lookup_patterns)
+    if p in {"writing","creative"}:
+        natural_lookup=False
+    if p=="coding" and has_files and not explicit:
+        natural_lookup=False
+
+    freshness_patterns=(
+        r"\b(?:latest|newest|current|currently|today|tonight|this week|recent|recently|breaking)\b",
+        r"\b(?:new release|new drop|just dropped|dropping|restock|restocked|restocking|in stock|sold out|available now)\b",
+        r"\b(?:release date|current version|price today|stock price|open now)\b",
+        r"\b(?:score|standings|schedule|forecast|weather|news)\b",
+    )
+    current=any(re.search(pat,low,re.I) for pat in freshness_patterns)
+
+    # "new" by itself is ambiguous. Treat it as fresh information only when the
+    # user is clearly asking to inspect/find/check a real-world thing, not while
+    # writing/creating or checking supplied code/files.
+    new_lookup=bool(
+        re.search(r"\bnew\b",low)
+        and natural_lookup
+        and p not in {"creative","writing","coding"}
+        and not has_files
+    )
+
     local = any(x in low for x in (
         "near me","nearby","closest","around me","in my area","my location","where am i",
         "restaurants near","food near","coffee near","open near me"
     ))
+
+    required=bool(explicit or natural_lookup or current or new_lookup or local or candidates)
+    reason=(
+        "unknown_term" if candidates else
+        "local" if local else
+        "current" if (current or new_lookup) else
+        "lookup" if natural_lookup else
+        "explicit" if explicit else ""
+    )
     return {
-        "required": bool(explicit or current or local or candidates),
+        "required": required,
         "explicit": explicit,
-        "current": current,
+        "lookup": natural_lookup,
+        "current": bool(current or new_lookup),
         "local": local,
         "unknown_terms": candidates,
-        "reason": "unknown_term" if candidates else ("current" if current else ("local" if local else ("explicit" if explicit else ""))),
+        "reason": reason,
     }
 
 
@@ -127,7 +169,11 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
     file_names = file_names or []
     low = _norm(message)
     difficulty = int(base.get("difficulty") or 1)
-    retrieval = retrieval_reason(message)
+    retrieval = retrieval_reason(
+        message,
+        profile=str(base.get("profile") or ""),
+        has_files=bool(file_names),
+    )
 
     coding = str(base.get("profile") or "") == "coding"
     has_url = bool(re.search(r"https?://[^\s]+", str(message or ""), re.I))
