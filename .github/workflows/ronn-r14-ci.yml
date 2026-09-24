@@ -1942,6 +1942,8 @@ jobs:
               os.environ["CLOUD_API_KEY"]="not-a-groq-key"
               os.environ["CLOUD_API_BASE"]="https://openrouter.ai/api/v1"
               assert browser_use._groq_key() == ""
+              os.environ["CLOUD_API_BASE"]="https://api.groq.com.evil.example/openai/v1"
+              assert browser_use._groq_key() == ""
               os.environ["CLOUD_API_BASE"]="https://api.groq.com/openai/v1"
               assert browser_use._groq_key() == "not-a-groq-key"
               os.environ["GROQ_API_KEY"]="direct-groq-key"
@@ -2169,6 +2171,21 @@ jobs:
           assert browser.browser_profile.block_ip_addresses is True
           assert browser.browser_profile.enable_default_extensions is False
           assert "example.com" in browser.browser_profile.allowed_domains
+
+          agent=Agent(
+              task="Open https://example.com and inspect the page",
+              llm=llm,
+              browser=browser,
+              use_vision=False,
+              use_thinking=False,
+              max_actions_per_step=3,
+              max_failures=3,
+              final_response_after_failure=False,
+              max_history_items=8,
+              generate_gif=False,
+              directly_open_url=True,
+          )
+          assert agent.settings.use_vision is False
 
           # The combined dependency environment must still import the actual RONN
           # application and pass the R23 benchmark. This catches transitive package
