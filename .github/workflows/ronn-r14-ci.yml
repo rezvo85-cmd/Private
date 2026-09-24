@@ -2088,6 +2088,78 @@ jobs:
           assert reqs["interactive_browser_execution"]["met"] is False
           assert fallback["evidence_sufficiency"]["sufficient"] is False
 
+          # Configured/ready can still fail at launch/runtime. In that case,
+          # Browser Use is attempted once, then the safe reader supplies
+          # read-only evidence without claiming the click succeeded.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          runtime_mod.collect_pages=lambda urls: (
+              calls.__setitem__("collect",calls["collect"]+1)
+              or [{"url":"https://example.com","status":200,"text":"runtime fallback page","error":None}]
+          )
+          runtime_mod.browser_use_status=lambda: {
+              "ready":True,"installed":True,"enabled":True,"configured":True
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":False,"reason":"browser_launch_failed"}
+          )
+          try:
+              failed_runtime=runtime_mod.execute(
+                  "ci","browser-runtime-fallback",
+                  "Open https://example.com and click More",[],decision
+              )
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["interactive"] == 1
+          assert calls["collect"] == 1
+          assert "browser_automation" not in failed_runtime["executed"]
+          assert "browser" in failed_runtime["executed"]
+          assert failed_runtime["browser_automation"]["reason"] == "browser_launch_failed"
+          reqs={x["name"]:x for x in failed_runtime["evidence_sufficiency"]["requirements"]}
+          assert reqs["explicit_url_read"]["met"] is True
+          assert reqs["interactive_browser_execution"]["met"] is False
+          assert failed_runtime["evidence_sufficiency"]["sufficient"] is False
+
+          # Defense in depth: even a malformed capability object cannot execute
+          # Browser Use if agent_runtime permission is false.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          runtime_mod.collect_pages=lambda urls: calls.__setitem__("collect",calls["collect"]+1) or []
+          runtime_mod.browser_use_status=lambda: {
+              "ready":True,"installed":True,"enabled":True,"configured":True
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":True,"urls":["https://example.com"],"result":"unexpected"}
+          )
+          no_permission={
+              "needs_live":False,
+              "capabilities":{
+                  "agent_runtime":False,
+                  "browser_url":True,
+                  "browser_interactive":True,
+                  "retrieval":{},
+              },
+          }
+          try:
+              blocked=runtime_mod.execute(
+                  "ci","browser-no-permission",
+                  "Open https://example.com and click More",[],no_permission
+              )
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["interactive"] == 0
+          assert calls["collect"] == 0
+          assert "browser_automation" not in blocked["executed"]
+          assert "browser" not in blocked["executed"]
+
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain
           runtime=agent_status()
