@@ -151,9 +151,9 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
         "use my computer","control my computer","my desktop","my screen","connected computer",
         "computer agent"
     ))
-    browser_interactive = bool(
-        browser_words and (has_url or "browser" in low or "website" in low or "site" in low)
-    )
+    # Browser Use is intentionally scoped to an explicit R23-approved URL.
+    # Open-ended discovery stays on the existing research pipeline.
+    browser_interactive = bool(browser_words and has_url)
 
     return {
         "strong_main_brain": True,
