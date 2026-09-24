@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from typing import Any
 
 VERSION = "R23-BROWSER-USE-1"
-DEFAULT_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 _TRUE = {"1", "true", "yes", "on"}
 
 _INTERACTIVE_WORDS = (
