@@ -41,6 +41,7 @@ from ecosystem_store import (
     use_recovery_code,
     vault_delete,
     vault_get,
+    vault_key_status,
     vault_list,
     vault_put,
     verify_owner_session,
@@ -343,16 +344,31 @@ def actions_undo(action_id: int, request: Request, _=Depends(require_op)):
 
 @router.get("/vault")
 def vault_index(request: Request, _=Depends(require_op)):
-    return {"items": vault_list(_owner(request))}
+    return {"items": vault_list(_owner(request)), "key_status": vault_key_status()}
 
 
 @router.post("/vault")
 def vault_write(body: VaultBody, request: Request, _=Depends(require_op)):
-    return {"item": vault_put(_owner(request), body.title, body.text, body.item_id)}
+    key_status = vault_key_status()
+    if not key_status.get("available"):
+        raise HTTPException(
+            503,
+            "Vault encryption is not durably configured on this server.",
+        )
+    try:
+        return {"item": vault_put(_owner(request), body.title, body.text, body.item_id)}
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)[:300])
 
 
 @router.get("/vault/{item_id}")
 def vault_read(item_id: str, request: Request, _=Depends(require_op)):
+    key_status = vault_key_status()
+    if not key_status.get("available"):
+        raise HTTPException(
+            503,
+            "Vault encryption is not durably configured on this server.",
+        )
     item = vault_get(_owner(request), item_id)
     if not item:
         raise HTTPException(404, "Vault item not found or could not be decrypted.")
