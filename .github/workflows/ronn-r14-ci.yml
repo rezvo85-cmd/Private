@@ -248,6 +248,51 @@ jobs:
           print("provider model retirement/live-evidence/vision fallback/agent-mode guard: ok")
           PY
 
+      - name: Desktop config and environment precedence smoke
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+
+          import launcher
+          from dotenv import dotenv_values
+
+          assert launcher.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
+
+          with tempfile.TemporaryDirectory() as td:
+              p=Path(td)/".env"
+              p.write_text(
+                  "CLOUD_API_BASE=https://api.groq.com/openai/v1\n"
+                  "CLOUD_API_KEY=desktop-key\n"
+                  "OPENROUTER_API_KEY=openrouter-key\n"
+                  "RONN_CREATOR_MODEL=qwen/qwen3.6-27b\n"
+                  "RONN_VISION_MODEL=qwen/qwen3.6-27b\n"
+                  "RONN_LIVE_MODEL=groq/compound-mini\n"
+                  "RONN_RESEARCH_MODEL=groq/compound\n",
+                  encoding="utf-8",
+              )
+              old=launcher.ENV_FILE
+              try:
+                  launcher.ENV_FILE=p
+                  assert launcher._env_has_provider(p) is True
+                  launcher.clean_env_file()
+                  vals=dotenv_values(p)
+                  assert vals["OPENROUTER_API_KEY"] == "openrouter-key"
+                  assert vals["RONN_CREATOR_MODEL"] == "qwen/qwen3.8-27b"
+                  assert vals["RONN_VISION_MODEL"] == "qwen/qwen3.8-27b"
+                  assert vals["RONN_LIVE_MODEL"] == "openai/gpt-oss-20b"
+                  assert vals["RONN_RESEARCH_MODEL"] == "openai/gpt-oss-120b"
+              finally:
+                  launcher.ENV_FILE=old
+
+          src=Path("app.py").read_text(encoding="utf-8")
+          assert 'os.getenv("RONN_ENV_FILE")' in src
+          assert "load_dotenv(dotenv_path=ENV_FILE, override=False)" in src
+          assert '"_ronn/launcher.py"' in src
+          print("desktop config/env precedence: ok")
+          PY
+
       - name: Integrity and health truthfulness smoke
         run: |
           python - <<'PY'
