@@ -99,6 +99,28 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Attachment budget smoke
+        run: |
+          python - <<'PY'
+          import math
+          from pathlib import Path
+          import app
+
+          mib=1024*1024
+          document_raw=25*mib
+          document_b64=4*math.ceil(document_raw/3)
+          assert app.MAX_BODY_BYTES >= 40*mib
+          assert document_b64 < app.MAX_BODY_BYTES
+
+          js=Path("static/app.js").read_text(encoding="utf-8")
+          assert "MAX_IMAGE_BYTES=20*1024*1024" in js
+          assert "MAX_DOCUMENT_BYTES=25*1024*1024" in js
+          assert "MAX_CHAT_IMAGE_RAW_BYTES=22*1024*1024" in js
+          assert 'bytes:file.size' in js
+          assert 'Images together must stay under 22 MB.' in js
+          print("attachment budget: ok")
+          PY
+
       - name: Rate limiter hardening smoke
         run: |
           python - <<'PY'
