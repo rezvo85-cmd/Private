@@ -911,6 +911,102 @@ jobs:
           print("persistent retention/sync cursor guards: ok")
           PY
 
+      - name: Valid bounded JSON storage smoke
+        run: |
+          python - <<'PY'
+          import json
+          import tempfile
+          from pathlib import Path
+
+          import r17_jobs as jobs
+          import r15_trust as trust
+
+          with tempfile.TemporaryDirectory() as td:
+              root=Path(td)
+
+              # R17: force the size path that used to cut serialized JSON in half.
+              jobs.DB=root/"jobs.sqlite3"
+              jobs.MAX_JSON_CHARS=6000
+              huge={
+                  "task":"quote\\slash\"" * 5000,
+                  "nested":{"items":[{"text":"x"*5000,"n":i} for i in range(30)]},
+                  "keep":"important",
+              }
+              packed=jobs._pack(huge)
+              assert len(packed) <= jobs.MAX_JSON_CHARS
+              decoded=json.loads(packed)
+              assert isinstance(decoded,dict)
+              assert decoded.get("keep") == "important"
+
+              # Persisted payload/result must decode back to structured JSON.
+              def runner(payload,progress):
+                  progress(50)
+                  return {"echo":payload,"result":"y"*30000}
+              created=jobs.create("ci-owner","ci",huge,runner)
+              # The worker is asynchronous; verify the payload immediately from DB.
+              stored=jobs.get(created["id"])
+              assert isinstance(stored["payload"],dict)
+              assert stored.get("payload_parse_error") is not True
+
+              # Legacy malformed rows are surfaced explicitly and are never resumed.
+              with jobs._db() as c:
+                  c.execute(
+                      "INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      ("legacy-bad","ci-owner","ci",'{"broken":',"failed",100,"","","1","1"),
+                  )
+                  c.commit()
+              bad=jobs.get("legacy-bad")
+              assert bad["payload"] is None
+              assert bad["payload_parse_error"] is True
+              resumed=jobs.resume("legacy-bad",lambda payload,progress: {"should_not_run":True})
+              assert resumed["status"] == "failed"
+              assert "cannot be resumed safely" in resumed["error"]
+
+              # R15: exact small rollback remains reversible.
+              trust.DB=root/"trust.sqlite3"
+              trust.MAX_JSON_CHARS=4000
+              exact=trust.checkpoint(
+                  "ci-owner","edit","small.txt",
+                  before={"content":"before"},after={"content":"after"},
+                  reversible=True,evidence={"ok":True},
+              )
+              assert exact["reversible"] is True
+              assert trust.rollback_payload(exact["id"])["restore"] == {"content":"before"}
+
+              # Oversized rollback state stays valid JSON but is explicitly not reversible.
+              oversized=trust.checkpoint(
+                  "ci-owner","edit","large.txt",
+                  before={"content":"z"*50000,"meta":{"keep":"yes"}},
+                  after={"content":"new"},
+                  reversible=True,
+                  evidence={"note":"e"*20000},
+              )
+              assert oversized["state_truncated"] is True
+              assert oversized["reversible"] is False
+              reread=trust.get(oversized["id"])
+              assert isinstance(reread["before_state"],dict)
+              assert trust.rollback_payload(oversized["id"])["reason"] == "not_reversible"
+
+              # Evidence accumulation must remain valid JSON under pressure.
+              aid=exact["id"]
+              for i in range(20):
+                  assert trust.add_evidence(aid,{"i":i,"blob":"q"*1500})
+              with trust._db() as c:
+                  raw=c.execute("SELECT evidence FROM actions WHERE id=?",(aid,)).fetchone()["evidence"]
+              parsed=json.loads(raw)
+              assert isinstance(parsed,list)
+              assert len(raw) <= trust.MAX_JSON_CHARS
+              assert parsed[-1]["i"] == 19
+
+              trust.mark_rolled_back(aid,{"blob":"r"*50000})
+              with trust._db() as c:
+                  raw=c.execute("SELECT evidence FROM actions WHERE id=?",(aid,)).fetchone()["evidence"]
+              assert isinstance(json.loads(raw),dict)
+              assert len(raw) <= trust.MAX_JSON_CHARS
+
+          print("valid bounded JSON storage: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
