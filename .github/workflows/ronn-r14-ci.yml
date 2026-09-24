@@ -1925,6 +1925,32 @@ jobs:
 
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
+          assert browser_use._allowed_domains(
+              "Open https://www.example.com/path and click the button"
+          ) == ["www.example.com"]
+
+          # Provider isolation: CLOUD_API_KEY may belong to a non-Groq
+          # OpenAI-compatible endpoint and must never be forwarded to Groq.
+          old_cloud_key=os.environ.get("CLOUD_API_KEY")
+          old_cloud_base=os.environ.get("CLOUD_API_BASE")
+          old_groq_key=os.environ.get("GROQ_API_KEY")
+          try:
+              os.environ.pop("GROQ_API_KEY",None)
+              os.environ["CLOUD_API_KEY"]="not-a-groq-key"
+              os.environ["CLOUD_API_BASE"]="https://openrouter.ai/api/v1"
+              assert browser_use._groq_key() == ""
+              os.environ["CLOUD_API_BASE"]="https://api.groq.com/openai/v1"
+              assert browser_use._groq_key() == "not-a-groq-key"
+              os.environ["GROQ_API_KEY"]="direct-groq-key"
+              os.environ["CLOUD_API_BASE"]="https://openrouter.ai/api/v1"
+              assert browser_use._groq_key() == "direct-groq-key"
+          finally:
+              if old_cloud_key is None: os.environ.pop("CLOUD_API_KEY",None)
+              else: os.environ["CLOUD_API_KEY"]=old_cloud_key
+              if old_cloud_base is None: os.environ.pop("CLOUD_API_BASE",None)
+              else: os.environ["CLOUD_API_BASE"]=old_cloud_base
+              if old_groq_key is None: os.environ.pop("GROQ_API_KEY",None)
+              else: os.environ["GROQ_API_KEY"]=old_groq_key
 
           for unsafe in (
               "http://127.0.0.1",
@@ -1957,6 +1983,39 @@ jobs:
           )
           assert computer["computer_requested"] is True
           assert computer["browser_interactive"] is False
+
+          # Interactive browser tasks must not also run the legacy text-browser
+          # fetch path. Keep the two execution modes mutually exclusive.
+          import r23_agent_runtime as runtime_mod
+          old_extract=runtime_mod.extract_urls
+          old_collect=runtime_mod.collect_pages
+          old_browser_exec=runtime_mod.browser_use_execute
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          runtime_mod.collect_pages=lambda urls: calls.__setitem__("collect",calls["collect"]+1) or []
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":True,"urls":["https://example.com"],"result":"clicked","actions":["click"],"steps":1}
+          )
+          try:
+              decision={
+                  "needs_live":False,
+                  "capabilities":{
+                      "agent_runtime":True,
+                      "browser_url":True,
+                      "browser_interactive":True,
+                      "retrieval":{},
+                  },
+              }
+              run=runtime_mod.execute("ci","browser-overlap","Open https://example.com and click More",[],decision)
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+          assert calls["collect"] == 0
+          assert calls["interactive"] == 1
+          assert "browser_automation" in run["executed"]
+          assert "browser" not in run["executed"]
 
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain

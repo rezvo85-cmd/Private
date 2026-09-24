@@ -51,10 +51,17 @@ def _installed() -> bool:
 
 
 def _groq_key() -> str:
-    return (
-        (os.getenv("GROQ_API_KEY") or "").strip()
-        or (os.getenv("CLOUD_API_KEY") or "").strip()
-    )
+    direct=(os.getenv("GROQ_API_KEY") or "").strip()
+    if direct:
+        return direct
+
+    # CLOUD_API_KEY is only safe to reuse when the configured cloud endpoint is
+    # actually Groq. RONN can point CLOUD_API_BASE at other OpenAI-compatible
+    # providers, and sending that key to Groq would be both incorrect and unsafe.
+    base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip().lower()
+    if "api.groq.com" in base:
+        return (os.getenv("CLOUD_API_KEY") or "").strip()
+    return ""
 
 
 def _urls(text: str) -> list[str]:
@@ -96,16 +103,11 @@ def _allowed_domains(task: str) -> list[str]:
     for raw in _urls(task):
         _public_http_url(raw)
         host = (urlparse(raw).hostname or "").lower()
-        candidates=[host]
-        if host.startswith("www.") and host.count(".") >= 2:
-            candidates.append(host[4:])
-        for candidate in list(candidates):
-            if candidate:
-                candidates.append("*."+candidate)
-        for candidate in candidates:
-            if candidate and candidate not in hosts:
-                hosts.append(candidate)
-    return hosts[:16]
+        # Keep Browser Use confined to the exact host R23 approved. Do not
+        # broaden an explicit host into wildcard sibling/subdomain access.
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts[:8]
 
 
 def requested(message: str) -> bool:
