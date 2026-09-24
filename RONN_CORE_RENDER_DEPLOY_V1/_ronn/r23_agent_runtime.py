@@ -20,6 +20,7 @@ from r17_computer import status as computer_status, action as computer_action
 from r18_research import extract_urls, collect_pages
 from r20_tool_hub import weather as weather_tool
 from r23_research import research as autonomous_research
+from r23_browser_use_adapter import execute as browser_use_execute, status as browser_use_status
 from experience_engine import learn_lesson
 
 
@@ -104,6 +105,9 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
             "reported_ok":bool(code.get("ok")) if code else False,
             "verified_success":final_runtime_verified,
         },
+        "interactive_browser_verified":bool(
+            "browser_automation" in executed and (out.get("browser_automation") or {}).get("ok")
+        ),
         "computer_observation_verified":bool(
             "computer_runtime_inspect" in executed and (out.get("computer") or {}).get("verified")
         ),
@@ -157,6 +161,13 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
         read_pages=int(retrieval.get("explicit_browser_pages_read") or 0)
         require("explicit_url_read",read_pages>=1,f"{read_pages} explicit URL page(s) successfully read")
 
+    if caps.get("browser_interactive"):
+        require(
+            "interactive_browser_execution",
+            bool(contract.get("interactive_browser_verified")),
+            "bounded interactive browser task completed" if contract.get("interactive_browser_verified") else "interactive browser task did not complete successfully",
+        )
+
     if caps.get("code_fix_loop") and decision.get("verify"):
         require(
             "runtime_verification",
@@ -204,6 +215,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "errors":[],
         "research":{},
         "browser_pages":[],
+        "browser_automation":{},
         "world_model":{},
         "simulation":{},
         "code_loop":{},
@@ -229,6 +241,26 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
             )
         except Exception as exc:
             out["errors"].append("browser:"+exc.__class__.__name__)
+
+    # Interactive web tasks use Browser Use only as a bounded executor. R23
+    # still owns task selection, evidence requirements, and final synthesis.
+    if caps.get("browser_interactive"):
+        out["planned"].append("browser_automation")
+        try:
+            br=browser_use_execute(message,depth=depth)
+            out["browser_automation"]=br
+            if br.get("ok"):
+                out["executed"].append("browser_automation")
+                for url in br.get("urls") or []:
+                    out["sources"].append({"url":url,"read":True,"kind":"browser_automation"})
+                evidence.append(
+                    "RONN INTERACTIVE BROWSER EVIDENCE (bounded Browser Use executor; R23 remains final-answer owner):\n"+
+                    json.dumps(br,ensure_ascii=False)[:32000]
+                )
+            else:
+                out["errors"].append("browser_automation:"+str(br.get("reason") or "failed"))
+        except Exception as exc:
+            out["errors"].append("browser_automation:"+exc.__class__.__name__)
 
     # Weather stays structured instead of using generic search.
     low=str(message or "").lower()
@@ -430,9 +462,11 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
 
 def status():
     cs=computer_status()
+    bu=browser_use_status()
     return {
-        "version":"R23-AGENT-2",
+        "version":"R23-AGENT-3",
         "browser":True,
+        "browser_use":bu,
         "research":True,
         "controlled_code_execution":True,
         "code_autofix":True,
