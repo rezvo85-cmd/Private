@@ -84,6 +84,14 @@ jobs:
           print("imported:", app.BUILD_ID)
           print("reader import: ok (Crawl4AI remains lazy until /crawl)")
           assert crawl_service._CRAWL4AI_COMPONENTS is None
+          assert any(
+              getattr(route, "path", "") == "/" and "HEAD" in (getattr(route, "methods", set()) or set())
+              for route in app.app.routes
+          )
+          assert any(
+              getattr(route, "path", "") == "/" and "HEAD" in (getattr(route, "methods", set()) or set())
+              for route in crawl_service.app.routes
+          )
           assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
           r23 = app.r23_eval_run()
           print("r23:", r23)
@@ -94,7 +102,10 @@ jobs:
       - name: Reader resilience smoke
         run: |
           python - <<'PY'
+          import asyncio
+          from fastapi import HTTPException
           import crawl_service
+          import r20_web_tools
 
           assert crawl_service._CRAWL4AI_COMPONENTS is None
           parsed = crawl_service._parse_html(
@@ -138,7 +149,74 @@ jobs:
           assert fallback["reader"] == "http-fallback"
           assert fallback["title"] == "Fallback"
           assert "Recovered page" in fallback["markdown"]
-          print("reader resilience: ok")
+
+          # Auth must reject invalid callers while the production no-browser fast
+          # path must go directly to the known-working HTTP fallback.
+          old_token = crawl_service.READER_TOKEN
+          old_browser = crawl_service.BROWSER_ENABLED
+          old_fallback = crawl_service._http_fallback
+          old_public = crawl_service._public_url
+          crawl_service.READER_TOKEN = "test-reader-secret"
+          crawl_service.BROWSER_ENABLED = False
+          crawl_service._public_url = lambda url: url
+          crawl_service._http_fallback = lambda url, max_chars: {
+              "ok": True,
+              "url": url,
+              "title": "Fast fallback",
+              "markdown": "reader fast path",
+              "links": [],
+              "reader": "http-fallback",
+          }
+          try:
+              try:
+                  asyncio.run(crawl_service.crawl(
+                      crawl_service.CrawlBody(url="https://example.com", max_chars=5000),
+                      "wrong-secret",
+                  ))
+                  raise AssertionError("reader accepted an invalid service token")
+              except HTTPException as exc:
+                  assert exc.status_code == 401
+
+              fast = asyncio.run(crawl_service.crawl(
+                  crawl_service.CrawlBody(url="https://example.com", max_chars=5000),
+                  "test-reader-secret",
+              ))
+              assert fast["reader"] == "http-fallback"
+              assert fast["browser_error"] == "disabled"
+              assert crawl_service._CRAWL4AI_COMPONENTS is None
+          finally:
+              crawl_service.READER_TOKEN = old_token
+              crawl_service.BROWSER_ENABLED = old_browser
+              crawl_service._http_fallback = old_fallback
+              crawl_service._public_url = old_public
+
+          # Core must attach the same token on /crawl requests.
+          captured = {}
+          class CoreFakeResponse:
+              def raise_for_status(self):
+                  return None
+              def json(self):
+                  return {
+                      "url": "https://example.com",
+                      "title": "Authenticated",
+                      "markdown": "ok",
+                  }
+          old_post = r20_web_tools.requests.post
+          old_core_token = r20_web_tools.READER_TOKEN
+          def fake_post(*args, **kwargs):
+              captured["headers"] = dict(kwargs.get("headers") or {})
+              return CoreFakeResponse()
+          r20_web_tools.requests.post = fake_post
+          r20_web_tools.READER_TOKEN = "test-reader-secret"
+          try:
+              result = r20_web_tools.read("https://example.com", 5000)
+          finally:
+              r20_web_tools.requests.post = old_post
+              r20_web_tools.READER_TOKEN = old_core_token
+          assert result["title"] == "Authenticated"
+          assert captured["headers"]["X-RONN-Reader-Token"] == "test-reader-secret"
+
+          print("reader resilience/auth/fast-path: ok")
           PY
 
       - name: Check browser JavaScript

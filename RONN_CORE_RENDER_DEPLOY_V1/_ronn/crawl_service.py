@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import ipaddress
+import os
 import socket
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 _CRAWL4AI_COMPONENTS = None
 MAX_FETCH_BYTES = 3_000_000
 MAX_REDIRECTS = 4
-USER_AGENT = "RONN-Reader/1.2"
+USER_AGENT = "RONN-Reader/1.3"
+READER_TOKEN = os.getenv("RONN_READER_TOKEN", "").strip()
+BROWSER_ENABLED = os.getenv("RONN_READER_BROWSER", "true").strip().lower() in {"1","true","yes","on"}
 
 
 def _crawler_components():
@@ -25,12 +29,19 @@ def _crawler_components():
     return _CRAWL4AI_COMPONENTS
 
 
-app = FastAPI(title="RONN Reader", version="1.2")
+app = FastAPI(title="RONN Reader", version="1.3")
 
 
 class CrawlBody(BaseModel):
     url: str
     max_chars: int = Field(default=24000, ge=1000, le=60000)
+
+
+def _reader_authorized(provided: str | None) -> bool:
+    if not READER_TOKEN:
+        return True
+    value=str(provided or "").strip()
+    return bool(value) and hmac.compare_digest(value, READER_TOKEN)
 
 
 def _public_url(url: str) -> str:
@@ -264,7 +275,12 @@ async def _crawl4ai_read(url: str, max_chars: int) -> dict:
 
 @app.get("/")
 async def root():
-    return {"ok":True,"service":"RONN Reader","version":"1.2"}
+    return {"ok":True,"service":"RONN Reader","version":"1.3"}
+
+
+@app.head("/")
+async def root_head():
+    return Response(status_code=200)
 
 
 @app.get("/health")
@@ -273,20 +289,34 @@ async def health():
         "ok":True,
         "reader":"hybrid",
         "crawler_load":"ready" if _CRAWL4AI_COMPONENTS is not None else "lazy",
+        "browser_enabled":BROWSER_ENABLED,
         "http_fallback":True,
+        "auth_required":bool(READER_TOKEN),
     }
 
 
+@app.head("/health")
+async def health_head():
+    return Response(status_code=200)
+
+
 @app.post("/crawl")
-async def crawl(body: CrawlBody):
+async def crawl(
+    body: CrawlBody,
+    x_ronn_reader_token: str | None = Header(default=None),
+):
+    if not _reader_authorized(x_ronn_reader_token):
+        raise HTTPException(status_code=401,detail="Unauthorized reader request.")
+
     url=_public_url(body.url)
-    browser_error=""
-    try:
-        return await _crawl4ai_read(url,body.max_chars)
-    except asyncio.TimeoutError:
-        browser_error="TimeoutError"
-    except Exception as exc:
-        browser_error=exc.__class__.__name__
+    browser_error="disabled"
+    if BROWSER_ENABLED:
+        try:
+            return await _crawl4ai_read(url,body.max_chars)
+        except asyncio.TimeoutError:
+            browser_error="TimeoutError"
+        except Exception as exc:
+            browser_error=exc.__class__.__name__
 
     try:
         fallback=await asyncio.wait_for(

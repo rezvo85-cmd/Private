@@ -143,7 +143,7 @@ from provider_engine import record as record_provider_event, recent_health, rank
 from artifact_engine import write_artifact, list_artifacts, inspect_text
 from document_engine import extract_document
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -3047,6 +3047,11 @@ def approve_studio_plan(owner: str, plan_id: str):
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
+
+
+@app.head("/")
+def index_head():
+    return Response(status_code=200)
 
 
 @app.get("/api/studio/status")

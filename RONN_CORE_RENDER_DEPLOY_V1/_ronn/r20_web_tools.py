@@ -10,6 +10,7 @@ import requests
 
 SEARXNG_URL = os.getenv("RONN_SEARXNG_URL", "https://ronn-search-live.onrender.com").rstrip("/")
 CRAWL4AI_URL = os.getenv("RONN_CRAWL4AI_URL", "https://ronn-reader.onrender.com").rstrip("/")
+READER_TOKEN = os.getenv("RONN_READER_TOKEN", "").strip()
 
 _HEALTH_CACHE = {"at": 0.0, "value": {}}
 
@@ -74,11 +75,14 @@ def search(query: str, limit: int = 8, time_range: str | None = None):
 
 
 def read(url: str, max_chars: int = 18000):
+    headers={"User-Agent": "RONN/20 web-research"}
+    if READER_TOKEN:
+        headers["X-RONN-Reader-Token"]=READER_TOKEN
     r = requests.post(
         CRAWL4AI_URL + "/crawl",
         json={"url": url, "max_chars": max(1000, min(int(max_chars), 60000))},
         timeout=(8, 50),
-        headers={"User-Agent": "RONN/20 web-research"},
+        headers=headers,
     )
     r.raise_for_status()
     data = r.json()
@@ -187,6 +191,7 @@ def status(force=False):
     out = {
         "searxng_url": SEARXNG_URL,
         "crawl4ai_url": CRAWL4AI_URL,
+        "reader_auth_configured": bool(READER_TOKEN),
         "searxng": False,
         "crawl4ai": False,
     }
