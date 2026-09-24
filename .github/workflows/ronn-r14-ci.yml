@@ -80,7 +80,10 @@ jobs:
         run: |
           python - <<'PY'
           import app
+          import crawl_service
           print("imported:", app.BUILD_ID)
+          print("reader import: ok (Crawl4AI remains lazy until /crawl)")
+          assert crawl_service._CRAWL4AI_COMPONENTS is None
           assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
           r23 = app.r23_eval_run()
           print("r23:", r23)
