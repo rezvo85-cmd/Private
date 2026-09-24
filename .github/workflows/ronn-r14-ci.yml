@@ -6,10 +6,13 @@ on:
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
       - ".github/workflows/ronn-r14-ci.yml"
+      - "render.yaml"
   pull_request:
     branches: [main]
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
+      - ".github/workflows/ronn-r14-ci.yml"
+      - "render.yaml"
 
 permissions:
   contents: read
@@ -97,6 +100,26 @@ jobs:
           print("r23:", r23)
           assert r23.get("all_11_ready") is True
           assert r23.get("score") == 100.0
+          PY
+
+      - name: Render database binding smoke
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          text=Path("../../render.yaml").read_text(encoding="utf-8")
+          compact=" ".join(line.strip() for line in text.splitlines() if line.strip())
+
+          assert "name: RONN_CORE" in text
+          assert "key: DATABASE_URL" in text
+          assert "fromDatabase:" in text
+          assert "name: RONN_MEMORY" in text
+          assert "property: connectionString" in text
+          assert "postgresql://" not in text
+          assert "postgres://" not in text
+          assert "password:" not in text
+          assert "RONN_MEMORY" in compact
+          print("render database binding: ok")
           PY
 
       - name: Attachment budget smoke

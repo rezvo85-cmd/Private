@@ -54,6 +54,23 @@ def run():
     except Exception as exc:
         add("cloud_storage_adapters",False,str(exc)[:240])
 
+    try:
+        blueprint=(ROOT.parent/"render.yaml").read_text(encoding="utf-8")
+        binding_ok=all(x in blueprint for x in (
+            "name: RONN_CORE",
+            "key: DATABASE_URL",
+            "fromDatabase:",
+            "name: RONN_MEMORY",
+            "property: connectionString",
+        )) and "postgresql://" not in blueprint and "postgres://" not in blueprint and "password:" not in blueprint
+        add(
+            "database_blueprint_binding",
+            binding_ok,
+            "DATABASE_URL securely references RONN_MEMORY via Render fromDatabase",
+        )
+    except Exception as exc:
+        add("database_blueprint_binding",False,str(exc)[:240])
+
     passed=sum(1 for x in checks if x["passed"])
     return {
         "ok":passed==len(checks),
