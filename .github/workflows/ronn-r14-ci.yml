@@ -668,6 +668,78 @@ jobs:
           print("cloud snapshot / task retention hardening: ok")
           PY
 
+      - name: Background job and queue retention smoke
+        run: |
+          python - <<'PY'
+          import tempfile
+          import time
+          from pathlib import Path
+
+          import r17_jobs
+          import task_queue
+
+          old_db=r17_jobs.DB
+          old_completed=r17_jobs.MAX_COMPLETED_JOBS_PER_OWNER
+          old_failed=r17_jobs.MAX_FAILED_JOBS_PER_OWNER
+          with tempfile.TemporaryDirectory() as td:
+              r17_jobs.DB=Path(td)/"jobs.db"
+              r17_jobs.MAX_COMPLETED_JOBS_PER_OWNER=3
+              r17_jobs.MAX_FAILED_JOBS_PER_OWNER=2
+              now=int(time.time())
+              with r17_jobs._db() as c:
+                  for i in range(5):
+                      c.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
+                          (f"c{i}","owner","test","{}","completed",100,"{}","",now+i,now+i))
+                  for i in range(4):
+                      c.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
+                          (f"f{i}","owner","test","{}","failed",100,"","boom",now+10+i,now+10+i))
+                  for i,status in enumerate(("queued","running","interrupted")):
+                      c.execute("INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?)",
+                          (f"a{i}","owner","test","{}",status,10,"","",now+20+i,now+20+i))
+                  c.commit()
+              stats=r17_jobs.stats("owner")
+              assert stats["completed"] == 3
+              assert stats["failed"] == 2
+              for jid in ("a0","a1","a2"):
+                  assert r17_jobs.get(jid) is not None
+              assert r17_jobs.get("c0") is None
+              assert r17_jobs.get("f0") is None
+              assert stats["retention"]["active_jobs_pruned"] is False
+          r17_jobs.DB=old_db
+          r17_jobs.MAX_COMPLETED_JOBS_PER_OWNER=old_completed
+          r17_jobs.MAX_FAILED_JOBS_PER_OWNER=old_failed
+
+          old_db=task_queue.DB
+          old_limit=task_queue.MAX_TERMINAL_ITEMS_PER_OWNER
+          with tempfile.TemporaryDirectory() as td:
+              task_queue.DB=Path(td)/"queue.db"
+              task_queue.MAX_TERMINAL_ITEMS_PER_OWNER=3
+              now=time.time()
+              with task_queue._db() as c:
+                  for i in range(6):
+                      c.execute("""INSERT INTO queue(owner,project_id,title,prompt,priority,status,created,updated)
+                                   VALUES(?,?,?,?,?,?,?,?)""",
+                          ("owner","p",f"done-{i}","x",50,
+                           ("complete","cancelled","failed")[i%3],now+i,now+i))
+                  for i,status in enumerate(("queued","running")):
+                      c.execute("""INSERT INTO queue(owner,project_id,title,prompt,priority,status,created,updated)
+                                   VALUES(?,?,?,?,?,?,?,?)""",
+                          ("owner","p",f"active-{i}","x",50,status,now+20+i,now+20+i))
+                  c.commit()
+
+              items=task_queue.list_items("owner",limit=200)
+              terminal=[x for x in items if x["status"] in {"complete","cancelled","failed"}]
+              active=[x for x in items if x["status"] in {"queued","running"}]
+              assert len(terminal) == 3
+              assert len(active) == 2
+              assert task_queue.stats("owner")["retention"]["active_items_pruned"] is False
+              assert len(task_queue.list_items("owner",limit=-100)) == 1
+
+          task_queue.DB=old_db
+          task_queue.MAX_TERMINAL_ITEMS_PER_OWNER=old_limit
+          print("background job/task-queue retention: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'

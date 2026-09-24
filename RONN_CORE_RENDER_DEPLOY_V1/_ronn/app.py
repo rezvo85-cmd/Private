@@ -196,6 +196,7 @@ def verify_package_integrity():
         "_ronn/project_brain.py",
         "_ronn/snapshot_engine.py",
         "_ronn/task_engine.py",
+        "_ronn/task_queue.py",
         "_ronn/r20_web_tools.py",
         "_ronn/r21_release_gate.py",
         "_ronn/requirements.txt",
