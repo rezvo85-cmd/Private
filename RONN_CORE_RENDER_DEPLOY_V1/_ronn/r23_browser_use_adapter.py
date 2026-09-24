@@ -20,6 +20,13 @@ from typing import Any
 VERSION = "R23-BROWSER-USE-1"
 DEFAULT_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
 _TRUE = {"1", "true", "yes", "on"}
+BLOCKED_ACTIONS = (
+    "upload_file",
+    "write_file",
+    "replace_file",
+    "read_file",
+    "evaluate",
+)
 
 _INTERACTIVE_WORDS = (
     "open the website", "click", "type into", "fill out", "fill in",
@@ -146,6 +153,7 @@ def status() -> dict[str, Any]:
         "local_file_actions_blocked": True,
         "downloads_blocked": True,
         "javascript_action_blocked": True,
+        "blocked_actions": list(BLOCKED_ACTIONS),
     }
 
 
@@ -193,13 +201,7 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         accept_downloads=False,
     )
     browser = Browser(browser_profile=profile)
-    tools = Tools(exclude_actions=[
-        "upload_file",
-        "write_file",
-        "replace_file",
-        "read_file",
-        "evaluate",
-    ])
+    tools = Tools(exclude_actions=list(BLOCKED_ACTIONS))
     llm = ChatGroq(
         model=model,
         api_key=key,
