@@ -74,7 +74,7 @@ def _alert(c,w,message):
         ("alert_"+uuid.uuid4().hex[:16],w["id"],owner,message[:800],int(time.time())),
     )
     c.execute("""DELETE FROM alerts WHERE owner=? AND id NOT IN (
-        SELECT id FROM alerts WHERE owner=? ORDER BY created_at DESC,id DESC LIMIT ?
+        SELECT id FROM alerts WHERE owner=? ORDER BY created_at DESC,rowid DESC LIMIT ?
     )""",(owner,owner,MAX_ALERTS_PER_OWNER))
 
 def check(wid):
@@ -94,7 +94,7 @@ def check(wid):
     return get(wid)
 
 def alerts(owner,unseen_only=False,limit=40):
-    q="SELECT * FROM alerts WHERE owner=?"+(" AND seen=0" if unseen_only else "")+" ORDER BY created_at DESC LIMIT ?"
+    q="SELECT * FROM alerts WHERE owner=?"+(" AND seen=0" if unseen_only else "")+" ORDER BY created_at DESC,rowid DESC LIMIT ?"
     with _db() as c:rows=c.execute(q,(str(owner),max(1,min(int(limit),100)))).fetchall()
     return [dict(x) for x in rows]
 
