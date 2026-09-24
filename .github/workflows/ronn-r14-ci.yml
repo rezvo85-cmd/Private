@@ -2043,6 +2043,20 @@ jobs:
           assert blocked_graph["replan_reason"] == "unrecoverable_browser_action"
           assert blocked_graph["recovery_attempted"] is False
 
+          # A failed interactive task also fails the generic explicit-URL gate.
+          # Browser failure must win over research recovery so RONN never retries
+          # a stateful click/fill/submit flow as if it were just missing a page read.
+          mixed_gap_run=dict(blocked_run)
+          mixed_gap_run["evidence_sufficiency"]={
+              "sufficient":False,
+              "gaps":["explicit_url_read","interactive_browser_execution"],
+          }
+          mixed_graph=reconcile_task_graph(graph,mixed_gap_run,browser_decision)
+          assert mixed_graph["dead_end"] is True
+          assert mixed_graph["replan_reason"] == "unrecoverable_browser_action"
+          assert mixed_graph.get("recovery_kind","") == ""
+          assert not any(str(x.get("id","")).startswith("recover_") for x in mixed_graph["nodes"])
+
           # Interactive browser tasks must not also run the legacy text-browser
           # fetch path. Keep the two execution modes mutually exclusive.
           import r23_agent_runtime as runtime_mod

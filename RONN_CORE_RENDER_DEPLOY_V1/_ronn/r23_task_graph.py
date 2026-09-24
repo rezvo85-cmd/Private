@@ -381,7 +381,16 @@ def replan_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[str,A
     proof=""
     deps=[]
 
-    if "live_source_evidence" in gaps or "explicit_url_read" in gaps or (rows.get("gather_evidence") or {}).get("state")=="failed":
+    # Interactive browser actions are stateful/mutating. If their evidence
+    # boundary fails, stop before considering generic URL-read/research recovery;
+    # otherwise an action failure can be misclassified as a research gap.
+    if "interactive_browser_execution" in gaps or (rows.get("interact_browser") or {}).get("state")=="failed":
+        graph["dead_end"]=True
+        graph["dead_end_reason"]="interactive browser completion was not verified; do not auto-retry browser actions because that could duplicate clicks, form entries, or submissions"
+        graph["replanned"]=True
+        graph["replan_reason"]="unrecoverable_browser_action"
+        return _refresh_states(graph)
+    elif "live_source_evidence" in gaps or "explicit_url_read" in gaps or (rows.get("gather_evidence") or {}).get("state")=="failed":
         recovery_kind="research"
         target="gather_evidence"
         title="Retry only the missing evidence branch with deeper retrieval"
