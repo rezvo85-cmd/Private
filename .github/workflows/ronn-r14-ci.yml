@@ -871,6 +871,8 @@ jobs:
               assert pending_row and pending_row["status"] == "pending"
 
               # Owner-session rows are bounded independently of unlock throttling.
+              # Revoked signed-session records must survive until expiry so a
+              # redeploy cannot accidentally make a revoked token valid again.
               with eco._db() as c:
                   now=1000.0
                   for i in range(5):
@@ -878,9 +880,19 @@ jobs:
                           "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,0)",
                           (f"tok-{i}",owner,"ci","",now+i,now+99999+i),
                       )
+                  c.execute(
+                      "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,1)",
+                      ("revoked-still-live",owner,"ci","",now-50,now+99999),
+                  )
                   eco._prune_owner_sessions(c,owner)
-                  sessions=c.execute("SELECT token_hash FROM owner_sessions WHERE owner=? ORDER BY created",(owner,)).fetchall()
-              assert [r["token_hash"] for r in sessions] == ["tok-2","tok-3","tok-4"]
+                  sessions=c.execute(
+                      "SELECT token_hash,revoked FROM owner_sessions WHERE owner=? ORDER BY created",
+                      (owner,),
+                  ).fetchall()
+              active=[r["token_hash"] for r in sessions if not r["revoked"]]
+              revoked=[r["token_hash"] for r in sessions if r["revoked"]]
+              assert active == ["tok-2","tok-3","tok-4"]
+              assert revoked == ["revoked-still-live"]
 
               # R15 trust journal keeps only the newest retained rollback records.
               trust.DB=root/"trust.sqlite3"
