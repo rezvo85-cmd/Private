@@ -234,7 +234,7 @@ RESEARCH_MODEL = os.getenv("RONN_RESEARCH_MODEL", "groq/compound").strip()
 PUBLIC_MODE = os.getenv("RONN_PUBLIC_MODE", "false").strip().lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RONN_RATE_LIMIT_PER_MINUTE", "10"))
 RATE_LIMIT_MAX_KEYS = max(100, int(os.getenv("RONN_RATE_LIMIT_MAX_KEYS", "5000")))
-MAX_BODY_BYTES = int(os.getenv("RONN_MAX_BODY_BYTES", str(25 * 1024 * 1024)))
+MAX_BODY_BYTES = int(os.getenv("RONN_MAX_BODY_BYTES", str(40 * 1024 * 1024)))
 
 FALLBACK_REPLY = "RONN could not get a final answer from any configured AI route. Open Diagnostics to test the provider connection and available models."
 
