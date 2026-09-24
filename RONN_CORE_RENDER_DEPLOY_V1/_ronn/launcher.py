@@ -10,6 +10,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from provider_models import normalize_groq_model
+
 ROOT = Path(__file__).resolve().parent.parent
 CORE = Path(__file__).resolve().parent
 ENV_FILE = ROOT / ".env"
@@ -20,7 +22,7 @@ RUNTIME_FILE = CORE / "data" / "runtime.json"
 LOGS.mkdir(exist_ok=True)
 RUNTIME_FILE.parent.mkdir(exist_ok=True)
 BASE_PORT = 8030
-BUILD_ID = "RONN-COGNITIVE-OS-APEX-2026-R10-ECOSYSTEM"
+BUILD_ID = "RONN-COGNITIVE-OS-2026-R23-ALL-11"
 
 
 def python_cmd():
@@ -48,7 +50,7 @@ def _real_key(value: str):
 
 def _env_has_provider(path: Path):
     vals = _parse_env_values(path)
-    return any(_real_key(vals.get(k, "")) for k in ("CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY"))
+    return any(_real_key(vals.get(k, "")) for k in ("CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "OPENROUTER_API_KEY"))
 
 
 def shared_config_path():
@@ -132,6 +134,7 @@ def clean_env_file():
     allowed = {
         "CLOUD_API_BASE", "CLOUD_API_KEY", "GROQ_API_KEY",
         "NVIDIA_BASE_URL", "NVIDIA_API_KEY", "NVIDIA_MODEL",
+        "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "RONN_CONTROLLER_OPENROUTER_MODEL",
         "RONN_PUBLIC_MODE", "RONN_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
         "RONN_FAST_MODEL", "RONN_SMART_MODEL", "RONN_CREATOR_MODEL",
         "RONN_VISION_MODEL", "RONN_LIVE_MODEL", "RONN_RESEARCH_MODEL",
@@ -160,7 +163,7 @@ def clean_env_file():
         v = v.strip().strip('"').strip("'")
         if k not in allowed or not v:
             continue
-        if k in {"CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "RONN_STUDIO_BRIDGE_TOKEN"} and any(x in v for x in (" ", "(", ")")):
+        if k in {"CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "OPENROUTER_API_KEY", "RONN_STUDIO_BRIDGE_TOKEN"} and any(x in v for x in (" ", "(", ")")):
             continue
         values[k] = v
 
@@ -169,6 +172,18 @@ def clean_env_file():
     values.setdefault("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
     values.setdefault("NVIDIA_API_KEY", "PASTE_YOUR_NVIDIA_API_KEY_HERE")
     values.setdefault("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+    values.setdefault("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
+
+    # Clean stale Groq model overrides during desktop launch too, so a recovered
+    # old .env does not keep forcing retired IDs after the runtime was upgraded.
+    groq_base=values.get("CLOUD_API_BASE", "https://api.groq.com/openai/v1")
+    for key in (
+        "RONN_FAST_MODEL","RONN_SMART_MODEL","RONN_CREATOR_MODEL",
+        "RONN_VISION_MODEL","RONN_LIVE_MODEL","RONN_RESEARCH_MODEL",
+    ):
+        if values.get(key):
+            values[key]=normalize_groq_model(values[key],groq_base)
+
     values["RONN_PUBLIC_MODE"] = "false"
     values.setdefault("RONN_CREDITS_ENABLED", "false")
     values.setdefault("RONN_DEFAULT_CREDITS", "100")
@@ -177,6 +192,7 @@ def clean_env_file():
     ordered = [
         "CLOUD_API_BASE", "CLOUD_API_KEY", "GROQ_API_KEY",
         "NVIDIA_BASE_URL", "NVIDIA_API_KEY", "NVIDIA_MODEL",
+        "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "RONN_CONTROLLER_OPENROUTER_MODEL",
         "RONN_FAST_MODEL", "RONN_SMART_MODEL", "RONN_CREATOR_MODEL",
         "RONN_VISION_MODEL", "RONN_LIVE_MODEL", "RONN_RESEARCH_MODEL",
         "RONN_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
@@ -326,7 +342,7 @@ def main():
     if os.name == "nt":
         os.system("title RONN COGNITIVE OS APEX")
     print("=" * 68)
-    print(" RONN COGNITIVE OS // R9 CORE API v1")
+    print(" RONN COGNITIVE OS // R23 CORE API v1")
     print(" Agentic intelligence // research + snapshots + knowledge + verification")
     print("=" * 68)
 
