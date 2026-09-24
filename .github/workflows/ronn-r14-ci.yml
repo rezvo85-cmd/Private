@@ -122,6 +122,31 @@ jobs:
           print("render database binding: ok")
           PY
 
+      - name: Production release gate runtime smoke
+        env:
+          RENDER: "true"
+          DATABASE_URL: "configured-for-ci"
+        run: |
+          python - <<'PY'
+          import os
+          import r21_release_gate
+
+          healthy=r21_release_gate.run()
+          print("healthy gate:",healthy)
+          checks={x["name"]:x for x in healthy["checks"]}
+          assert healthy["ok"] is True
+          assert checks["database_runtime_binding"]["passed"] is True
+          assert checks["external_capability_boundaries"]["passed"] is True
+
+          os.environ["DATABASE_URL"]=""
+          missing=r21_release_gate.run()
+          print("missing-db gate:",missing)
+          checks={x["name"]:x for x in missing["checks"]}
+          assert missing["ok"] is False
+          assert checks["database_runtime_binding"]["passed"] is False
+          print("production runtime release gate: ok")
+          PY
+
       - name: Attachment budget smoke
         run: |
           python - <<'PY'
@@ -298,12 +323,23 @@ jobs:
           python - <<'PY'
           import base64
           import io
+          import zipfile
           from docx import Document
-          from document_engine import extract_document, status
+          from openpyxl import Workbook
+          from pptx import Presentation
+          from document_engine import (
+              _validate_office_archive,
+              extract_document,
+              status,
+          )
 
+          def payload(mime, raw):
+              return "data:"+mime+";base64,"+base64.b64encode(raw).decode()
+
+          # DOCX through Docling.
           doc=Document()
           doc.add_heading("RONN Docling Smoke", level=1)
-          doc.add_paragraph("Docling must remain a backend beneath RONN's one document interface.")
+          doc.add_paragraph("Docling stays beneath RONN's single document interface.")
           table=doc.add_table(rows=2, cols=2)
           table.cell(0,0).text="Capability"
           table.cell(0,1).text="Owner"
@@ -311,18 +347,71 @@ jobs:
           table.cell(1,1).text="document_engine.py"
           buf=io.BytesIO()
           doc.save(buf)
-          payload="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64," + base64.b64encode(buf.getvalue()).decode()
-
-          out=extract_document("ronn-docling-smoke.docx", payload)
-          print(out["meta"])
+          out=extract_document(
+              "ronn-docling-smoke.docx",
+              payload("application/vnd.openxmlformats-officedocument.wordprocessingml.document",buf.getvalue()),
+          )
           assert out["meta"]["backend"] == "docling"
           assert out["meta"]["fallback_used"] is False
           assert "RONN Docling Smoke" in out["text"]
+
+          # XLSX through the same one document interface.
+          wb=Workbook()
+          ws=wb.active
+          ws.title="RONN"
+          ws.append(["Capability","Owner"])
+          ws.append(["Spreadsheets","document_engine.py"])
+          buf=io.BytesIO()
+          wb.save(buf)
+          xlsx=extract_document(
+              "ronn-docling-smoke.xlsx",
+              payload("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",buf.getvalue()),
+          )
+          assert xlsx["meta"]["backend"] == "docling"
+          assert "Spreadsheets" in xlsx["text"]
+
+          # PPTX through the same one document interface.
+          prs=Presentation()
+          slide=prs.slides.add_slide(prs.slide_layouts[1])
+          slide.shapes.title.text="RONN Presentation Smoke"
+          slide.placeholders[1].text="LangGraph does not own document parsing."
+          buf=io.BytesIO()
+          prs.save(buf)
+          pptx=extract_document(
+              "ronn-docling-smoke.pptx",
+              payload("application/vnd.openxmlformats-officedocument.presentationml.presentation",buf.getvalue()),
+          )
+          assert pptx["meta"]["backend"] == "docling"
+          assert "RONN Presentation Smoke" in pptx["text"]
+
+          # Strict base64 and Office decompression guards must fail before parsers.
+          try:
+              extract_document("bad.txt","data:text/plain;base64,%%%not-base64%%%")
+              raise AssertionError("invalid base64 was accepted")
+          except ValueError as exc:
+              assert "base64" in str(exc).lower()
+
+          bomb=io.BytesIO()
+          with zipfile.ZipFile(bomb,"w",zipfile.ZIP_DEFLATED) as z:
+              z.writestr("word/document.xml",b"A"*200000)
+          try:
+              _validate_office_archive(
+                  ".docx",
+                  bomb.getvalue(),
+                  max_uncompressed=100000,
+                  max_member=300000,
+              )
+              raise AssertionError("oversized Office archive was accepted")
+          except ValueError as exc:
+              assert "safe extraction limit" in str(exc)
+
           st=status()
           assert st["single_interface"] is True
           assert st["docling"]["installed"] is True
           assert st["docling"]["owns_routing"] is False
-          print("docling integration: ok")
+          assert st["office_archive_guard"] is True
+          assert st["strict_base64"] is True
+          print("docling formats/safety integration: ok")
           PY
 
       - name: LangGraph R23 boundary smoke
@@ -362,9 +451,7 @@ jobs:
           assert len(decision["task_graph"]["nodes"]) >= 6
           assert workflow.eligible(decision) is True
 
-          calls=[]
-          def fake_executor(owner, request_id, message, files, current, depth="smart", repair_fn=None):
-              calls.append((request_id, depth))
+          def successful_run():
               contract={
                   "retrieval":{
                       "source_count":1,
@@ -408,26 +495,54 @@ jobs:
                   "evidence_sufficiency":suff,
               }
 
+          calls=[]
+          def fake_executor(owner, request_id, message, files, current, depth="smart", repair_fn=None):
+              calls.append((request_id,depth))
+              return successful_run()
+
           result=workflow.run(
-              "ci-owner",
-              "ci-langgraph",
+              "ci-owner","ci-langgraph",
               "Research a current technical topic with evidence.",
-              [],
-              decision,
-              executor=fake_executor,
+              [],decision,executor=fake_executor,
           )
-          print({"engine":result["engine"],"used_langgraph":result["used_langgraph"],"calls":calls})
           assert result["engine"] == "langgraph"
           assert result["used_langgraph"] is True
           assert len(calls) == 1
-          assert result["task_graph"]["active"] is True
-          assert workflow.status()["simple_chat_skipped"] is True
-          print("langgraph R23 boundary: ok")
+
+          # Regression: if LangGraph fails after the primary executor already ran,
+          # the direct fallback must NOT replay that action.
+          old_reconcile=workflow._reconcile
+          replay_calls=[]
+          def replay_executor(owner, request_id, message, files, current, depth="smart", repair_fn=None):
+              replay_calls.append(request_id)
+              return successful_run()
+          workflow._reconcile=lambda *args,**kwargs: (_ for _ in ()).throw(RuntimeError("forced-after-execute"))
+          try:
+              degraded=workflow.run(
+                  "ci-owner","ci-no-replay",
+                  "Research a current technical topic with evidence.",
+                  [],decision,executor=replay_executor,
+              )
+          finally:
+              workflow._reconcile=old_reconcile
+          print("degraded:",degraded)
+          assert len(replay_calls) == 1
+          assert degraded["engine"] == "langgraph_degraded"
+          assert degraded["used_langgraph"] is True
+          assert degraded.get("fallback_from") == ""
+          assert any("langgraph_post_execution" in x for x in degraded["tool_run"].get("errors",[]))
+
+          st=workflow.status()
+          assert st["simple_chat_skipped"] is True
+          assert st["no_duplicate_action_replay"] is True
+          assert st["r23_plan_of_record"] is True
+          print("langgraph R23 boundary/no-replay: ok")
           PY
 
       - name: R23 research relevance smoke
         run: |
           python - <<'PY'
+          from urllib.parse import urlparse
           import r23_research as rr
 
           query="python asyncio taskgroup exception handling"
@@ -443,6 +558,19 @@ jobs:
           }
           assert rr._source_score(query,relevant) > rr._source_score(query,irrelevant_official)
 
+          # Authority is a true tie-breaker now; it cannot compensate for lower relevance.
+          one_hit={
+              "title":"TaskGroup reference",
+              "url":"https://agency.gov/reference",
+              "snippet":"unrelated material",
+          }
+          two_hits={
+              "title":"TaskGroup exception handling",
+              "url":"https://community.example/guide",
+              "snippet":"TaskGroup exception handling",
+          }
+          assert rr._source_score(query,two_hits)[0] > rr._source_score(query,one_hit)[0]
+
           page=(
               "General introduction with unrelated navigation and boilerplate.\n\n"
               + ("Generic filler paragraph.\n\n"*20)
@@ -455,8 +583,6 @@ jobs:
           assert "TaskGroup exception handling" in excerpt
           assert "cancels sibling tasks" in excerpt
 
-          # Regression: a diverse page selected for reading may sit beyond the
-          # first N discovery rows. It still must reach R23 evidence.
           old_search,old_read=rr.web_search,rr.web_read
           calls={"n":0}
           def fake_search(q,limit):
@@ -478,25 +604,38 @@ jobs:
                   }
                   for i in range(8)
               ]
+          def marker(url):
+              return "READMARKER-"+(urlparse(url).hostname or "unknown").replace(".","-")
           def fake_read(url,max_chars):
               return {
                   "url":url,
                   "title":"Read alpha page",
-                  "markdown":"Alpha evidence from the successfully read page.\n\nRelevant alpha details.",
+                  "markdown":(
+                      f"alpha alpha alpha {marker(url)}\n\n"
+                      + ("alpha relevant evidence paragraph with dates 2026 and value 42.\n\n"*900)
+                  ),
               }
           rr.web_search,rr.web_read=fake_search,fake_read
           try:
-              result=rr.research("alpha",depth="deep")
+              result=rr.research("alpha",depth="apex")
           finally:
               rr.web_search,rr.web_read=old_search,old_read
 
           assert result["ok"] is True
           assert result["read_count"] >= 2
-          read_urls={s["url"] for s in result["sources"] if s.get("read")}
-          assert any("independent" in url for url in read_urls)
-          assert "Alpha evidence from the successfully read page." in result["evidence"]
-          assert rr.status()["version"] == "R23-RESEARCH-3"
-          print("r23 research relevance/evidence preservation: ok")
+          read_sources=[s for s in result["sources"] if s.get("read")]
+          assert any("independent" in s["url"] for s in read_sources)
+          # Every page counted as READ PAGE must actually survive into the evidence,
+          # even at apex depth where the old final [:70000] cut could drop later pages.
+          for src in read_sources:
+              assert f"SOURCE {src['id']} [READ PAGE]" in result["evidence"]
+              assert marker(src["url"]) in result["evidence"]
+              assert src.get("evidence_included") is True
+          assert result["evidence_chars"] == len(result["evidence"])
+          assert result["evidence_chars"] < 70000
+          assert rr.status()["version"] == "R23-RESEARCH-4"
+          assert rr.status()["strict_relevance_primary"] is True
+          print("r23 research ranking/all-read-page evidence: ok")
           PY
 
       - name: Reader resilience smoke
