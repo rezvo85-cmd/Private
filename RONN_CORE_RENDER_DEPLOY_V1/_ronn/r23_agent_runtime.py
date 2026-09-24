@@ -235,10 +235,16 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "evidence_sufficiency":{},
     }
     evidence=[]
+    browser_use_state=browser_use_status()
+    browser_use_ready=bool(browser_use_state.get("ready"))
 
     # 2) Full agent runtime: inspect explicit URLs with the safe browser.
+    # Preserve the read-only path whenever the optional interactive executor
+    # is not ready, so RONN still has page evidence instead of a dead end.
     urls=extract_urls(message)
-    if urls and caps.get("agent_runtime") and not caps.get("browser_interactive"):
+    if urls and caps.get("agent_runtime") and (
+        not caps.get("browser_interactive") or not browser_use_ready
+    ):
         out["planned"].append("browser")
         try:
             pages=collect_pages(urls[:4])
@@ -255,21 +261,31 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
     # still owns task selection, evidence requirements, and final synthesis.
     if caps.get("browser_interactive"):
         out["planned"].append("browser_automation")
-        try:
-            br=browser_use_execute(message,depth=depth)
-            out["browser_automation"]=br
-            if br.get("ok"):
-                out["executed"].append("browser_automation")
-                for url in br.get("urls") or []:
-                    out["sources"].append({"url":url,"read":True,"kind":"browser_automation"})
-                evidence.append(
-                    "RONN INTERACTIVE BROWSER EVIDENCE (bounded Browser Use executor; R23 remains final-answer owner):\n"+
-                    json.dumps(br,ensure_ascii=False)[:32000]
-                )
-            else:
-                out["errors"].append("browser_automation:"+str(br.get("reason") or "failed"))
-        except Exception as exc:
-            out["errors"].append("browser_automation:"+exc.__class__.__name__)
+        if not browser_use_ready:
+            out["browser_automation"]={
+                "ok":False,
+                "reason":"unavailable",
+                "installed":bool(browser_use_state.get("installed")),
+                "enabled":bool(browser_use_state.get("enabled")),
+                "configured":bool(browser_use_state.get("configured")),
+            }
+            out["errors"].append("browser_automation:unavailable")
+        else:
+            try:
+                br=browser_use_execute(message,depth=depth)
+                out["browser_automation"]=br
+                if br.get("ok"):
+                    out["executed"].append("browser_automation")
+                    for url in br.get("urls") or []:
+                        out["sources"].append({"url":url,"read":True,"kind":"browser_automation"})
+                    evidence.append(
+                        "RONN INTERACTIVE BROWSER EVIDENCE (bounded Browser Use executor; R23 remains final-answer owner):\n"+
+                        json.dumps(br,ensure_ascii=False)[:32000]
+                    )
+                else:
+                    out["errors"].append("browser_automation:"+str(br.get("reason") or "failed"))
+            except Exception as exc:
+                out["errors"].append("browser_automation:"+exc.__class__.__name__)
 
     # Weather stays structured instead of using generic search.
     low=str(message or "").lower()
