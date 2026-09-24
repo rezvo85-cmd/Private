@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json, os, re
+from r13_ensemble import QWEN_MODEL as OR_QWEN_MODEL
 from typing import Any
 
 R20_VERSION="R20-CONTROLLER-1"
@@ -74,7 +75,7 @@ def _provider():
     gk=(os.getenv("CLOUD_API_KEY","").strip() or os.getenv("GROQ_API_KEY","").strip())
     if gk:return os.getenv("CLOUD_API_BASE","https://api.groq.com/openai/v1").rstrip("/"),gk,os.getenv("RONN_CONTROLLER_MODEL",os.getenv("RONN_FAST_MODEL","openai/gpt-oss-20b")).strip()
     ok=os.getenv("OPENROUTER_API_KEY","").strip()
-    if ok:return os.getenv("OPENROUTER_API_BASE","https://openrouter.ai/api/v1").rstrip("/"),ok,os.getenv("RONN_CONTROLLER_OPENROUTER_MODEL","qwen/qwen3.6-27b").strip()
+    if ok:return os.getenv("OPENROUTER_API_BASE","https://openrouter.ai/api/v1").rstrip("/"),ok,os.getenv("RONN_CONTROLLER_OPENROUTER_MODEL",OR_QWEN_MODEL).strip()
     nk=os.getenv("NVIDIA_API_KEY","").strip()
     if nk:return os.getenv("NVIDIA_BASE_URL","https://integrate.api.nvidia.com/v1").rstrip("/"),nk,os.getenv("NVIDIA_MODEL","nvidia/nemotron-3-super-120b-a12b").strip()
     return None
