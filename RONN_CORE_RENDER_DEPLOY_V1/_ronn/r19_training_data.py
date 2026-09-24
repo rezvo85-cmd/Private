@@ -83,36 +83,56 @@ def stage(request_id,owner,prompt,response,profile="general",model=""):
     return True
 
 
-def promote(request_id):
-    now=int(time.time())
+def promote(request_id,owner=None):
+    now=int(time.time());request_id=str(request_id)
     with _db() as c:
-        r=c.execute("SELECT * FROM pending WHERE request_id=?",(str(request_id),)).fetchone()
+        if owner is None:
+            r=c.execute("SELECT * FROM pending WHERE request_id=?",(request_id,)).fetchone()
+        else:
+            r=c.execute(
+                "SELECT * FROM pending WHERE request_id=? AND owner=?",
+                (request_id,str(owner)),
+            ).fetchone()
         if not r:return None
         if int(r["created_at"] or 0)<now-PENDING_TTL_SECONDS:
-            c.execute("DELETE FROM pending WHERE request_id=?",(str(request_id),))
+            c.execute("DELETE FROM pending WHERE request_id=? AND owner=?",(request_id,r["owner"]))
             c.commit()
             return None
         eid="ex_"+uuid.uuid4().hex[:16]
         c.execute("INSERT INTO examples VALUES(?,?,?,?,?,?,?,?)",
           (eid,r["owner"],r["profile"],r["prompt"],r["response"],r["model"],"positive_feedback",now))
-        c.execute("DELETE FROM pending WHERE request_id=?",(str(request_id),))
+        c.execute("DELETE FROM pending WHERE request_id=? AND owner=?",(request_id,r["owner"]))
         _prune(c,r["owner"],now)
         c.commit()
     return eid
 
 
-def discard(request_id):
+def discard(request_id,owner=None):
+    request_id=str(request_id)
     with _db() as c:
-        cur=c.execute("DELETE FROM pending WHERE request_id=?",(str(request_id),));c.commit()
+        if owner is None:
+            cur=c.execute("DELETE FROM pending WHERE request_id=?",(request_id,))
+        else:
+            cur=c.execute(
+                "DELETE FROM pending WHERE request_id=? AND owner=?",
+                (request_id,str(owner)),
+            )
+        c.commit()
     return cur.rowcount>0
 
 
-def pending_example(request_id):
-    now=int(time.time())
+def pending_example(request_id,owner=None):
+    now=int(time.time());request_id=str(request_id)
     with _db() as c:
-        r=c.execute("SELECT * FROM pending WHERE request_id=?",(str(request_id),)).fetchone()
+        if owner is None:
+            r=c.execute("SELECT * FROM pending WHERE request_id=?",(request_id,)).fetchone()
+        else:
+            r=c.execute(
+                "SELECT * FROM pending WHERE request_id=? AND owner=?",
+                (request_id,str(owner)),
+            ).fetchone()
         if r and int(r["created_at"] or 0)<now-PENDING_TTL_SECONDS:
-            c.execute("DELETE FROM pending WHERE request_id=?",(str(request_id),))
+            c.execute("DELETE FROM pending WHERE request_id=? AND owner=?",(request_id,r["owner"]))
             c.commit()
             return None
     return dict(r) if r else None
