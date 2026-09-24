@@ -209,7 +209,9 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         task=bounded_task,
         llm=llm,
         browser=browser,
-        use_vision="auto",
+        # Groq GPT-OSS 120B is text-only. Force vision off so Browser Use
+        # cannot request screenshots and accidentally send unsupported image input.
+        use_vision=False,
         use_thinking=False,
         max_actions_per_step=3,
         max_failures=3,
