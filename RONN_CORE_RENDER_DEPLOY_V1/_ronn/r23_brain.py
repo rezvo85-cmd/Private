@@ -16,6 +16,11 @@ from r23_brain_arena import (
 )
 from r23_quality_lab import quality_signal as r23_quality_signal
 from r23_confidence import apply_confidence_governor, status as confidence_status
+from r23_requirements import (
+    apply_requirement_contract,
+    directive_text as requirements_directive,
+    status as requirements_status,
+)
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
 
@@ -119,6 +124,10 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         "explicit_mode":str(explicit_mode or "auto").strip().lower(),
         "capabilities":caps,
     })
+
+    # Freeze the current turn explicit constraints into a compact checklist
+    # before later policy layers decide verification and reasoning depth.
+    apply_requirement_contract(out,message)
 
     retrieval=caps.get("retrieval") or {}
     if caps.get("universal_retrieval"):
@@ -470,6 +479,7 @@ def directive(decision):
             ("universal retrieval","universal_retrieval"),
         ) if caps.get(key)
     ]
+    requirement_block=requirements_directive(decision.get("requirement_contract") or {})
     return (
         "RONN R23 UNIFIED BRAIN:\n"
         "- One strongest available main brain owns the final answer.\n"
@@ -477,7 +487,8 @@ def directive(decision):
         f"- Reasoning depth: {decision.get('depth')}\n"
         f"- Task profile: {decision.get('profile')}\n"
         + reasoning_contract(decision) + "\n"
-        f"- Active capabilities: {', '.join(active) if active else 'main brain only'}\n"
+        + (requirement_block + "\n" if requirement_block else "")
+        + f"- Active capabilities: {', '.join(active) if active else 'main brain only'}\n"
         "- Use real tool evidence when present. Never claim an action succeeded without evidence.\n"
         "- Keep simple answers simple; use the larger capability plane only when the task earns it."
     )
@@ -504,6 +515,9 @@ def status():
         "confidence_governor":True,
         "confidence_governor_status":confidence_status(),
         "confidence_governor_policy":"auto-mode current-turn uncertainty can add verification, deeper reasoning, correction, or competition; easy/explicit-mode turns are preserved",
+        "requirement_contract":True,
+        "requirement_contract_status":requirements_status(),
+        "requirement_contract_policy":"current-turn exact constraints are checklist-tracked; dense contracts add verification without forcing an extra provider call",
         "provider_reasoning_effort":True,
         "reasoning_budget_decoupled_from_visible_brevity":True,
         "reasoning_effort_levels":{"fast":"low","smart":"medium","deep":"high","apex":"high"},
