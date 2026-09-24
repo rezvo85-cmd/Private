@@ -1925,6 +1925,9 @@ jobs:
 
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
+          assert browser_use._completion_state(True,True,"Task complete") == {"blocked":False,"ok":True}
+          assert browser_use._completion_state(True,True,"BLOCKED: final submit remains") == {"blocked":True,"ok":False}
+          assert browser_use._completion_state(False,True,"Task complete")["ok"] is False
           assert browser_use._allowed_domains(
               "Open https://www.example.com/path and click the button"
           ) == ["www.example.com"]
@@ -1984,6 +1987,60 @@ jobs:
           assert computer["computer_requested"] is True
           assert computer["browser_interactive"] is False
 
+          from r23_task_graph import build_task_graph, reconcile_task_graph
+          browser_decision={
+              "difficulty":3,
+              "profile":"knowledge",
+              "verify":False,
+              "needs_live":False,
+              "capabilities":interactive,
+              "requirement_contract":{},
+          }
+          graph=build_task_graph(
+              "Open https://example.com and click the More information link",
+              browser_decision,
+          )
+          rows={x["id"]:x for x in graph["nodes"]}
+          assert graph["active"] is True
+          assert "interact_browser" in rows
+          assert rows["interact_browser"]["kind"] == "browser"
+
+          success_run={
+              "planned":["browser_automation"],
+              "executed":["browser_automation"],
+              "browser_automation":{"ok":True,"blocked":False},
+              "evidence_contract":{
+                  "interactive_browser_verified":True,
+                  "retrieval":{},
+                  "runtime_execution":{},
+              },
+              "evidence_sufficiency":{"sufficient":True,"gaps":[]},
+          }
+          success_graph=reconcile_task_graph(graph,success_run,browser_decision)
+          success_rows={x["id"]:x for x in success_graph["nodes"]}
+          assert success_rows["interact_browser"]["state"] == "complete"
+
+          blocked_run={
+              "planned":["browser_automation"],
+              "executed":[],
+              "browser_automation":{"ok":False,"blocked":True,"result":"BLOCKED: final submit remains"},
+              "evidence_contract":{
+                  "interactive_browser_verified":False,
+                  "retrieval":{},
+                  "runtime_execution":{},
+              },
+              "evidence_sufficiency":{
+                  "sufficient":False,
+                  "gaps":["interactive_browser_execution"],
+              },
+          }
+          blocked_graph=reconcile_task_graph(graph,blocked_run,browser_decision)
+          blocked_rows={x["id"]:x for x in blocked_graph["nodes"]}
+          assert blocked_rows["interact_browser"]["state"] == "failed"
+          assert blocked_graph["dead_end"] is True
+          assert blocked_graph["replan_reason"] == "unrecoverable_browser_action"
+          assert blocked_graph["recovery_attempted"] is False
+
           # Interactive browser tasks must not also run the legacy text-browser
           # fetch path. Keep the two execution modes mutually exclusive.
           import r23_agent_runtime as runtime_mod
@@ -2016,6 +2073,10 @@ jobs:
           assert calls["interactive"] == 1
           assert "browser_automation" in run["executed"]
           assert "browser" not in run["executed"]
+          browser_sources=[x for x in run["sources"] if x.get("kind")=="browser_automation"]
+          assert browser_sources
+          assert browser_sources[0].get("read") is False
+          assert browser_sources[0].get("interacted") is True
 
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain
