@@ -1,11 +1,12 @@
 """RONN R15 trust, evidence and rollback journal."""
 from __future__ import annotations
-import json, sqlite3, time, uuid
+import json, os, sqlite3, time, uuid
 from pathlib import Path
 
 BASE=Path(__file__).resolve().parent
 DB=BASE/"data"/"r15_trust.db"
 DB.parent.mkdir(exist_ok=True)
+MAX_ACTIONS_PER_OWNER=max(200,min(10000,int(os.getenv("RONN_TRUST_MAX_ACTIONS_PER_OWNER","2000") or "2000")))
 
 def _db():
     c=sqlite3.connect(DB); c.row_factory=sqlite3.Row
@@ -15,6 +16,17 @@ def _db():
       status TEXT, created_at INTEGER, updated_at INTEGER)""")
     c.commit(); return c
 
+def _prune_owner(c, owner):
+    c.execute(
+        """DELETE FROM actions
+           WHERE owner=? AND id NOT IN (
+             SELECT id FROM actions WHERE owner=?
+             ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ?
+           )""",
+        (str(owner),str(owner),MAX_ACTIONS_PER_OWNER),
+    )
+
+
 def checkpoint(owner,action,target,before=None,after=None,risk="low",reversible=True,evidence=None):
     aid="act_"+uuid.uuid4().hex[:18]; now=int(time.time())
     pack=lambda x: json.dumps(x,ensure_ascii=False)[:120000] if x is not None else ""
@@ -23,6 +35,7 @@ def checkpoint(owner,action,target,before=None,after=None,risk="low",reversible=
           (aid,str(owner)[:120],str(action)[:120],str(target)[:300],str(risk)[:20],
            1 if reversible else 0,pack(before),pack(after),pack(evidence),
            "completed",now,now))
+        _prune_owner(c,owner)
         c.commit()
     return get(aid)
 
@@ -77,4 +90,4 @@ def stats(owner=None):
         else:
             total=c.execute("SELECT COUNT(*) n FROM actions").fetchone()["n"]
             rb=c.execute("SELECT COUNT(*) n FROM actions WHERE status='rolled_back'").fetchone()["n"]
-    return {"actions":int(total),"rolled_back":int(rb)}
+    return {"actions":int(total),"rolled_back":int(rb),"max_actions_per_owner":MAX_ACTIONS_PER_OWNER}
