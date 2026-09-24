@@ -1676,16 +1676,25 @@ def model_fallback_order(preferred_model: str, route: str):
     and a few usable current chat models are appended automatically.
     """
     order = [preferred_model]
-    if openrouter_key_loaded():
+    vision_route = route in {"vision","r20-vision","ensemble-vision"}
+    if vision_route:
+        # Never send image-bearing requests to text-only fallbacks. R13's Qwen
+        # endpoint is the only cross-provider vision fallback RONN currently
+        # declares as vision-capable.
+        if openrouter_key_loaded() and OR_QWEN_MODEL not in order:
+            order.append(OR_QWEN_MODEL)
+    elif openrouter_key_loaded():
         for m in r13_fallback_models("coding" if route in {"creator","ensemble-code","r20-code"} else "chat"):
             if m not in order:
                 order.append(m)
     if preferred_model == NVIDIA_MODEL:
         order += [SMART_MODEL, CREATOR_MODEL, FAST_MODEL]
-    elif route in {"creator","vision"}:
-        if nvidia_key_loaded() and route == "creator":
+    elif route == "creator":
+        if nvidia_key_loaded():
             order += [NVIDIA_MODEL]
         order += [SMART_MODEL, FAST_MODEL]
+    elif vision_route:
+        pass
     elif route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-limited"}:
         # Live freshness comes from RONN's retrieval/evidence plane. Provider
         # fallbacks are synthesis models only; none are assumed to have searched.
@@ -1711,16 +1720,18 @@ def model_fallback_order(preferred_model: str, route: str):
         if m != NVIDIA_MODEL and not is_openrouter_model(m) and catalog and m not in catalog_set:
             continue
         out.append(m)
-    if catalog:
+    if catalog and not vision_route:
         for m in _general_chat_model_ids(catalog):
             if m not in out:
                 out.append(m)
             if len(out) >= 8:
                 break
-    # If catalog lookup failed, preserve the configured fallback names.
-    if not out:
+    # Preserve configured names only when catalog discovery itself failed.
+    # If a reachable catalog proved a model unavailable, never add it back.
+    if not catalog and not out:
         for m in order:
-            if m and m not in out: out.append(m)
+            if m and m not in out:
+                out.append(m)
     # Demote models with repeated observed provider failures, then use explicit user feedback
     # only after multiple ratings so one click cannot destabilize routing.
     health_ranked = rank_models(out)
