@@ -3444,11 +3444,19 @@ def self_repair_plan_api():
     actions=[]
     integrity=verify_package_integrity()
     providers=provider_config_status()
+    release_now=r21_release_gate()
+    release_checks={x.get("name"):x for x in (release_now.get("checks") or [])}
     r7=run_r7_benchmarks()
     if not integrity.get("verified"):
         actions.append({"severity":"high","action":"restore_clean_build","detail":"Core file fingerprints do not match this RONN build. Re-extract the clean ZIP instead of patching around a modified package."})
-    if not providers["groq"]["configured"] and not providers["nvidia"]["configured"]:
+    if not providers["groq"]["configured"] and not providers["nvidia"]["configured"] and not providers["openrouter"]["configured"]:
         actions.append({"severity":"high","action":"configure_provider","detail":"No valid AI provider key is configured, so model-backed intelligence cannot run."})
+    if not (release_checks.get("provider_models_current") or {}).get("passed",True):
+        actions.append({
+            "severity":"high",
+            "action":"update_provider_models",
+            "detail":"One or more configured Groq model IDs are retired. Remove the stale RONN_*_MODEL override or replace it with the effective current model reported by the release gate.",
+        })
     health=provider_health_summary()
     failing=[h for h in health if (h.get("consecutive_failures") or 0)>=2]
     if failing:
@@ -3917,6 +3925,7 @@ def diagnostics(request: Request):
         "core_store_pg": (BASE / "core_store_pg.py").exists(),
         "memory_store_pg": (BASE / "memory_store_pg.py").exists(),
         "r20_tool_hub": (BASE / "r20_tool_hub.py").exists(),
+        "provider_models": (BASE / "provider_models.py").exists(),
         "r21_release_gate": (BASE / "r21_release_gate.py").exists(),
     }
     integrity = verify_package_integrity()
@@ -3931,6 +3940,7 @@ def diagnostics(request: Request):
     r22_checks = r22_eval_run()
     r23_checks = r23_eval_run()
     provider = provider_config_status()
+    release_now = r21_release_gate()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
         warnings.append("No AI provider key is configured.")
@@ -3960,6 +3970,12 @@ def diagnostics(request: Request):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
         warnings.append("RONN package integrity check did not match the shipped build manifest.")
+    if not release_now.get("ok",False):
+        failed_release=[x.get("name") for x in (release_now.get("checks") or []) if not x.get("passed")]
+        warnings.append(
+            "Production release gate is not passing"
+            + (": " + ", ".join(x for x in failed_release if x) if failed_release else ".")
+        )
     return {
         "name":"RONN",
         "build":BUILD_ID,
@@ -3987,7 +4003,7 @@ def diagnostics(request: Request):
         "r23_quality_lab":r23_quality_status(_quality_lab_candidates("main")),
         "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
-        "r21_release_gate":R21_RELEASE_STATUS,
+        "r21_release_gate":release_now,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner_id(request)),
