@@ -195,7 +195,11 @@ def _refresh_states(graph):
     while changed:
         changed=False
         for node in graph.get("nodes") or []:
-            if node.get("state") in {"complete","failed","blocked"}:
+            if node.get("state") in {"complete","failed"}:
+                continue
+            # Dependency-blocked downstream nodes can become runnable again after
+            # a successful recovery pass. Explicit dead-end blocks remain terminal.
+            if node.get("state")=="blocked" and node.get("detail")!="dependency did not complete":
                 continue
             deps=node.get("depends_on") or []
             dep_rows=[rows.get(x) or {} for x in deps]
@@ -283,6 +287,17 @@ def reconcile_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[st
             if code.get("ok"):
                 detail="runtime reported success but verification proof is incomplete"
             _mark(graph,"execute_verify","failed",detail,True)
+
+    # If this is the bounded recovery pass, close the recovery node according
+    # to whether its original failed branch was actually repaired.
+    if graph.get("recovery_attempted") and graph.get("recovery_kind"):
+        rid="recover_"+str(graph.get("recovery_kind"))
+        target=str(graph.get("recovery_target") or "")
+        target_row=_index(graph).get(target) or {}
+        if target_row.get("state")=="complete":
+            _mark(graph,rid,"complete","bounded recovery repaired the target branch",True)
+        elif target_row.get("state")=="failed":
+            _mark(graph,rid,"failed","bounded recovery did not repair the target branch",True)
 
     # The main brain has not synthesized yet, but it can proceed once all tool
     # prerequisites are complete or explicitly bounded by a dead-end limitation.
