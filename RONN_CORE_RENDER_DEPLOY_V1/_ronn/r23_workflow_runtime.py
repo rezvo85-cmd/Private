@@ -22,8 +22,19 @@ from r23_task_graph import (
     merge_tool_runs as _merge_tool_runs,
 )
 
-VERSION = "R23-WORKFLOW-RUNTIME-1"
+VERSION = "R23-WORKFLOW-RUNTIME-2"
 _LANGGRAPH_ENABLED = os.getenv("RONN_LANGGRAPH_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+class _LangGraphFailure(RuntimeError):
+    """Carries enough state to avoid blindly repeating already-started tools."""
+
+    def __init__(self, error_name: str, *, execution_started=False, tool_run=None, task_graph=None):
+        super().__init__(error_name)
+        self.error_name = str(error_name or "LangGraphError")
+        self.execution_started = bool(execution_started)
+        self.tool_run = tool_run
+        self.task_graph = task_graph
 
 
 def langgraph_available() -> bool:
@@ -173,9 +184,18 @@ def _langgraph_run(
     executor: Callable,
     checkpoint_fn: Callable | None,
 ) -> dict[str, Any]:
-    from langgraph.graph import END, START, StateGraph
+    progress = {
+        "execution_started": False,
+        "tool_run": None,
+        "task_graph": decision.get("task_graph") or {},
+    }
+    try:
+        from langgraph.graph import END, START, StateGraph
+    except Exception as exc:
+        raise _LangGraphFailure(exc.__class__.__name__) from exc
 
     def execute_node(state: _WorkflowState):
+        progress["execution_started"] = True
         run = _invoke_executor(
             state["executor"],
             state["owner"],
@@ -185,6 +205,7 @@ def _langgraph_run(
             state["decision"],
             state.get("repair_fn"),
         )
+        progress["tool_run"] = run
         return {"tool_run": run}
 
     def reconcile_node(state: _WorkflowState):
@@ -193,6 +214,7 @@ def _langgraph_run(
             state.get("tool_run") or {},
             state["decision"],
         )
+        progress["task_graph"] = graph
         recovery = _recovery_decision(
             graph,
             state["decision"],
@@ -214,37 +236,64 @@ def _langgraph_run(
                 checkpoint(state["request_id"], "Replan", "started", "LangGraph is executing the single R23-approved recovery branch.")
             except Exception:
                 pass
-        recovery_run = _invoke_executor(
-            state["executor"],
-            state["owner"],
-            state["request_id"] + "_replan",
-            state["message"],
-            state.get("files") or [],
-            recovery,
-            state.get("repair_fn"),
-        )
-        graph, merged = _merge_after_recovery(
-            graph,
-            state.get("tool_run") or {},
-            recovery_run,
-            state["decision"],
-        )
-        if checkpoint:
-            try:
-                ok = bool((merged.get("evidence_sufficiency") or {}).get("sufficient"))
-                checkpoint(
-                    state["request_id"],
-                    "Replan",
-                    "complete" if ok else "blocked",
-                    "LangGraph completed the bounded R23 recovery branch.",
-                )
-            except Exception:
-                pass
-        return {
-            "task_graph": graph,
-            "recovery_run": recovery_run,
-            "tool_run": merged,
-        }
+        try:
+            recovery_run = _invoke_executor(
+                state["executor"],
+                state["owner"],
+                state["request_id"] + "_replan",
+                state["message"],
+                state.get("files") or [],
+                recovery,
+                state.get("repair_fn"),
+            )
+            graph, merged = _merge_after_recovery(
+                graph,
+                state.get("tool_run") or {},
+                recovery_run,
+                state["decision"],
+            )
+            progress["tool_run"] = merged
+            progress["task_graph"] = graph
+            if checkpoint:
+                try:
+                    ok = bool((merged.get("evidence_sufficiency") or {}).get("sufficient"))
+                    checkpoint(
+                        state["request_id"],
+                        "Replan",
+                        "complete" if ok else "blocked",
+                        "LangGraph completed the bounded R23 recovery branch.",
+                    )
+                except Exception:
+                    pass
+            return {
+                "task_graph": graph,
+                "recovery_run": recovery_run,
+                "tool_run": merged,
+            }
+        except Exception as exc:
+            # Never replay the primary action because only the bounded recovery failed.
+            primary = dict(state.get("tool_run") or {})
+            primary.setdefault("errors", []).append(
+                "task_graph_recovery:" + exc.__class__.__name__
+            )
+            graph = _reconcile(graph, primary, state["decision"])
+            progress["tool_run"] = primary
+            progress["task_graph"] = graph
+            if checkpoint:
+                try:
+                    checkpoint(
+                        state["request_id"],
+                        "Replan",
+                        "blocked",
+                        "Bounded R23 recovery failed without repeating the primary tool action.",
+                    )
+                except Exception:
+                    pass
+            return {
+                "task_graph": graph,
+                "recovery_run": {},
+                "tool_run": primary,
+            }
 
     workflow = StateGraph(_WorkflowState)
     workflow.add_node("execute", execute_node)
@@ -261,20 +310,32 @@ def _langgraph_run(
     workflow.add_edge("recover", "finish")
     workflow.add_edge("finish", END)
 
-    compiled = workflow.compile()
-    result = compiled.invoke(
-        {
-            "owner": owner,
-            "request_id": request_id,
-            "message": message,
-            "files": files or [],
-            "decision": decision,
-            "repair_fn": repair_fn,
-            "executor": executor,
-            "checkpoint_fn": checkpoint_fn,
-            "errors": [],
-        }
-    )
+    try:
+        compiled = workflow.compile()
+    except Exception as exc:
+        raise _LangGraphFailure(exc.__class__.__name__) from exc
+
+    try:
+        result = compiled.invoke(
+            {
+                "owner": owner,
+                "request_id": request_id,
+                "message": message,
+                "files": files or [],
+                "decision": decision,
+                "repair_fn": repair_fn,
+                "executor": executor,
+                "checkpoint_fn": checkpoint_fn,
+                "errors": [],
+            }
+        )
+    except Exception as exc:
+        raise _LangGraphFailure(
+            exc.__class__.__name__,
+            execution_started=progress["execution_started"],
+            tool_run=progress["tool_run"],
+            task_graph=progress["task_graph"],
+        ) from exc
     return {
         "engine": "langgraph",
         "used_langgraph": True,
@@ -302,16 +363,55 @@ def run(
             return _langgraph_run(
                 owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
             )
-        except Exception as exc:
-            fallback = _direct(
-                owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
-            )
-            fallback["fallback_from"] = "langgraph"
-            fallback["workflow_error"] = exc.__class__.__name__
-            fallback["tool_run"].setdefault("errors", []).append(
-                "langgraph_fallback:" + exc.__class__.__name__
-            )
-            return fallback
+        except _LangGraphFailure as exc:
+            # A direct fallback is safe only before any primary tool execution starts.
+            if not exc.execution_started:
+                fallback = _direct(
+                    owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
+                )
+                fallback["fallback_from"] = "langgraph"
+                fallback["workflow_error"] = exc.error_name
+                fallback["tool_run"].setdefault("errors", []).append(
+                    "langgraph_pre_execution_fallback:" + exc.error_name
+                )
+                return fallback
+
+            # Once execution starts, never blindly replay it. Preserve any completed
+            # result and let R23 synthesize with the explicit degraded/error state.
+            if isinstance(exc.tool_run, dict):
+                tool_run = dict(exc.tool_run)
+                tool_run.setdefault("errors", []).append(
+                    "langgraph_post_execution:" + exc.error_name
+                )
+                try:
+                    graph = exc.task_graph or _reconcile(
+                        decision.get("task_graph") or {}, tool_run, decision
+                    )
+                except Exception:
+                    graph = decision.get("task_graph") or {}
+                return {
+                    "engine": "langgraph_degraded",
+                    "used_langgraph": True,
+                    "tool_run": tool_run,
+                    "task_graph": graph,
+                    "fallback_from": "",
+                    "workflow_error": exc.error_name,
+                }
+
+            return {
+                "engine": "langgraph_error",
+                "used_langgraph": True,
+                "tool_run": {
+                    "planned": [],
+                    "executed": [],
+                    "evidence": "",
+                    "sources": [],
+                    "errors": ["langgraph_execution_started:" + exc.error_name],
+                },
+                "task_graph": exc.task_graph or decision.get("task_graph") or {},
+                "fallback_from": "",
+                "workflow_error": exc.error_name,
+            }
 
     return _direct(
         owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
@@ -329,5 +429,6 @@ def status() -> dict[str, Any]:
         "r23_plan_of_record": True,
         "owns_model_routing": False,
         "owns_final_answer": False,
-        "fallback": "existing direct R23 workflow",
+        "fallback": "direct R23 workflow only before tool execution starts",
+        "no_duplicate_action_replay": True,
     }
