@@ -160,6 +160,20 @@ jobs:
           assert "qwen/qwen3.6-27b" not in controller_src
           assert "research-limited" in app_src
 
+          catalog_candidates=app._general_chat_model_ids([
+              "openai/gpt-oss-120b",
+              "qwen/qwen3.8-27b",
+              "canopylabs/orpheus-v1-english",
+              "canopylabs/orpheus-arabic-saudi",
+              "whisper-large-v3",
+              "openai/gpt-oss-safeguard-20b",
+          ])
+          assert "openai/gpt-oss-120b" in catalog_candidates
+          assert "qwen/qwen3.8-27b" in catalog_candidates
+          assert not any("orpheus" in x for x in catalog_candidates)
+          assert not any("whisper" in x for x in catalog_candidates)
+          assert not any("safeguard" in x for x in catalog_candidates)
+
           # Vision fallback must never route image-bearing requests into text-only
           # GPT-OSS models, and a reachable provider catalog must be authoritative.
           old_or=app.openrouter_key_loaded
