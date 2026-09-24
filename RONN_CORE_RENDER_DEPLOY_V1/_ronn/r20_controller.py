@@ -50,9 +50,29 @@ def _local_intent(message):
         "recommend me restaurants","recommend restaurants"
     ))
 
+def _natural_lookup_intent(message):
+    low=re.sub(r"\s+"," ",str(message or "").lower()).strip()
+    patterns=(
+        r"\bcheck (?:that|this|it|those|these) out\b",
+        r"\bcheck (?:that|this|it|those|these) (?:for me|online)\b",
+        r"\b(?:can you |could you )?(?:find|look up|look into|check for|see if)\b",
+        r"\bfind me\b",
+        r"\bwhere (?:can|could) i (?:buy|get|find)\b",
+        r"\bwhat(?:'s| is) new with\b",
+    )
+    return any(re.search(p,low,re.I) for p in patterns)
+
+
 def _needs_live(message,profile):
     low=(message or "").lower()
-    return profile=="research" or _local_intent(message) or any(x in low for x in ("today","right now","currently","latest","this week","weather","forecast","news","score","standings","schedule","price today","stock price","who won","release date","current version","open now"))
+    freshness=any(re.search(p,low,re.I) for p in (
+        r"\b(?:today|tonight|right now|currently|latest|newest|this week|recent|recently|breaking)\b",
+        r"\b(?:new release|new drop|just dropped|dropping|restock|restocked|restocking|in stock|sold out|available now)\b",
+        r"\b(?:weather|forecast|news|score|standings|schedule|price today|stock price|who won|release date|current version|open now)\b",
+    ))
+    natural=_natural_lookup_intent(message)
+    new_lookup=bool(re.search(r"\bnew\b",low) and natural and profile not in {"creative","writing","coding"})
+    return bool(profile=="research" or _local_intent(message) or freshness or natural or new_lookup)
 
 def deterministic_plan(message,history=None,file_names=None,has_images=False,has_project=False,agent_mode=True,explicit_mode="auto"):
     history=history or []; file_names=file_names or []
