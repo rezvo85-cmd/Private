@@ -238,7 +238,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
 
     # 2) Full agent runtime: inspect explicit URLs with the safe browser.
     urls=extract_urls(message)
-    if urls and caps.get("agent_runtime"):
+    if urls and caps.get("agent_runtime") and not caps.get("browser_interactive"):
         out["planned"].append("browser")
         try:
             pages=collect_pages(urls[:4])
@@ -473,7 +473,7 @@ def status():
     cs=computer_status()
     bu=browser_use_status()
     return {
-        "version":"R23-AGENT-3",
+        "version":"R23-AGENT-4",
         "browser":True,
         "browser_use":bu,
         "research":True,

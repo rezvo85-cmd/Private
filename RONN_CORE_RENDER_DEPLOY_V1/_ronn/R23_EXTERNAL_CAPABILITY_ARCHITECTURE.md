@@ -25,7 +25,7 @@ External libraries are implementation helpers beneath existing R23-owned interfa
 4. LangGraph is allowed only for complex R23 task graphs that already require real tools. Simple and medium chat keeps the direct R23 path.
 5. Every external integration has a deterministic fallback. If a helper is unavailable, RONN keeps its existing behavior rather than failing the main brain.
 6. No external framework may write R23 prompts, select the final model, modify Requirement Contracts, modify confidence scores, or own final synthesis.
-7. External-version upgrades are pinned and must pass R23 CI before production.\n8. Browser Use is a task-local executor exception to the no-secondary-planner rule: its internal step selection is confined to one R23-approved browser task, is hard-capped, and returns evidence only. R23 remains the plan of record and final-answer owner.\n9. Browser Use stays lazy and optional in Core until the Chromium runtime is independently proven on the deployment host; normal chat must not require it.
+7. External-version upgrades are pinned and must pass R23 CI before production.\n8. Browser Use is a task-local executor under R23. Its optional planner and judge layers are disabled; it may select only immediate page actions inside one R23-approved browser task, is hard-capped, and returns evidence only. R23 remains the plan of record and final-answer owner.\n9. Browser Use stays lazy and optional in Core until the Chromium runtime is independently proven on the deployment host; normal chat must not require it. Local file actions, uploads, downloads, PDF saving, arbitrary page JavaScript evaluation, wildcard domain expansion, and Browser Use web search are disabled at the adapter boundary.
 
 ## Why these integrations exist
 

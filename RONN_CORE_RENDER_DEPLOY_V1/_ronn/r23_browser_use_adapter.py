@@ -17,8 +17,9 @@ import time
 from urllib.parse import urlparse
 from typing import Any
 
-VERSION = "R23-BROWSER-USE-1"
-DEFAULT_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+VERSION = "R23-BROWSER-USE-2"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+_FORBIDDEN_ACTIONS = ("search", "upload_file", "save_as_pdf", "write_file", "replace_file", "read_file", "evaluate")
 _TRUE = {"1", "true", "yes", "on"}
 
 _INTERACTIVE_WORDS = (
@@ -92,20 +93,18 @@ def _public_http_url(url: str, *, allow_blank: bool = False) -> bool:
 
 
 def _allowed_domains(task: str) -> list[str]:
+    """Return only hosts R23 explicitly approved in the user task.
+
+    Browser Use already handles the ordinary www/non-www variant. Do not add
+    subdomain wildcards here: that would silently widen R23's approved scope.
+    """
     hosts: list[str] = []
     for raw in _urls(task):
         _public_http_url(raw)
         host = (urlparse(raw).hostname or "").lower()
-        candidates=[host]
-        if host.startswith("www.") and host.count(".") >= 2:
-            candidates.append(host[4:])
-        for candidate in list(candidates):
-            if candidate:
-                candidates.append("*."+candidate)
-        for candidate in candidates:
-            if candidate and candidate not in hosts:
-                hosts.append(candidate)
-    return hosts[:16]
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts[:8]
 
 
 def requested(message: str) -> bool:
@@ -133,6 +132,10 @@ def status() -> dict[str, Any]:
         "scope": "bounded_browser_executor",
         "r23_final_answer_owner": True,
         "lazy_loaded": True,
+        "internal_planning": False,
+        "internal_judge": False,
+        "local_file_actions_blocked": True,
+        "downloads_blocked": True,
         "local_private_network_blocked": True,
         "irreversible_final_submit_blocked": True,
     }
@@ -162,7 +165,7 @@ def _timeout_seconds() -> int:
 
 async def _run(task: str, depth: str) -> dict[str, Any]:
     # Imports stay inside the execution path by design.
-    from browser_use import Agent, Browser, BrowserProfile, ChatGroq
+    from browser_use import Agent, Browser, BrowserProfile, ChatGroq, Tools
 
     key = _groq_key()
     if not key:
@@ -179,8 +182,13 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         block_ip_addresses=True,
         keep_alive=False,
         enable_default_extensions=False,
+        accept_downloads=False,
+        auto_download_pdfs=False,
+        captcha_solver=False,
+        permissions=[],
     )
     browser = Browser(browser_profile=profile)
+    tools = Tools(exclude_actions=list(_FORBIDDEN_ACTIONS))
     llm = ChatGroq(
         model=model,
         api_key=key,
@@ -193,8 +201,13 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         task=bounded_task,
         llm=llm,
         browser=browser,
-        use_vision="auto",
+        tools=tools,
+        use_vision=False,
         use_thinking=False,
+        use_judge=False,
+        enable_planning=False,
+        available_file_paths=[],
+        display_files_in_done_text=False,
         max_actions_per_step=3,
         max_failures=3,
         final_response_after_failure=False,
