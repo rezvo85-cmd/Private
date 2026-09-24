@@ -102,6 +102,211 @@ jobs:
           assert r23.get("score") == 100.0
           PY
 
+      - name: Provider model retirement and live-evidence smoke
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import app
+          import provider_models
+
+          assert app.FAST_MODEL == "openai/gpt-oss-20b"
+          assert app.SMART_MODEL == "openai/gpt-oss-120b"
+          assert app.CREATOR_MODEL == "qwen/qwen3.8-27b"
+          assert app.VISION_MODEL == "qwen/qwen3.8-27b"
+          assert app.LIVE_MODEL == "openai/gpt-oss-20b"
+          assert app.RESEARCH_MODEL == "openai/gpt-oss-120b"
+
+          groq="https://api.groq.com/openai/v1"
+          assert provider_models.normalize_groq_model("qwen/qwen3.6-27b",groq) == "qwen/qwen3.8-27b"
+          assert provider_models.normalize_groq_model("groq/compound-mini",groq) == "openai/gpt-oss-20b"
+          assert provider_models.normalize_groq_model("groq/compound",groq) == "openai/gpt-oss-120b"
+          # Custom OpenAI-compatible providers retain their explicit IDs.
+          assert provider_models.normalize_groq_model(
+              "groq/compound","https://example-provider.invalid/v1"
+          ) == "groq/compound"
+
+          payload=app.request_payload(
+              app.RESEARCH_MODEL,"research",
+              [{"role":"user","content":"test"}],128,False,
+          )
+          assert payload["model"] == "openai/gpt-oss-120b"
+          assert "compound_custom" not in payload
+
+          model,route=provider_models.live_synthesis_target(
+              has_evidence=False,r23=True,current_model=app.RESEARCH_MODEL,
+              groq=True,openrouter=False,nvidia=False,
+              smart_model=app.SMART_MODEL,openrouter_model=app.OR_QWEN_MODEL,
+              nvidia_model=app.NVIDIA_MODEL,
+          )
+          assert model == app.SMART_MODEL
+          assert route == "research-limited"
+
+          model,route=provider_models.live_synthesis_target(
+              has_evidence=True,r23=True,current_model=app.RESEARCH_MODEL,
+              groq=True,openrouter=False,nvidia=False,
+              smart_model=app.SMART_MODEL,openrouter_model=app.OR_QWEN_MODEL,
+              nvidia_model=app.NVIDIA_MODEL,
+          )
+          assert model == app.RESEARCH_MODEL
+          assert route == "web-synthesis"
+
+          app_src=Path("app.py").read_text(encoding="utf-8")
+          controller_src=Path("r20_controller.py").read_text(encoding="utf-8")
+          assert "groq/compound-mini" not in app_src
+          assert '"groq/compound"' not in app_src
+          assert "qwen/qwen3.6-27b" not in app_src
+          assert "qwen/qwen3.6-27b" not in controller_src
+          assert "research-limited" in app_src
+
+          catalog_candidates=app._general_chat_model_ids([
+              "openai/gpt-oss-120b",
+              "qwen/qwen3.8-27b",
+              "canopylabs/orpheus-v1-english",
+              "canopylabs/orpheus-arabic-saudi",
+              "whisper-large-v3",
+              "openai/gpt-oss-safeguard-20b",
+          ])
+          assert "openai/gpt-oss-120b" in catalog_candidates
+          assert "qwen/qwen3.8-27b" in catalog_candidates
+          assert not any("orpheus" in x for x in catalog_candidates)
+          assert not any("whisper" in x for x in catalog_candidates)
+          assert not any("safeguard" in x for x in catalog_candidates)
+
+          # Vision fallback must never route image-bearing requests into text-only
+          # GPT-OSS models, and a reachable provider catalog must be authoritative.
+          old_or=app.openrouter_key_loaded
+          old_groq=app.groq_key_loaded
+          old_nv=app.nvidia_key_loaded
+          old_catalog=app.groq_model_catalog
+          try:
+              app.openrouter_key_loaded=lambda: False
+              app.groq_key_loaded=lambda: True
+              app.nvidia_key_loaded=lambda: False
+              app.groq_model_catalog=lambda ttl=300: [
+                  app.VISION_MODEL,app.SMART_MODEL,app.FAST_MODEL
+              ]
+              vision_order=app.model_fallback_order(app.VISION_MODEL,"vision")
+              assert vision_order == [app.VISION_MODEL], vision_order
+
+              # If Groq says the configured vision model is absent, do not
+              # re-add it or substitute text-only models.
+              app.groq_model_catalog=lambda ttl=300: [
+                  app.SMART_MODEL,app.FAST_MODEL
+              ]
+              vision_missing=app.model_fallback_order(app.VISION_MODEL,"vision")
+              assert vision_missing == [], vision_missing
+
+              # With OpenRouter available, only its declared Qwen vision model
+              # may be used as the cross-provider fallback.
+              app.openrouter_key_loaded=lambda: True
+              vision_cross=app.model_fallback_order(app.VISION_MODEL,"vision")
+              assert vision_cross == [app.OR_QWEN_MODEL], vision_cross
+              assert app.SMART_MODEL not in vision_cross
+              assert app.FAST_MODEL not in vision_cross
+          finally:
+              app.openrouter_key_loaded=old_or
+              app.groq_key_loaded=old_groq
+              app.nvidia_key_loaded=old_nv
+              app.groq_model_catalog=old_catalog
+
+          # Agent Mode is a real user-facing boundary. Turning it off must
+          # suppress browser/computer agent capabilities, and the runtime must
+          # still defend against a malformed/stale decision object.
+          from r23_capabilities import capability_plan
+          import r23_agent_runtime as agent_runtime
+
+          base={"difficulty":3,"profile":"knowledge","followup":False}
+          off=capability_plan(
+              base,
+              "Open https://example.com and click More, then inspect my screen",
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=False,
+          )
+          assert off["agent_mode"] is False
+          assert off["agent_runtime"] is False
+          assert off["browser_interactive"] is False
+          assert off["computer_requested"] is False
+
+          old_browser=agent_runtime.browser_use_execute
+          old_cstatus=agent_runtime.computer_status
+          old_caction=agent_runtime.computer_action
+          calls={"browser":0,"status":0,"action":0}
+          agent_runtime.browser_use_execute=lambda *a,**k: calls.__setitem__("browser",calls["browser"]+1) or {"ok":True}
+          agent_runtime.computer_status=lambda: calls.__setitem__("status",calls["status"]+1) or {"verified":True}
+          agent_runtime.computer_action=lambda *a,**k: calls.__setitem__("action",calls["action"]+1) or {"ok":True}
+          try:
+              malformed={
+                  "needs_live":False,
+                  "capabilities":{
+                      "agent_mode":False,
+                      "agent_runtime":False,
+                      "browser_url":True,
+                      "browser_interactive":True,
+                      "computer_requested":True,
+                      "retrieval":{},
+                  },
+              }
+              guarded=agent_runtime.execute(
+                  "ci","agent-off","Open https://example.com and click More, inspect my screen",
+                  [],malformed,
+              )
+          finally:
+              agent_runtime.browser_use_execute=old_browser
+              agent_runtime.computer_status=old_cstatus
+              agent_runtime.computer_action=old_caction
+          assert calls == {"browser":0,"status":0,"action":0}, calls
+          assert "browser_automation" not in guarded["planned"]
+          assert "computer_runtime" not in guarded["planned"]
+
+          print("provider model retirement/live-evidence/vision fallback/agent-mode guard: ok")
+          PY
+
+      - name: Desktop config and environment precedence smoke
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+
+          import launcher
+          from dotenv import dotenv_values
+
+          assert launcher.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
+
+          with tempfile.TemporaryDirectory() as td:
+              p=Path(td)/".env"
+              p.write_text(
+                  "CLOUD_API_BASE=https://api.groq.com/openai/v1\n"
+                  "CLOUD_API_KEY=desktop-key\n"
+                  "OPENROUTER_API_KEY=openrouter-key\n"
+                  "RONN_CREATOR_MODEL=qwen/qwen3.6-27b\n"
+                  "RONN_VISION_MODEL=qwen/qwen3.6-27b\n"
+                  "RONN_LIVE_MODEL=groq/compound-mini\n"
+                  "RONN_RESEARCH_MODEL=groq/compound\n",
+                  encoding="utf-8",
+              )
+              old=launcher.ENV_FILE
+              try:
+                  launcher.ENV_FILE=p
+                  assert launcher._env_has_provider(p) is True
+                  launcher.clean_env_file()
+                  vals=dotenv_values(p)
+                  assert vals["OPENROUTER_API_KEY"] == "openrouter-key"
+                  assert vals["RONN_CREATOR_MODEL"] == "qwen/qwen3.8-27b"
+                  assert vals["RONN_VISION_MODEL"] == "qwen/qwen3.8-27b"
+                  assert vals["RONN_LIVE_MODEL"] == "openai/gpt-oss-20b"
+                  assert vals["RONN_RESEARCH_MODEL"] == "openai/gpt-oss-120b"
+              finally:
+                  launcher.ENV_FILE=old
+
+          src=Path("app.py").read_text(encoding="utf-8")
+          assert 'os.getenv("RONN_ENV_FILE")' in src
+          assert "load_dotenv(dotenv_path=ENV_FILE, override=False)" in src
+          assert '"_ronn/launcher.py"' in src
+          print("desktop config/env precedence: ok")
+          PY
+
       - name: Integrity and health truthfulness smoke
         run: |
           python - <<'PY'
@@ -171,6 +376,7 @@ jobs:
           assert healthy["ok"] is True
           assert checks["database_runtime_binding"]["passed"] is True
           assert checks["external_capability_boundaries"]["passed"] is True
+          assert checks["provider_models_current"]["passed"] is True
 
           os.environ["DATABASE_URL"]=""
           missing=r21_release_gate.run()

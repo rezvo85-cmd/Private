@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 import re
 import shutil
 import socket
@@ -9,6 +10,8 @@ import time
 import urllib.request
 import webbrowser
 from pathlib import Path
+
+from provider_models import normalize_groq_model
 
 ROOT = Path(__file__).resolve().parent.parent
 CORE = Path(__file__).resolve().parent
@@ -20,7 +23,7 @@ RUNTIME_FILE = CORE / "data" / "runtime.json"
 LOGS.mkdir(exist_ok=True)
 RUNTIME_FILE.parent.mkdir(exist_ok=True)
 BASE_PORT = 8030
-BUILD_ID = "RONN-COGNITIVE-OS-APEX-2026-R10-ECOSYSTEM"
+BUILD_ID = "RONN-COGNITIVE-OS-2026-R23-ALL-11"
 
 
 def python_cmd():
@@ -48,7 +51,7 @@ def _real_key(value: str):
 
 def _env_has_provider(path: Path):
     vals = _parse_env_values(path)
-    return any(_real_key(vals.get(k, "")) for k in ("CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY"))
+    return any(_real_key(vals.get(k, "")) for k in ("CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "OPENROUTER_API_KEY"))
 
 
 def shared_config_path():
@@ -130,13 +133,54 @@ def clean_env_file():
     if not ENV_FILE.exists():
         return
     allowed = {
+        # Provider/model configuration.
         "CLOUD_API_BASE", "CLOUD_API_KEY", "GROQ_API_KEY",
         "NVIDIA_BASE_URL", "NVIDIA_API_KEY", "NVIDIA_MODEL",
-        "RONN_PUBLIC_MODE", "RONN_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
+        "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "RONN_CONTROLLER_MODEL",
+        "RONN_CONTROLLER_OPENROUTER_MODEL",
         "RONN_FAST_MODEL", "RONN_SMART_MODEL", "RONN_CREATOR_MODEL",
         "RONN_VISION_MODEL", "RONN_LIVE_MODEL", "RONN_RESEARCH_MODEL",
+        "RONN_ALLOW_RETIRED_GROQ_MODELS",
+
+        # Core auth/security and desktop behavior. Stable signing/vault keys must
+        # never be stripped or older encrypted Vault data can become unreadable.
+        "RONN_CORE_TOKEN", "RONN_SESSION_SIGNING_KEY", "RONN_VAULT_MASTER_KEY",
+        "RONN_PUBLIC_MODE", "RONN_CORS_ORIGINS", "RONN_BIND_HOST",
+        "RONN_RATE_LIMIT_PER_MINUTE", "RONN_RATE_LIMIT_MAX_KEYS",
+        "RONN_OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
+
+        # Search/reader and optional capability runtimes.
+        "RONN_SEARXNG_URL", "RONN_CRAWL4AI_URL", "RONN_READER_TOKEN",
+        "RONN_READER_BROWSER", "RONN_DOCLING_ENABLED", "RONN_LANGGRAPH_ENABLED",
+        "RONN_BROWSER_USE_ENABLED", "RONN_BROWSER_USE_MODEL",
+        "RONN_BROWSER_USE_MAX_STEPS", "RONN_BROWSER_USE_TIMEOUT_SECONDS",
+        "RONN_COMPUTER_URL", "RONN_COMPUTER_TOKEN",
+        "RONN_RUNNER_URL", "RONN_RUNNER_TOKEN",
+        "RONN_TRAINING_URL", "RONN_TRAINING_TOKEN",
+
+        # Connector credentials used by the R17 registry.
+        "GITHUB_TOKEN", "GOOGLE_CONNECTOR_TOKEN", "DROPBOX_ACCESS_TOKEN", "SLACK_BOT_TOKEN",
+
+        # Cloud/durability/retention tuning.
+        "DATABASE_URL", "RONN_CLOUD_SYNC_SECONDS", "RONN_CLOUD_MAX_EVENTS_PER_OWNER",
+        "RONN_CLOUD_EVENT_RETENTION_DAYS", "RONN_SNAPSHOT_MAX_PER_PROJECT",
+        "RONN_MAX_LOCAL_BACKUPS", "RONN_MAX_CLIPBOARD_PER_OWNER",
+        "RONN_MAX_READ_NOTIFICATIONS_PER_OWNER", "RONN_MAX_UNREAD_NOTIFICATIONS_PER_OWNER",
+        "RONN_MAX_SYNC_EVENTS_PER_OWNER", "RONN_MAX_ACTIONS_PER_OWNER",
+        "RONN_MAX_CLAIMED_HANDOFFS_PER_OWNER", "RONN_MAX_OWNER_SESSIONS_PER_OWNER",
+        "RONN_MAX_ROUTINE_INTERVAL_MINUTES",
+        "RONN_TRUST_MAX_ACTIONS_PER_OWNER", "RONN_TRUST_JSON_MAX_CHARS",
+        "RONN_MAX_COMPLETED_JOBS_PER_OWNER", "RONN_MAX_FAILED_JOBS_PER_OWNER",
+        "RONN_JOB_JSON_MAX_CHARS",
+        "RONN_MONITOR_MAX_WATCHES_PER_OWNER", "RONN_MONITOR_MAX_ALERTS_PER_OWNER",
+        "RONN_TRAINING_PENDING_TTL_SECONDS", "RONN_TRAINING_MAX_PENDING_PER_OWNER",
+        "RONN_TRAINING_MAX_EXAMPLES_PER_OWNER",
+        "RONN_MAX_TASKS_PER_OWNER", "RONN_MAX_CHECKPOINTS_PER_TASK",
+        "RONN_TASK_QUEUE_MAX_TERMINAL_PER_OWNER",
+
+        # Existing product/runtime settings.
         "RONN_STUDIO_BRIDGE_URL", "RONN_STUDIO_BRIDGE_TOKEN",
-        "RONN_CORE_TOKEN", "RONN_CORS_ORIGINS", "RONN_CREDITS_ENABLED", "RONN_DEFAULT_CREDITS", "RONN_VAULT_MASTER_KEY",
+        "RONN_CREDITS_ENABLED", "RONN_DEFAULT_CREDITS",
         "PORT",
     }
     legacy_map = {
@@ -160,7 +204,13 @@ def clean_env_file():
         v = v.strip().strip('"').strip("'")
         if k not in allowed or not v:
             continue
-        if k in {"CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "RONN_STUDIO_BRIDGE_TOKEN"} and any(x in v for x in (" ", "(", ")")):
+        if k in {
+            "CLOUD_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "OPENROUTER_API_KEY",
+            "RONN_STUDIO_BRIDGE_TOKEN", "RONN_CORE_TOKEN", "RONN_SESSION_SIGNING_KEY",
+            "RONN_VAULT_MASTER_KEY", "RONN_READER_TOKEN", "RONN_COMPUTER_TOKEN",
+            "RONN_RUNNER_TOKEN", "RONN_TRAINING_TOKEN", "GITHUB_TOKEN",
+            "GOOGLE_CONNECTOR_TOKEN", "DROPBOX_ACCESS_TOKEN", "SLACK_BOT_TOKEN",
+        } and any(x in v for x in (" ", "(", ")")):
             continue
         values[k] = v
 
@@ -169,6 +219,18 @@ def clean_env_file():
     values.setdefault("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
     values.setdefault("NVIDIA_API_KEY", "PASTE_YOUR_NVIDIA_API_KEY_HERE")
     values.setdefault("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+    values.setdefault("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
+
+    # Clean stale Groq model overrides during desktop launch too, so a recovered
+    # old .env does not keep forcing retired IDs after the runtime was upgraded.
+    groq_base=values.get("CLOUD_API_BASE", "https://api.groq.com/openai/v1")
+    for key in (
+        "RONN_FAST_MODEL","RONN_SMART_MODEL","RONN_CREATOR_MODEL",
+        "RONN_VISION_MODEL","RONN_LIVE_MODEL","RONN_RESEARCH_MODEL",
+    ):
+        if values.get(key):
+            values[key]=normalize_groq_model(values[key],groq_base)
+
     values["RONN_PUBLIC_MODE"] = "false"
     values.setdefault("RONN_CREDITS_ENABLED", "false")
     values.setdefault("RONN_DEFAULT_CREDITS", "100")
@@ -177,15 +239,47 @@ def clean_env_file():
     ordered = [
         "CLOUD_API_BASE", "CLOUD_API_KEY", "GROQ_API_KEY",
         "NVIDIA_BASE_URL", "NVIDIA_API_KEY", "NVIDIA_MODEL",
+        "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "RONN_CONTROLLER_MODEL",
+        "RONN_CONTROLLER_OPENROUTER_MODEL",
         "RONN_FAST_MODEL", "RONN_SMART_MODEL", "RONN_CREATOR_MODEL",
         "RONN_VISION_MODEL", "RONN_LIVE_MODEL", "RONN_RESEARCH_MODEL",
-        "RONN_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
+        "RONN_ALLOW_RETIRED_GROQ_MODELS",
+        "RONN_CORE_TOKEN", "RONN_SESSION_SIGNING_KEY", "RONN_VAULT_MASTER_KEY",
+        "RONN_CORS_ORIGINS", "RONN_RATE_LIMIT_PER_MINUTE", "RONN_RATE_LIMIT_MAX_KEYS",
+        "RONN_OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
+        "RONN_SEARXNG_URL", "RONN_CRAWL4AI_URL", "RONN_READER_TOKEN", "RONN_READER_BROWSER",
+        "RONN_DOCLING_ENABLED", "RONN_LANGGRAPH_ENABLED",
+        "RONN_BROWSER_USE_ENABLED", "RONN_BROWSER_USE_MODEL",
+        "RONN_BROWSER_USE_MAX_STEPS", "RONN_BROWSER_USE_TIMEOUT_SECONDS",
+        "RONN_COMPUTER_URL", "RONN_COMPUTER_TOKEN",
+        "RONN_RUNNER_URL", "RONN_RUNNER_TOKEN", "RONN_TRAINING_URL", "RONN_TRAINING_TOKEN",
+        "GITHUB_TOKEN", "GOOGLE_CONNECTOR_TOKEN", "DROPBOX_ACCESS_TOKEN", "SLACK_BOT_TOKEN",
+        "DATABASE_URL", "RONN_CLOUD_SYNC_SECONDS", "RONN_CLOUD_MAX_EVENTS_PER_OWNER",
+        "RONN_CLOUD_EVENT_RETENTION_DAYS", "RONN_SNAPSHOT_MAX_PER_PROJECT",
+        "RONN_MAX_LOCAL_BACKUPS", "RONN_MAX_CLIPBOARD_PER_OWNER",
+        "RONN_MAX_READ_NOTIFICATIONS_PER_OWNER", "RONN_MAX_UNREAD_NOTIFICATIONS_PER_OWNER",
+        "RONN_MAX_SYNC_EVENTS_PER_OWNER", "RONN_MAX_ACTIONS_PER_OWNER",
+        "RONN_MAX_CLAIMED_HANDOFFS_PER_OWNER", "RONN_MAX_OWNER_SESSIONS_PER_OWNER",
+        "RONN_MAX_ROUTINE_INTERVAL_MINUTES",
+        "RONN_TRUST_MAX_ACTIONS_PER_OWNER", "RONN_TRUST_JSON_MAX_CHARS",
+        "RONN_MAX_COMPLETED_JOBS_PER_OWNER", "RONN_MAX_FAILED_JOBS_PER_OWNER",
+        "RONN_JOB_JSON_MAX_CHARS",
+        "RONN_MONITOR_MAX_WATCHES_PER_OWNER", "RONN_MONITOR_MAX_ALERTS_PER_OWNER",
+        "RONN_TRAINING_PENDING_TTL_SECONDS", "RONN_TRAINING_MAX_PENDING_PER_OWNER",
+        "RONN_TRAINING_MAX_EXAMPLES_PER_OWNER",
+        "RONN_MAX_TASKS_PER_OWNER", "RONN_MAX_CHECKPOINTS_PER_TASK",
+        "RONN_TASK_QUEUE_MAX_TERMINAL_PER_OWNER",
         "RONN_STUDIO_BRIDGE_URL", "RONN_STUDIO_BRIDGE_TOKEN",
-        "RONN_CORE_TOKEN", "RONN_CORS_ORIGINS", "RONN_CREDITS_ENABLED", "RONN_DEFAULT_CREDITS", "RONN_VAULT_MASTER_KEY",
+        "RONN_CREDITS_ENABLED", "RONN_DEFAULT_CREDITS",
         "RONN_PUBLIC_MODE", "PORT",
     ]
     lines = [f"{k}={values[k]}" for k in ordered if k in values]
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if os.name != "nt":
+        try:
+            os.chmod(ENV_FILE, 0o600)
+        except Exception:
+            pass
 
 
 def persist_shared_env():
@@ -195,6 +289,11 @@ def persist_shared_env():
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ENV_FILE, target)
+        if os.name != "nt":
+            try:
+                os.chmod(target, 0o600)
+            except Exception:
+                pass
         return target
     except Exception:
         return None
@@ -247,19 +346,55 @@ def ensure_env():
     print(f"[RONN] Configure: {ENV_FILE}")
     return {"configured": False, "source": str(ENV_FILE), "shared": str(shared_config_path())}
 
+def _requirements_digest():
+    try:
+        return hashlib.sha256(REQ.read_bytes()).hexdigest()
+    except Exception:
+        return ""
+
+
 def ensure_venv():
     py = python_cmd()
+    created = False
     if not py.exists():
         print("[RONN] First launch: creating a private Python environment...")
         subprocess.check_call([sys.executable, "-m", "venv", str(VENV)])
+        created = True
+
+    # An existing venv from an older RONN build may still import FastAPI while
+    # missing newer R23 dependencies. Track the exact requirements file that was
+    # last installed and also probe every current core dependency namespace.
+    marker = VENV / ".ronn_requirements.sha256"
+    digest = _requirements_digest()
+    installed_digest = ""
+    try:
+        installed_digest = marker.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
+    probe = (
+        "import fastapi,uvicorn,requests,dotenv,cryptography,psycopg,agents,docling,langgraph,"
+        "pypdf,docx,openpyxl,pptx"
+    )
     check = subprocess.run(
-        [str(py), "-c", "import fastapi,uvicorn,requests,dotenv,cryptography"],
+        [str(py), "-c", probe],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    if check.returncode != 0:
-        print("[RONN] Installing required packages...")
+    needs_install = bool(
+        created
+        or check.returncode != 0
+        or not digest
+        or installed_digest != digest
+    )
+    if needs_install:
+        print("[RONN] Installing/updating required packages for this build...")
         subprocess.check_call([str(py), "-m", "pip", "install", "-q", "-r", str(REQ)])
+        # Verify dependency metadata after installation; do not launch a partially
+        # resolved environment just because imports happen to work.
+        subprocess.check_call([str(py), "-m", "pip", "check"], stdout=subprocess.DEVNULL)
+        if digest:
+            marker.write_text(digest + "\n", encoding="utf-8")
     return py
 
 
@@ -326,7 +461,7 @@ def main():
     if os.name == "nt":
         os.system("title RONN COGNITIVE OS APEX")
     print("=" * 68)
-    print(" RONN COGNITIVE OS // R9 CORE API v1")
+    print(" RONN COGNITIVE OS // R23 CORE API v1")
     print(" Agentic intelligence // research + snapshots + knowledge + verification")
     print("=" * 68)
 

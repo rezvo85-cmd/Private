@@ -133,6 +133,11 @@ from snapshot_engine import create_snapshot, list_snapshots, load_snapshot, comp
 from task_queue import add as queue_add, list_items as queue_list, update as queue_update, stats as queue_stats
 from task_engine import start_task, checkpoint as task_checkpoint, finish_task, get_task, recent_tasks, stats as task_stats, latest_incomplete
 from provider_engine import record as record_provider_event, recent_health, rank_models, summary as provider_health_summary
+from provider_models import (
+    configured_model as provider_configured_model,
+    live_synthesis_target as provider_live_synthesis_target,
+    status as provider_models_status,
+)
 from artifact_engine import write_artifact, list_artifacts, inspect_text
 from document_engine import extract_document, status as document_engine_status
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
@@ -150,7 +155,7 @@ STATIC = BASE / "static"
 DATA = BASE / "data"
 DATA.mkdir(exist_ok=True)
 DB_FILE = DATA / "ronn_memory.db"
-ENV_FILE = BASE.parent / ".env"
+ENV_FILE = Path(os.getenv("RONN_ENV_FILE") or (BASE.parent / ".env")).expanduser()
 INTEGRITY_MANIFEST = BASE / "integrity_manifest.json"
 
 def verify_package_integrity():
@@ -168,6 +173,7 @@ def verify_package_integrity():
     patch_exemptions={
         "_ronn/app.py",
         "_ronn/core_api.py",
+        "_ronn/launcher.py",
         "_ronn/core_store.py",
         "_ronn/core_store_pg.py",
         "_ronn/ecosystem_api.py",
@@ -233,7 +239,9 @@ def verify_package_integrity():
         "mismatches":mismatches[:20],
     }
 
-load_dotenv(dotenv_path=ENV_FILE, override=True)
+# Explicit process/Render environment always wins. The dotenv file only fills
+# missing desktop settings; it must never shadow deployment secrets/config.
+load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 API_BASE = os.getenv("CLOUD_API_BASE", "https://api.groq.com/openai/v1").rstrip("/")
 API_KEY = (os.getenv("CLOUD_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "").strip())
@@ -245,12 +253,12 @@ OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/ap
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
 
-FAST_MODEL = os.getenv("RONN_FAST_MODEL", "openai/gpt-oss-20b").strip()
-SMART_MODEL = os.getenv("RONN_SMART_MODEL", "openai/gpt-oss-120b").strip()
-CREATOR_MODEL = os.getenv("RONN_CREATOR_MODEL", "qwen/qwen3.6-27b").strip()
-VISION_MODEL = os.getenv("RONN_VISION_MODEL", "qwen/qwen3.6-27b").strip()
-LIVE_MODEL = os.getenv("RONN_LIVE_MODEL", "groq/compound-mini").strip()
-RESEARCH_MODEL = os.getenv("RONN_RESEARCH_MODEL", "groq/compound").strip()
+FAST_MODEL = provider_configured_model("RONN_FAST_MODEL", "fast", API_BASE)
+SMART_MODEL = provider_configured_model("RONN_SMART_MODEL", "smart", API_BASE)
+CREATOR_MODEL = provider_configured_model("RONN_CREATOR_MODEL", "creator", API_BASE)
+VISION_MODEL = provider_configured_model("RONN_VISION_MODEL", "vision", API_BASE)
+LIVE_MODEL = provider_configured_model("RONN_LIVE_MODEL", "live", API_BASE)
+RESEARCH_MODEL = provider_configured_model("RONN_RESEARCH_MODEL", "research", API_BASE)
 
 PUBLIC_MODE = os.getenv("RONN_PUBLIC_MODE", "false").strip().lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RONN_RATE_LIMIT_PER_MINUTE", "10"))
@@ -1570,10 +1578,6 @@ def request_payload(model, route, messages, max_tokens, stream=True):
     payload = {"model":model,"messages":messages,"stream":stream,"max_tokens":max_tokens}
     reasoning_effort=r23_reasoning_effort_for_route(route)
 
-    if model in {"groq/compound","groq/compound-mini"}:
-        payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
-        return payload
-
     if model in OR_ENSEMBLE_MODELS:
         payload["temperature"] = 0.45 if model != OR_CRITIC_MODEL else 0.3
         # OpenRouter normalizes reasoning effort for supported thinking models.
@@ -1616,8 +1620,6 @@ def provider_for_model(model: str):
 def cloud_request(model, route, messages, max_tokens, stream=True):
     base_url, api_key, provider = provider_for_model(model)
     headers = {"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
-    if provider == "groq" and model in {"groq/compound","groq/compound-mini"}:
-        headers["Groq-Model-Version"] = "latest"
     if provider == "openrouter":
         headers["X-Title"] = "RONN"
     started = time.time()
@@ -1662,7 +1664,7 @@ def groq_model_catalog(ttl=300):
         return []
 
 def _general_chat_model_ids(ids):
-    bad=("whisper","tts","audio","speech","embedding","guard","moderation","safety")
+    bad=("whisper","tts","audio","speech","orpheus","embedding","guard","moderation","safety")
     usable=[m for m in ids if not any(x in m.lower() for x in bad)]
     def score(m):
         low=m.lower(); points=0
@@ -1677,18 +1679,28 @@ def model_fallback_order(preferred_model: str, route: str):
     and a few usable current chat models are appended automatically.
     """
     order = [preferred_model]
-    if openrouter_key_loaded():
+    vision_route = route in {"vision","r20-vision","ensemble-vision"}
+    if vision_route:
+        # Never send image-bearing requests to text-only fallbacks. R13's Qwen
+        # endpoint is the only cross-provider vision fallback RONN currently
+        # declares as vision-capable.
+        if openrouter_key_loaded() and OR_QWEN_MODEL not in order:
+            order.append(OR_QWEN_MODEL)
+    elif openrouter_key_loaded():
         for m in r13_fallback_models("coding" if route in {"creator","ensemble-code","r20-code"} else "chat"):
             if m not in order:
                 order.append(m)
     if preferred_model == NVIDIA_MODEL:
         order += [SMART_MODEL, CREATOR_MODEL, FAST_MODEL]
-    elif route in {"creator","vision"}:
-        if nvidia_key_loaded() and route == "creator":
+    elif route == "creator":
+        if nvidia_key_loaded():
             order += [NVIDIA_MODEL]
         order += [SMART_MODEL, FAST_MODEL]
-    elif route in {"live","research","max","tools","r20-current","r20-research"}:
-        # Preserve Groq's tool-enabled route first; NVIDIA is a reasoning fallback.
+    elif vision_route:
+        pass
+    elif route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-limited"}:
+        # Live freshness comes from RONN's retrieval/evidence plane. Provider
+        # fallbacks are synthesis models only; none are assumed to have searched.
         if nvidia_key_loaded():
             order += [NVIDIA_MODEL]
         order += [SMART_MODEL, FAST_MODEL]
@@ -1711,16 +1723,18 @@ def model_fallback_order(preferred_model: str, route: str):
         if m != NVIDIA_MODEL and not is_openrouter_model(m) and catalog and m not in catalog_set:
             continue
         out.append(m)
-    if catalog:
+    if catalog and not vision_route:
         for m in _general_chat_model_ids(catalog):
             if m not in out:
                 out.append(m)
             if len(out) >= 8:
                 break
-    # If catalog lookup failed, preserve the configured fallback names.
-    if not out:
+    # Preserve configured names only when catalog discovery itself failed.
+    # If a reachable catalog proved a model unavailable, never add it back.
+    if not catalog and not out:
         for m in order:
-            if m and m not in out: out.append(m)
+            if m and m not in out:
+                out.append(m)
     # Demote models with repeated observed provider failures, then use explicit user feedback
     # only after multiple ratings so one click cannot destabilize routing.
     health_ranked = rank_models(out)
@@ -1736,15 +1750,10 @@ def minimal_cloud_request(model, messages, max_tokens, stream=True):
         "max_tokens": max_tokens,
         "temperature": 0.5,
     }
-    if model in {"groq/compound","groq/compound-mini"}:
-        payload.pop("temperature", None)
-        payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
     base_url, api_key, provider = provider_for_model(model)
     started=time.time()
     try:
         _headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
-        if provider == "groq" and model in {"groq/compound","groq/compound-mini"}:
-            _headers["Groq-Model-Version"]="latest"
         if provider == "openrouter":
             _headers["X-Title"]="RONN"
         r=requests.post(
@@ -1968,7 +1977,7 @@ def looks_like_internal_tool_payload(text: str) -> bool:
 def stream_response(r, owner: str, original_message: str, route: str, model: str, request_id: str="", started_at: float=0.0, profile: str="", retry_messages=None, brevity_policy=None, r7_report=None, project_id: str=""):
     filt = ThinkFilter()
     full = ""
-    _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis"} or model in {"groq/compound","groq/compound-mini"}
+    _guard_live = route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-recovered","knowledge-gap-rescue"}
     _gap_buffer = r23_gap_should_buffer(original_message, profile, already_live=_guard_live, has_images=False)
     _gap_prefix = ""
     _gap_released = not _gap_buffer
@@ -2083,13 +2092,14 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
         yield json.dumps({"token":full}) + "\n"
         _gap_released = True
 
-    # Never surface model-generated tool protocol. Recover with a real full Compound
-    # completion when live evidence/tool execution was requested.
+    # Never surface model-generated tool protocol. If live evidence was already
+    # gathered, retry synthesis with the same evidence-bound main model rather
+    # than relying on a retired provider-side search system.
     if _guard_live and looks_like_internal_tool_payload(full):
         try:
             _recovery_messages = retry_messages or []
-            if _recovery_messages and groq_key_loaded():
-                recovered, used_model = nonstream_with_fallback(RESEARCH_MODEL, "research", _recovery_messages, 1100)
+            if _recovery_messages:
+                recovered, used_model = nonstream_with_fallback(model, "web-synthesis", _recovery_messages, 1100)
                 recovered=(recovered or "").strip()
                 if recovered and not looks_like_internal_tool_payload(recovered):
                     full=recovered
@@ -2488,12 +2498,12 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 "Executed: " + ", ".join(_tool_run.get("executed") or ["evidence tool"])
             )
         elif _r20.get("needs_live"):
-            task_checkpoint(request_id, "Tool hub", "blocked", "Tool hub returned no live evidence; Compound fallback remains available.")
+            task_checkpoint(request_id, "Tool hub", "blocked", "Tool hub returned no live evidence; RONN will preserve the evidence limitation instead of substituting model memory.")
     except Exception as _tool_exc:
         _tool_run["errors"] = [_tool_exc.__class__.__name__]
         if _r20.get("needs_live"):
             try:
-                task_checkpoint(request_id, "Tool hub", "blocked", "RONN tool hub unavailable; using Compound built-in live tools.")
+                task_checkpoint(request_id, "Tool hub", "blocked", "RONN tool hub unavailable; current claims will remain explicitly unverified.")
             except Exception:
                 pass
 
@@ -2526,20 +2536,21 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             pass
 
     # Tools gather evidence; the R23 main brain keeps ownership of synthesis.
-    # Only if retrieval completely fails do we fall back to Compound's built-in web tools.
+    # A failed retrieval must never be relabeled as live research. Keep a capable
+    # synthesis model but switch to research-limited so prompts/UI/audits preserve
+    # the missing-evidence boundary.
     if _r20.get("needs_live"):
-        if _tool_run.get("evidence"):
-            if not _r20.get("r23"):
-                if groq_key_loaded():
-                    model, route = SMART_MODEL, "web-synthesis"
-                elif openrouter_key_loaded():
-                    model, route = OR_QWEN_MODEL, "web-synthesis"
-                elif nvidia_key_loaded():
-                    model, route = NVIDIA_MODEL, "web-synthesis"
-            else:
-                route = "web-synthesis"
-        elif groq_key_loaded():
-            model, route = RESEARCH_MODEL, "research"
+        model, route = provider_live_synthesis_target(
+            has_evidence=bool(_tool_run.get("evidence")),
+            r23=bool(_r20.get("r23")),
+            current_model=model,
+            groq=groq_key_loaded(),
+            openrouter=openrouter_key_loaded(),
+            nvidia=nvidia_key_loaded(),
+            smart_model=SMART_MODEL,
+            openrouter_model=OR_QWEN_MODEL,
+            nvidia_model=NVIDIA_MODEL,
+        )
 
     messages = build_messages(owner, body, profile, _r20)
     _evidence_contract = (_tool_run.get("evidence_contract") or {}) if _r20.get("r23") else {}
@@ -2574,7 +2585,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         messages[0]["content"] += (
             "\nFor current or research-dependent claims, answer from the retrieved web evidence when it is present. "
             "Treat SOURCE R# [READ PAGE] as retrieved page evidence and SOURCE R# [SEARCH SNIPPET ONLY] as discovery evidence only. "
-            "Do not describe, simulate, request, or print a tool call. If no retrieved evidence is present and the provider supports built-in live tools, it may use them internally. "
+            "Do not describe, simulate, request, or print a tool call. If no retrieved evidence is present, do not substitute model memory for current facts; state the retrieval limitation. "
             "Never expose tool-call JSON, tool names, internal arguments, executed-tools data, or hidden reasoning to the user. "
             "Return only the normal user-facing answer and include useful source links for current claims."
         )
@@ -2628,7 +2639,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "cognitive_os":_os_state,
         "strategy":_strategy,
         "reliability":reliability_flags(body.message, body.files),
-        "evidence_mode":"live" if _r20.get("needs_live") or route in {"live","research","max","tools","r20-current","r20-research"} else "model",
+        "evidence_mode":"live" if bool(_tool_run.get("evidence")) else "model",
         "response_length":_length_policy,
         "reasoning_budget":{
             "depth":_depth,
@@ -3288,6 +3299,14 @@ def capabilities():
         "r23_long_context": r23_context_status(),
         "r23_quality_lab": r23_quality_status(_quality_lab_candidates("main")),
         "r23_release_ready": r23_eval_run().get("all_11_ready",False),
+        "provider_model_compatibility": provider_models_status(API_BASE,{
+            "fast":FAST_MODEL,
+            "smart":SMART_MODEL,
+            "creator":CREATOR_MODEL,
+            "vision":VISION_MODEL,
+            "live":LIVE_MODEL,
+            "research":RESEARCH_MODEL,
+        }),
         "r7_capability_manifest": capability_manifest(),
         "core_api_v1": True,
         "core_conversation_store": True,
@@ -3296,8 +3315,9 @@ def capabilities():
         "skills": sorted([p.name for p in (BASE / "skills").glob("*.md")]),
         "tools": TOOL_CATALOG,
         "tool_routes": {
-            "live": "groq/compound-mini",
-            "research": "groq/compound",
+            "live": LIVE_MODEL,
+            "research": RESEARCH_MODEL,
+            "retrieval": "RONN SearXNG + reader evidence plane",
             "web_search": True,
             "visit_website": True,
             "code_execution": True,
@@ -3438,11 +3458,19 @@ def self_repair_plan_api():
     actions=[]
     integrity=verify_package_integrity()
     providers=provider_config_status()
+    release_now=r21_release_gate()
+    release_checks={x.get("name"):x for x in (release_now.get("checks") or [])}
     r7=run_r7_benchmarks()
     if not integrity.get("verified"):
         actions.append({"severity":"high","action":"restore_clean_build","detail":"Core file fingerprints do not match this RONN build. Re-extract the clean ZIP instead of patching around a modified package."})
-    if not providers["groq"]["configured"] and not providers["nvidia"]["configured"]:
+    if not providers["groq"]["configured"] and not providers["nvidia"]["configured"] and not providers["openrouter"]["configured"]:
         actions.append({"severity":"high","action":"configure_provider","detail":"No valid AI provider key is configured, so model-backed intelligence cannot run."})
+    if not (release_checks.get("provider_models_current") or {}).get("passed",True):
+        actions.append({
+            "severity":"high",
+            "action":"update_provider_models",
+            "detail":"One or more configured Groq model IDs are retired. Remove the stale RONN_*_MODEL override or replace it with the effective current model reported by the release gate.",
+        })
     health=provider_health_summary()
     failing=[h for h in health if (h.get("consecutive_failures") or 0)>=2]
     if failing:
@@ -3911,6 +3939,7 @@ def diagnostics(request: Request):
         "core_store_pg": (BASE / "core_store_pg.py").exists(),
         "memory_store_pg": (BASE / "memory_store_pg.py").exists(),
         "r20_tool_hub": (BASE / "r20_tool_hub.py").exists(),
+        "provider_models": (BASE / "provider_models.py").exists(),
         "r21_release_gate": (BASE / "r21_release_gate.py").exists(),
     }
     integrity = verify_package_integrity()
@@ -3925,6 +3954,7 @@ def diagnostics(request: Request):
     r22_checks = r22_eval_run()
     r23_checks = r23_eval_run()
     provider = provider_config_status()
+    release_now = r21_release_gate()
     warnings = []
     if not provider["groq"]["configured"] and not provider["nvidia"]["configured"] and not provider["openrouter"]["configured"]:
         warnings.append("No AI provider key is configured.")
@@ -3954,6 +3984,12 @@ def diagnostics(request: Request):
         warnings.append("One or more required RONN files are missing.")
     if not integrity.get("verified"):
         warnings.append("RONN package integrity check did not match the shipped build manifest.")
+    if not release_now.get("ok",False):
+        failed_release=[x.get("name") for x in (release_now.get("checks") or []) if not x.get("passed")]
+        warnings.append(
+            "Production release gate is not passing"
+            + (": " + ", ".join(x for x in failed_release if x) if failed_release else ".")
+        )
     return {
         "name":"RONN",
         "build":BUILD_ID,
@@ -3981,7 +4017,7 @@ def diagnostics(request: Request):
         "r23_quality_lab":r23_quality_status(_quality_lab_candidates("main")),
         "r23_knowledge_gap_rescue":r23_gap_status(),
         "r23_profile_outcomes":portable_outcome_status(),
-        "r21_release_gate":R21_RELEASE_STATUS,
+        "r21_release_gate":release_now,
         "r13_ensemble":r13_status(),
         "r15_cloud":r15_cloud_status(),
         "r15_trust":r15_trust_stats(owner_id(request)),
@@ -4555,12 +4591,24 @@ except Exception as _monitor_start_exc:
 start_routine_scheduler(queue_add)
 
 
+def _runtime_bind_host():
+    requested=(os.getenv("RONN_BIND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    loopback={"127.0.0.1","localhost","::1"}
+    if requested not in loopback and not _core_access_token():
+        # Local desktop mode is intentionally usable without a service token,
+        # therefore it must not become a LAN service by accident.
+        return "127.0.0.1"
+    return requested
+
+
 if __name__ == "__main__":
     import uvicorn
     print("="*66)
     print("RONN COGNITIVE OS APEX")
     print(f"BUILD: {BUILD_ID}")
+    bind_host=_runtime_bind_host()
     print(f"PORT: {PORT}")
+    print(f"BIND HOST: {bind_host}")
     print(f"ENV FOUND: {ENV_FILE.exists()}")
     print(f"GROQ KEY LOADED: {groq_key_loaded()}")
     print(f"NVIDIA KEY LOADED: {nvidia_key_loaded()}")
@@ -4572,4 +4620,4 @@ if __name__ == "__main__":
     print(f"LIVE: {LIVE_MODEL}")
     print(f"MAX/RESEARCH: {RESEARCH_MODEL}")
     print("="*66)
-    uvicorn.run("app:app", host="0.0.0.0", port=PORT, reload=False)
+    uvicorn.run("app:app", host=bind_host, port=PORT, reload=False)

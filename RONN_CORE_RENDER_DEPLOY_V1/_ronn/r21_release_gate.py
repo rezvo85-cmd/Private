@@ -7,6 +7,7 @@ from pathlib import Path
 
 from brevity_engine import response_length_policy, brevity_directive
 from r20_tool_hub import plan as tool_plan
+from provider_models import DEFAULTS as PROVIDER_MODEL_DEFAULTS, model_migration
 
 BASE=Path(__file__).resolve().parent
 ROOT=BASE.parent
@@ -63,6 +64,9 @@ def run():
             "fromDatabase:",
             "name: RONN_MEMORY",
             "property: connectionString",
+            "key: CLOUD_API_KEY",
+            "key: RONN_CORE_TOKEN",
+            'key: RONN_PUBLIC_MODE',
         )) and "postgresql://" not in blueprint and "postgres://" not in blueprint and "password:" not in blueprint
         add(
             "database_blueprint_binding",
@@ -71,6 +75,52 @@ def run():
         )
     except Exception as exc:
         add("database_blueprint_binding",False,str(exc)[:240])
+
+    try:
+        nested_blueprint=(ROOT/"render.yaml").read_text(encoding="utf-8")
+        required_render_keys=(
+            "key: DATABASE_URL",
+            "fromDatabase:",
+            "name: RONN_MEMORY",
+            "property: connectionString",
+            "key: CLOUD_API_KEY",
+            "key: RONN_CORE_TOKEN",
+            "key: RONN_PUBLIC_MODE",
+        )
+        nested_ok=all(x in nested_blueprint for x in required_render_keys)
+        add(
+            "render_blueprints_consistent",
+            bool(binding_ok and nested_ok),
+            "Both Render blueprints declare provider auth, private API auth, and durable Postgres binding",
+        )
+    except Exception as exc:
+        add("render_blueprints_consistent",False,str(exc)[:240])
+
+    # Provider model IDs age independently from RONN code. Detect stale Groq
+    # environment overrides explicitly so runtime migration cannot hide a
+    # production configuration that should be cleaned up.
+    try:
+        groq_base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip()
+        configured_models={
+            "fast":(os.getenv("RONN_FAST_MODEL") or PROVIDER_MODEL_DEFAULTS["fast"]).strip(),
+            "smart":(os.getenv("RONN_SMART_MODEL") or PROVIDER_MODEL_DEFAULTS["smart"]).strip(),
+            "creator":(os.getenv("RONN_CREATOR_MODEL") or PROVIDER_MODEL_DEFAULTS["creator"]).strip(),
+            "vision":(os.getenv("RONN_VISION_MODEL") or PROVIDER_MODEL_DEFAULTS["vision"]).strip(),
+            "live":(os.getenv("RONN_LIVE_MODEL") or PROVIDER_MODEL_DEFAULTS["live"]).strip(),
+            "research":(os.getenv("RONN_RESEARCH_MODEL") or PROVIDER_MODEL_DEFAULTS["research"]).strip(),
+        }
+        migrations={k:model_migration(v,groq_base) for k,v in configured_models.items()}
+        stale={k:v for k,v in migrations.items() if v.get("migrated")}
+        add(
+            "provider_models_current",
+            not stale,
+            {
+                "stale_configured_roles":sorted(stale),
+                "effective_models":{k:v.get("effective") for k,v in migrations.items()},
+            },
+        )
+    except Exception as exc:
+        add("provider_models_current",False,str(exc)[:240])
 
     # On the actual Render service, the secure Blueprint declaration is not
     # enough by itself: the runtime must really have DATABASE_URL.
@@ -82,6 +132,25 @@ def run():
             database_url_configured,
             "DATABASE_URL is configured in the running Render service" if database_url_configured
             else "DATABASE_URL is missing from the running Render service",
+        )
+        core_token_configured=bool(os.getenv("RONN_CORE_TOKEN","").strip())
+        add(
+            "production_auth_binding",
+            core_token_configured,
+            "RONN_CORE_TOKEN protects private production APIs" if core_token_configured
+            else "RONN_CORE_TOKEN is missing; private production APIs would not have a service auth boundary",
+        )
+        provider_runtime_configured=bool(
+            (os.getenv("CLOUD_API_KEY") or "").strip()
+            or (os.getenv("GROQ_API_KEY") or "").strip()
+            or (os.getenv("NVIDIA_API_KEY") or "").strip()
+            or (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        )
+        add(
+            "provider_runtime_binding",
+            provider_runtime_configured,
+            "At least one model provider key is configured in the running service" if provider_runtime_configured
+            else "No model provider key is configured in the running service",
         )
 
     # Production should have the two runtime helpers available, while DeepEval

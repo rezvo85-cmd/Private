@@ -153,10 +153,11 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
     ))
     # Browser Use is intentionally scoped to an explicit R23-approved URL.
     # Open-ended discovery stays on the existing research pipeline.
-    browser_interactive = bool(browser_words and has_url)
+    browser_interactive = bool(agent_mode and browser_words and has_url)
 
     return {
         "strong_main_brain": True,
+        "agent_mode": bool(agent_mode),
         "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or browser_interactive or computer_words or execution_words)),
         "browser_url": bool(has_url),
         "browser_interactive": browser_interactive,
@@ -169,7 +170,7 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
         "failure_learning": True,
         "autonomous_research": bool(retrieval["required"] and (research_words or difficulty >= 4 or retrieval["unknown_terms"])),
         "universal_retrieval": bool(retrieval["required"]),
-        "computer_requested": bool(computer_words),
+        "computer_requested": bool(agent_mode and computer_words),
         "retrieval": retrieval,
     }
 

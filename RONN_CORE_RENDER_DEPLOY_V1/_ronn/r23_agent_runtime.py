@@ -253,7 +253,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
 
     # Interactive web tasks use Browser Use only as a bounded executor. R23
     # still owns task selection, evidence requirements, and final synthesis.
-    if caps.get("browser_interactive"):
+    if caps.get("agent_runtime") and caps.get("browser_interactive"):
         out["planned"].append("browser_automation")
         try:
             br=browser_use_execute(message,depth=depth)
@@ -447,7 +447,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
             out["errors"].append("code_loop:"+exc.__class__.__name__)
 
     # 2) Computer runtime is real only when the isolated service is configured.
-    if caps.get("computer_requested"):
+    if caps.get("agent_runtime") and caps.get("computer_requested"):
         out["planned"].append("computer_runtime")
         try:
             cs=computer_status()
