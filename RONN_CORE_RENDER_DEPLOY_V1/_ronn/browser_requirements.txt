@@ -1,0 +1,4 @@
+# Optional external browser executor for R23.
+# Kept out of core requirements until its Chromium/runtime footprint is proven
+# on the production host. The adapter lazy-loads it and fails closed otherwise.
+browser-use==0.13.10
