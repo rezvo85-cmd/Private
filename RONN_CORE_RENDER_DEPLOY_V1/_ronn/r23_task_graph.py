@@ -230,7 +230,7 @@ def _refresh_states(graph):
         x["id"] for x in graph.get("nodes") or []
         if x.get("state")=="ready" and x.get("kind") not in {"understand","requirements","inspect"}
     ][:4]
-    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","verify","synthesize"}]
+    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","computer","verify","synthesize"}]
     graph["completion_proof"]={
         "required":[{"id":x.get("id"),"proof":x.get("proof"),"state":x.get("state")} for x in required],
         "proved":all(x.get("state")=="complete" for x in required if x.get("kind")!="synthesize") if required else True,
