@@ -437,6 +437,23 @@ def _prune_studio_plans_locked(now: float | None = None) -> None:
             _studio_plans.pop(pid,None)
 
 
+_V1_PUBLIC_BOOTSTRAP_PATHS = {
+    "/api/v1/health",
+    "/api/v1/owner/status",
+    "/api/v1/owner/unlock",
+    "/api/v1/owner/recovery-unlock",
+}
+
+# These routes own their auth policy in core_api._chat_auth so PUBLIC_MODE can
+# intentionally allow device-scoped public chat without opening ecosystem APIs.
+_V1_CHAT_AUTH_PATHS = {
+    "/api/v1/chat",
+    "/api/v1/chat/complete",
+    "/api/v1/chat/sse",
+    "/api/v1/research",
+}
+
+
 _LEGACY_PUBLIC_API_PATHS = {
     "/api/capabilities",
     "/api/cognitive-os",
@@ -491,6 +508,15 @@ def _legacy_private_route(path: str) -> bool:
     )
 
 
+def _v1_private_route(path: str) -> bool:
+    path=str(path or "")
+    return bool(
+        path.startswith("/api/v1/")
+        and path not in _V1_PUBLIC_BOOTSTRAP_PATHS
+        and path not in _V1_CHAT_AUTH_PATHS
+    )
+
+
 def _legacy_owner_authorized(request: Request) -> bool:
     if not _core_access_token():
         return True
@@ -504,7 +530,11 @@ def _legacy_owner_authorized(request: Request) -> bool:
 @app.middleware("http")
 async def public_guard(request: Request, call_next):
     if request.url.path.startswith("/api/"):
-        if _legacy_private_route(request.url.path) and not _legacy_owner_authorized(request):
+        private_api=(
+            _legacy_private_route(request.url.path)
+            or _v1_private_route(request.url.path)
+        )
+        if private_api and not _legacy_owner_authorized(request):
             return JSONResponse(
                 {"detail":"This device needs to reconnect to RONN."},
                 status_code=401,
