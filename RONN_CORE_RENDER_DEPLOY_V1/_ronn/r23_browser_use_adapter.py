@@ -123,6 +123,15 @@ def requested(message: str) -> bool:
     return bool(interactive and _urls(message))
 
 
+def _completion_state(done: bool, successful: bool, result: str) -> dict[str, bool]:
+    text=str(result or "").strip()
+    blocked=text.upper().startswith("BLOCKED:")
+    return {
+        "blocked":blocked,
+        "ok":bool(done and successful and text and not blocked),
+    }
+
+
 def status() -> dict[str, Any]:
     key = bool(_groq_key())
     installed = _installed()
@@ -231,12 +240,12 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         result = str(history.final_result() or "").strip()[:30000]
         successful = bool(history.is_successful())
         done = bool(history.is_done())
-        blocked = result.lstrip().upper().startswith("BLOCKED:")
+        completion=_completion_state(done,successful,result)
         return {
-            "ok": bool(done and successful and result and not blocked),
+            "ok": completion["ok"],
             "done": done,
             "successful": successful,
-            "blocked": blocked,
+            "blocked": completion["blocked"],
             "result": result,
             "urls": urls,
             "actions": [str(x)[:80] for x in (history.action_names() or [])[:80]],
