@@ -11,6 +11,7 @@ POOL=ThreadPoolExecutor(max_workers=3,thread_name_prefix="ronn-job")
 _LOCK=threading.Lock()
 MAX_COMPLETED_JOBS_PER_OWNER=max(50,min(5000,int(os.getenv("RONN_MAX_COMPLETED_JOBS_PER_OWNER","300") or "300")))
 MAX_FAILED_JOBS_PER_OWNER=max(50,min(5000,int(os.getenv("RONN_MAX_FAILED_JOBS_PER_OWNER","300") or "300")))
+MAX_JSON_CHARS=max(50000,min(1000000,int(os.getenv("RONN_JOB_JSON_MAX_CHARS","200000") or "200000")))
 
 def _db():
     c=sqlite3.connect(DB,check_same_thread=False); c.row_factory=sqlite3.Row
@@ -30,9 +31,61 @@ def _prune_owner(c,owner):
             SELECT id FROM jobs WHERE owner=? AND status=? ORDER BY updated_at DESC,id DESC LIMIT ?
         )""",(owner,status,owner,status,limit))
 
+def _bounded_value(value,string_limit=20000,item_limit=120,depth=0):
+    """Return a JSON-safe bounded copy while preserving common container shape."""
+    if depth>=8:
+        return {"_ronn_truncated":True,"reason":"max_depth"}
+    if value is None or isinstance(value,(bool,int,float)):
+        return value
+    if isinstance(value,str):
+        if len(value)<=string_limit:
+            return value
+        return value[:max(0,string_limit-24)]+"...[RONN truncated]"
+    if isinstance(value,dict):
+        out={}
+        items=list(value.items())
+        for key,val in items[:item_limit]:
+            out[str(key)[:240]]=_bounded_value(val,string_limit,item_limit,depth+1)
+        if len(items)>item_limit:
+            out["_ronn_truncated_items"]=len(items)-item_limit
+        return out
+    if isinstance(value,(list,tuple)):
+        out=[_bounded_value(v,string_limit,item_limit,depth+1) for v in list(value)[:item_limit]]
+        if len(value)>item_limit:
+            out.append({"_ronn_truncated_items":len(value)-item_limit})
+        return out
+    return _bounded_value(str(value),string_limit,item_limit,depth+1)
+
+
 def _pack(x):
-    try:return json.dumps(x,ensure_ascii=False)[:200000]
-    except Exception:return json.dumps({"text":str(x)[:100000]})
+    """Always return valid JSON; never slice a serialized JSON document."""
+    try:
+        raw=json.dumps(x,ensure_ascii=False)
+    except Exception:
+        x={"text":str(x)}
+        raw=json.dumps(x,ensure_ascii=False)
+    if len(raw)<=MAX_JSON_CHARS:
+        return raw
+
+    for string_limit,item_limit in (
+        (20000,120),(10000,100),(5000,80),(2000,60),(800,40),(300,25),
+    ):
+        bounded=_bounded_value(x,string_limit,item_limit)
+        raw=json.dumps(bounded,ensure_ascii=False)
+        if len(raw)<=MAX_JSON_CHARS:
+            return raw
+
+    fallback={
+        "_ronn_truncated":True,
+        "reason":"serialized_payload_exceeded_limit",
+        "original_chars":len(raw),
+        "preview":str(x)[:max(0,MAX_JSON_CHARS//2)],
+    }
+    text=json.dumps(fallback,ensure_ascii=False)
+    if len(text)>MAX_JSON_CHARS:
+        fallback["preview"]=fallback["preview"][:max(0,len(fallback["preview"])-(len(text)-MAX_JSON_CHARS)-32)]
+        text=json.dumps(fallback,ensure_ascii=False)
+    return text
 
 def _submit_existing(jid,payload,runner):
     def work():
@@ -72,8 +125,19 @@ def get(jid):
     if not r:return None
     d=dict(r)
     for k in ("payload","result"):
-        try:d[k]=json.loads(d[k]) if d[k] else None
-        except Exception:pass
+        raw=d.get(k)
+        if not raw:
+            d[k]=None
+            continue
+        try:
+            d[k]=json.loads(raw)
+        except Exception:
+            # Legacy rows created before valid bounded JSON may contain a cut-off
+            # document. Surface the corruption explicitly instead of changing the
+            # field type from object to an arbitrary raw string.
+            d[k]=None
+            d[k+"_parse_error"]=True
+            d[k+"_raw_preview"]=str(raw)[:1000]
     return d
 
 def list_jobs(owner,limit=40):
@@ -99,6 +163,9 @@ def stats(owner=None):
 def resume(jid,runner):
     job=get(jid)
     if not job:return None
+    if job.get("payload_parse_error"):
+        update(jid,status="failed",progress=100,error="Stored job payload is invalid legacy JSON and cannot be resumed safely.")
+        return get(jid)
     if job.get("status") in {"running","queued"}:
         return job
     if job.get("status")=="completed":
