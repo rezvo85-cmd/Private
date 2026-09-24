@@ -313,6 +313,25 @@ def run():
 
     task_graph_simple=plan("hi").get("task_graph") or {}
     task_graph_hard=hard_plan.get("task_graph") or {}
+    task_graph_code=task_graph_build(
+        "Fix this multi-file service, map dependencies first, then run tests and verify the repair.",
+        {
+            "difficulty":5,
+            "profile":"coding",
+            "needs_live":False,
+            "needs_tools":True,
+            "verify":True,
+            "depth":"deep",
+            "capabilities":{
+                "agent_runtime":True,
+                "world_model":True,
+                "code_fix_loop":True,
+            },
+            "requirement_contract":{"count":0,"hard_count":0,"density":"none"},
+        },
+        file_names=["app.py","service.py"],
+        has_project=True,
+    )
 
     task_graph_research_decision={
         "difficulty":5,
@@ -575,7 +594,7 @@ def run():
                   and len(task_graph_hard.get("nodes") or [])>=4
                   and any(
                       "map_dependencies" in (x.get("depends_on") or [])
-                      for x in task_graph_hard.get("nodes") or []
+                      for x in task_graph_code.get("nodes") or []
                       if x.get("id")=="execute_verify"
                   )
                   and task_graph_failed.get("replanned") is True
