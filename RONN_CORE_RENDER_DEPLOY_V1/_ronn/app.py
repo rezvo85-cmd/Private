@@ -4591,12 +4591,24 @@ except Exception as _monitor_start_exc:
 start_routine_scheduler(queue_add)
 
 
+def _runtime_bind_host():
+    requested=(os.getenv("RONN_BIND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    loopback={"127.0.0.1","localhost","::1"}
+    if requested not in loopback and not _core_access_token():
+        # Local desktop mode is intentionally usable without a service token,
+        # therefore it must not become a LAN service by accident.
+        return "127.0.0.1"
+    return requested
+
+
 if __name__ == "__main__":
     import uvicorn
     print("="*66)
     print("RONN COGNITIVE OS APEX")
     print(f"BUILD: {BUILD_ID}")
+    bind_host=_runtime_bind_host()
     print(f"PORT: {PORT}")
+    print(f"BIND HOST: {bind_host}")
     print(f"ENV FOUND: {ENV_FILE.exists()}")
     print(f"GROQ KEY LOADED: {groq_key_loaded()}")
     print(f"NVIDIA KEY LOADED: {nvidia_key_loaded()}")
@@ -4608,4 +4620,4 @@ if __name__ == "__main__":
     print(f"LIVE: {LIVE_MODEL}")
     print(f"MAX/RESEARCH: {RESEARCH_MODEL}")
     print("="*66)
-    uvicorn.run("app:app", host="0.0.0.0", port=PORT, reload=False)
+    uvicorn.run("app:app", host=bind_host, port=PORT, reload=False)
