@@ -740,6 +740,83 @@ jobs:
           print("background job/task-queue retention: ok")
           PY
 
+      - name: Ecosystem retention and session cleanup smoke
+        run: |
+          python - <<'PY'
+          import tempfile
+          import time
+          from pathlib import Path
+
+          import ecosystem_store as store
+
+          old_db=store.DB
+          old_clip=store.MAX_CLIPBOARD_PER_OWNER
+          old_read=store.MAX_READ_NOTIFICATIONS_PER_OWNER
+          old_unread=store.MAX_UNREAD_NOTIFICATIONS_PER_OWNER
+          old_routine=store.MAX_ROUTINE_INTERVAL_MINUTES
+
+          with tempfile.TemporaryDirectory() as td:
+              store.DB=Path(td)/"ecosystem.sqlite3"
+              store.MAX_CLIPBOARD_PER_OWNER=3
+              store.MAX_READ_NOTIFICATIONS_PER_OWNER=2
+              store.MAX_UNREAD_NOTIFICATIONS_PER_OWNER=3
+              store.MAX_ROUTINE_INTERVAL_MINUTES=120
+              now=time.time()
+
+              # Expired session rows are safe to delete; unexpired revoked rows
+              # must remain so signed-session revocation still works.
+              with store._db() as c:
+                  c.executemany(
+                      "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,?)",
+                      [
+                          ("expired","owner","","",now-200,now-10,0),
+                          ("active","owner","","",now-10,now+1000,0),
+                          ("revoked","owner","","",now-10,now+1000,1),
+                      ],
+                  )
+                  store._prune_expired_sessions(c,now)
+                  rows=c.execute("SELECT token_hash,revoked FROM owner_sessions ORDER BY token_hash").fetchall()
+              assert [(r["token_hash"],r["revoked"]) for r in rows] == [("active",0),("revoked",1)]
+
+              # Clipboard only needs bounded recent history.
+              for i in range(6):
+                  store.clipboard_push("owner","device",f"clip-{i}")
+              with store._db() as c:
+                  rows=c.execute("SELECT payload FROM clipboard WHERE owner='owner' ORDER BY id DESC").fetchall()
+              assert [r["payload"] for r in rows] == ["clip-5","clip-4","clip-3"]
+
+              # Keep read and unread notification history bounded independently.
+              for i in range(6):
+                  store.notification_add("owner",f"n-{i}","body")
+              with store._db() as c:
+                  unread=c.execute("SELECT COUNT(*) n FROM notifications WHERE owner='owner' AND read=0").fetchone()["n"]
+                  for i in range(4):
+                      c.execute(
+                          "INSERT INTO notifications(owner,title,body,category,read,created) VALUES(?,?,?,?,1,?)",
+                          ("owner",f"read-{i}","body","general",now+i),
+                      )
+                  store._prune_notifications(c,"owner")
+                  read=c.execute("SELECT COUNT(*) n FROM notifications WHERE owner='owner' AND read=1").fetchone()["n"]
+              assert unread == 3
+              assert read == 2
+              assert len(store.notifications("owner",False,-999)) == 1
+
+              # Huge user-provided routine intervals must not overflow SQLite.
+              rid=store.routine_save("owner","Far future",10**100,prompt="x")
+              with store._db() as c:
+                  row=c.execute("SELECT interval_minutes,next_run FROM routines WHERE id=?",(rid,)).fetchone()
+              assert row["interval_minutes"] == 120
+              assert row["next_run"] > now
+
+          store.DB=old_db
+          store.MAX_CLIPBOARD_PER_OWNER=old_clip
+          store.MAX_READ_NOTIFICATIONS_PER_OWNER=old_read
+          store.MAX_UNREAD_NOTIFICATIONS_PER_OWNER=old_unread
+          store.MAX_ROUTINE_INTERVAL_MINUTES=old_routine
+
+          print("ecosystem retention/session/routine guards: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
