@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 import re
 import shutil
 import socket
@@ -343,19 +344,55 @@ def ensure_env():
     print(f"[RONN] Configure: {ENV_FILE}")
     return {"configured": False, "source": str(ENV_FILE), "shared": str(shared_config_path())}
 
+def _requirements_digest():
+    try:
+        return hashlib.sha256(REQ.read_bytes()).hexdigest()
+    except Exception:
+        return ""
+
+
 def ensure_venv():
     py = python_cmd()
+    created = False
     if not py.exists():
         print("[RONN] First launch: creating a private Python environment...")
         subprocess.check_call([sys.executable, "-m", "venv", str(VENV)])
+        created = True
+
+    # An existing venv from an older RONN build may still import FastAPI while
+    # missing newer R23 dependencies. Track the exact requirements file that was
+    # last installed and also probe every current core dependency namespace.
+    marker = VENV / ".ronn_requirements.sha256"
+    digest = _requirements_digest()
+    installed_digest = ""
+    try:
+        installed_digest = marker.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+
+    probe = (
+        "import fastapi,uvicorn,requests,dotenv,cryptography,psycopg,agents,docling,langgraph,"
+        "pypdf,docx,openpyxl,pptx"
+    )
     check = subprocess.run(
-        [str(py), "-c", "import fastapi,uvicorn,requests,dotenv,cryptography"],
+        [str(py), "-c", probe],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    if check.returncode != 0:
-        print("[RONN] Installing required packages...")
+    needs_install = bool(
+        created
+        or check.returncode != 0
+        or not digest
+        or installed_digest != digest
+    )
+    if needs_install:
+        print("[RONN] Installing/updating required packages for this build...")
         subprocess.check_call([str(py), "-m", "pip", "install", "-q", "-r", str(REQ)])
+        # Verify dependency metadata after installation; do not launch a partially
+        # resolved environment just because imports happen to work.
+        subprocess.check_call([str(py), "-m", "pip", "check"], stdout=subprocess.DEVNULL)
+        if digest:
+            marker.write_text(digest + "\n", encoding="utf-8")
     return py
 
 
