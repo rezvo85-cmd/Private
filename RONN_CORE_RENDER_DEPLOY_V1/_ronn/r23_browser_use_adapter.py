@@ -55,11 +55,14 @@ def _groq_key() -> str:
     if direct:
         return direct
 
-    # CLOUD_API_KEY is only safe to reuse when the configured cloud endpoint is
-    # actually Groq. RONN can point CLOUD_API_BASE at other OpenAI-compatible
-    # providers, and sending that key to Groq would be both incorrect and unsafe.
-    base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip().lower()
-    if "api.groq.com" in base:
+    raw_base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip()
+    try:
+        parsed=urlparse(raw_base)
+        host=(parsed.hostname or "").strip().lower()
+        port=parsed.port
+    except ValueError:
+        return ""
+    if parsed.scheme == "https" and host == "api.groq.com" and port in {None,443}:
         return (os.getenv("CLOUD_API_KEY") or "").strip()
     return ""
 
@@ -125,11 +128,14 @@ def requested(message: str) -> bool:
 def status() -> dict[str, Any]:
     key = bool(_groq_key())
     installed = _installed()
+    enabled = _enabled()
+    configured = bool(installed and key)
     return {
         "version": VERSION,
         "installed": installed,
-        "enabled": _enabled(),
-        "configured": bool(installed and key),
+        "enabled": enabled,
+        "configured": configured,
+        "ready": bool(enabled and configured),
         "provider": "groq" if key else "",
         "model": (os.getenv("RONN_BROWSER_USE_MODEL") or DEFAULT_MODEL).strip(),
         "scope": "bounded_browser_executor",
