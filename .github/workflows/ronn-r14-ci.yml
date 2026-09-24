@@ -2131,6 +2131,72 @@ jobs:
           assert audit["internal_payload"]["detected"] is True
           assert any("Internal tool/search planning payload" in x for x in audit["warnings"])
           print("server visible-answer planner leak guard: ok")
+
+          # Reproduce the reported failure on a NON-live route. The backend must
+          # hold planner JSON before sending even one visible token, then recover
+          # through retrieval + normal synthesis.
+          class FakeStream:
+              ok=True
+              status_code=200
+              text=""
+              def __enter__(self): return self
+              def __exit__(self,*args): return False
+              def iter_lines(self):
+                  import json as _json
+                  chunk={"choices":[{"delta":{"content":screenshot_payload}}]}
+                  yield ("data: "+_json.dumps(chunk)).encode("utf-8")
+                  yield b"data: [DONE]"
+
+          old_research=app.r23_research_run
+          old_nonstream=app.nonstream_with_fallback
+          old_save=app.save_message
+          try:
+              app.r23_research_run=lambda *args,**kwargs:{
+                  "ok":True,
+                  "evidence":"READ PAGE: Jordan sneaker evidence",
+                  "source_count":1,
+                  "read_count":1,
+                  "snippet_only_count":0,
+              }
+              app.nonstream_with_fallback=lambda *args,**kwargs:(
+                  "I found the sneaker information and synthesized a normal answer.",
+                  app.SMART_MODEL,
+              )
+              app.save_message=lambda *args,**kwargs: None
+
+              events=list(app.stream_response(
+                  FakeStream(),
+                  "ci-owner",
+                  normal_question,
+                  "knowledge",
+                  app.SMART_MODEL,
+                  profile="knowledge",
+                  retry_messages=[
+                      {"role":"system","content":"Answer the user normally."},
+                      {"role":"user","content":normal_question},
+                  ],
+              ))
+          finally:
+              app.r23_research_run=old_research
+              app.nonstream_with_fallback=old_nonstream
+              app.save_message=old_save
+
+          visible=[]
+          for row in events:
+              try:
+                  obj=__import__("json").loads(row)
+              except Exception:
+                  continue
+              if obj.get("token"):
+                  visible.append(obj["token"])
+          joined="".join(visible)
+          assert screenshot_payload not in joined, joined
+          assert '"queries"' not in joined.lower(), joined
+          assert "synthesized a normal answer" in joined, joined
+
+          root=app.index()
+          assert "no-store" in str(root.headers.get("cache-control") or "").lower()
+          print("non-live streamed planner leak guard + root cache control: ok")
           PY
 
           node <<'JS'
@@ -2146,6 +2212,16 @@ jobs:
           if(!looksInternalToolPayload(payload,question))throw new Error("planner JSON leak was not blocked");
           if(looksInternalToolPayload(payload,"Give me JSON with the search queries only"))throw new Error("explicit JSON request was blocked");
           console.log("client visible-answer planner leak guard: ok");
+
+          const index=fs.readFileSync("static/index.html","utf8");
+          const sw=fs.readFileSync("static/service-worker.js","utf8");
+          const version="RONN-R23-PLAN-GUARD2";
+          if(!index.includes("/static/app.js?v="+version))throw new Error("index app.js cache-bust version mismatch");
+          if(!index.includes("/static/style.css?v="+version))throw new Error("index style cache-bust version mismatch");
+          if(!sw.includes("/static/app.js?v="+version))throw new Error("service worker asset version mismatch");
+          if(!sw.includes("ronn-assets-r23-plan-guard2"))throw new Error("service worker cache name mismatch");
+          if(!src.includes("/service-worker.js?v="+version))throw new Error("service worker registration version mismatch");
+          console.log("web asset version/cache bust consistency: ok");
           JS
 
       - name: Check browser JavaScript
