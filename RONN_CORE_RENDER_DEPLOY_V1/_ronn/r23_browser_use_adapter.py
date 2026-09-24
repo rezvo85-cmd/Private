@@ -143,6 +143,9 @@ def status() -> dict[str, Any]:
         "lazy_loaded": True,
         "local_private_network_blocked": True,
         "irreversible_final_submit_blocked": True,
+        "local_file_actions_blocked": True,
+        "downloads_blocked": True,
+        "javascript_action_blocked": True,
     }
 
 
@@ -170,7 +173,7 @@ def _timeout_seconds() -> int:
 
 async def _run(task: str, depth: str) -> dict[str, Any]:
     # Imports stay inside the execution path by design.
-    from browser_use import Agent, Browser, BrowserProfile, ChatGroq
+    from browser_use import Agent, Browser, BrowserProfile, ChatGroq, Tools
 
     key = _groq_key()
     if not key:
@@ -187,8 +190,16 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         block_ip_addresses=True,
         keep_alive=False,
         enable_default_extensions=False,
+        accept_downloads=False,
     )
     browser = Browser(browser_profile=profile)
+    tools = Tools(exclude_actions=[
+        "upload_file",
+        "write_file",
+        "replace_file",
+        "read_file",
+        "evaluate",
+    ])
     llm = ChatGroq(
         model=model,
         api_key=key,
@@ -209,6 +220,7 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         max_history_items=8,
         generate_gif=False,
         directly_open_url=True,
+        tools=tools,
     )
 
     async def guard(agent_obj):
