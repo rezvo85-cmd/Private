@@ -175,7 +175,7 @@ def _http_fallback(url: str, max_chars: int) -> dict:
         response=session.get(
             current,
             headers=headers,
-            timeout=(6,20),
+            timeout=(5,15),
             allow_redirects=False,
             stream=True,
         )
@@ -236,12 +236,12 @@ async def _crawl4ai_read(url: str, max_chars: int) -> dict:
     run=CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         word_count_threshold=5,
-        page_timeout=45000,
+        page_timeout=18000,
         remove_overlay_elements=True,
         exclude_external_links=False,
     )
     async with AsyncWebCrawler(config=browser) as crawler:
-        result=await asyncio.wait_for(crawler.arun(url=url,config=run),timeout=55)
+        result=await asyncio.wait_for(crawler.arun(url=url,config=run),timeout=20)
 
     if not getattr(result,"success",False):
         raise RuntimeError((getattr(result,"error_message","") or "crawl_failed")[:500])
@@ -291,7 +291,7 @@ async def crawl(body: CrawlBody):
     try:
         fallback=await asyncio.wait_for(
             asyncio.to_thread(_http_fallback,url,body.max_chars),
-            timeout=30,
+            timeout=22,
         )
         fallback["browser_error"]=browser_error
         return fallback
