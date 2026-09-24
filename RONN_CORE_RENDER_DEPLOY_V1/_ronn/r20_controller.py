@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json, os, re
 from r13_ensemble import QWEN_MODEL as OR_QWEN_MODEL
+from provider_models import DEFAULTS as PROVIDER_MODEL_DEFAULTS, normalize_groq_model
 from typing import Any
 
 R20_VERSION="R20-CONTROLLER-1"
@@ -73,7 +74,10 @@ def _provider():
     enabled=os.getenv("RONN_R20_AGENT_CONTROLLER","true").strip().lower() not in {"0","false","off","no"}
     if not enabled or not AGENTS_SDK_AVAILABLE:return None
     gk=(os.getenv("CLOUD_API_KEY","").strip() or os.getenv("GROQ_API_KEY","").strip())
-    if gk:return os.getenv("CLOUD_API_BASE","https://api.groq.com/openai/v1").rstrip("/"),gk,os.getenv("RONN_CONTROLLER_MODEL",os.getenv("RONN_FAST_MODEL","openai/gpt-oss-20b")).strip()
+    if gk:
+        base=os.getenv("CLOUD_API_BASE","https://api.groq.com/openai/v1").rstrip("/")
+        raw_model=os.getenv("RONN_CONTROLLER_MODEL",os.getenv("RONN_FAST_MODEL",PROVIDER_MODEL_DEFAULTS["fast"])).strip()
+        return base,gk,normalize_groq_model(raw_model,base)
     ok=os.getenv("OPENROUTER_API_KEY","").strip()
     if ok:return os.getenv("OPENROUTER_API_BASE","https://openrouter.ai/api/v1").rstrip("/"),ok,os.getenv("RONN_CONTROLLER_OPENROUTER_MODEL",OR_QWEN_MODEL).strip()
     nk=os.getenv("NVIDIA_API_KEY","").strip()
