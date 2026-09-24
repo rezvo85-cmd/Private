@@ -1,6 +1,6 @@
 """RONN R17 long-running task engine with durable checkpoints."""
 from __future__ import annotations
-import json, sqlite3, threading, time, uuid
+import json, os, sqlite3, threading, time, uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -9,13 +9,26 @@ DB=BASE/"data"/"r17_jobs.db"
 DB.parent.mkdir(exist_ok=True)
 POOL=ThreadPoolExecutor(max_workers=3,thread_name_prefix="ronn-job")
 _LOCK=threading.Lock()
+MAX_COMPLETED_JOBS_PER_OWNER=max(50,min(5000,int(os.getenv("RONN_MAX_COMPLETED_JOBS_PER_OWNER","300") or "300")))
+MAX_FAILED_JOBS_PER_OWNER=max(50,min(5000,int(os.getenv("RONN_MAX_FAILED_JOBS_PER_OWNER","300") or "300")))
 
 def _db():
     c=sqlite3.connect(DB,check_same_thread=False); c.row_factory=sqlite3.Row
     c.execute("""CREATE TABLE IF NOT EXISTS jobs(
       id TEXT PRIMARY KEY, owner TEXT, kind TEXT, payload TEXT, status TEXT,
       progress INTEGER, result TEXT, error TEXT, created_at INTEGER, updated_at INTEGER)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_jobs_owner_status_updated ON jobs(owner,status,updated_at DESC)")
     c.commit(); return c
+
+def _prune_owner(c,owner):
+    owner=str(owner)
+    for status,limit in (
+        ("completed",MAX_COMPLETED_JOBS_PER_OWNER),
+        ("failed",MAX_FAILED_JOBS_PER_OWNER),
+    ):
+        c.execute("""DELETE FROM jobs WHERE owner=? AND status=? AND id NOT IN (
+            SELECT id FROM jobs WHERE owner=? AND status=? ORDER BY updated_at DESC,id DESC LIMIT ?
+        )""",(owner,status,owner,status,limit))
 
 def _pack(x):
     try:return json.dumps(x,ensure_ascii=False)[:200000]
@@ -47,7 +60,11 @@ def update(jid,status=None,progress=None,result=None,error=None):
     if error is not None:fields.append("error=?");args.append(str(error)[:5000])
     fields.append("updated_at=?");args.append(int(time.time()));args.append(str(jid))
     with _db() as c:
-        c.execute("UPDATE jobs SET "+",".join(fields)+" WHERE id=?",args);c.commit()
+        c.execute("UPDATE jobs SET "+",".join(fields)+" WHERE id=?",args)
+        if status in {"completed","failed"}:
+            row=c.execute("SELECT owner FROM jobs WHERE id=?",(str(jid),)).fetchone()
+            if row:_prune_owner(c,row["owner"])
+        c.commit()
     return get(jid)
 
 def get(jid):
@@ -65,9 +82,18 @@ def list_jobs(owner,limit=40):
 
 def stats(owner=None):
     with _db() as c:
-        if owner:rows=c.execute("SELECT status,COUNT(*) n FROM jobs WHERE owner=? GROUP BY status",(str(owner),)).fetchall()
-        else:rows=c.execute("SELECT status,COUNT(*) n FROM jobs GROUP BY status").fetchall()
-    return {r["status"]:int(r["n"]) for r in rows}
+        if owner:
+            _prune_owner(c,owner);c.commit()
+            rows=c.execute("SELECT status,COUNT(*) n FROM jobs WHERE owner=? GROUP BY status",(str(owner),)).fetchall()
+        else:
+            rows=c.execute("SELECT status,COUNT(*) n FROM jobs GROUP BY status").fetchall()
+    out={r["status"]:int(r["n"]) for r in rows}
+    out["retention"]={
+        "completed_per_owner":MAX_COMPLETED_JOBS_PER_OWNER,
+        "failed_per_owner":MAX_FAILED_JOBS_PER_OWNER,
+        "active_jobs_pruned":False,
+    }
+    return out
 
 
 def resume(jid,runner):
