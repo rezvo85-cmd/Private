@@ -15,6 +15,7 @@ from r23_brain_arena import (
     challenger_signal as arena_challenger_signal,
 )
 from r23_quality_lab import quality_signal as r23_quality_signal
+from r23_confidence import apply_confidence_governor, status as confidence_status
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
 
@@ -444,7 +445,8 @@ def resolve_route(decision,providers,models):
     decision["main_brain_quality_lab"]=signals.get("quality_lab") or {}
     decision["main_brain_challengers"]=signals.get("challengers") or {}
     _apply_adaptive_effort(decision,selected,decision["main_brain_outcomes"])
-    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + progressive-quality-lab + objective-arena-aware + profile-outcome-aware + adaptive-effort"
+    apply_confidence_governor(decision,selected,penalty,signals)
+    decision["main_brain_policy"]="quality-first + health-aware + proven-challengers + domain-arena-aware + progressive-quality-lab + objective-arena-aware + profile-outcome-aware + adaptive-effort + confidence-calibrated"
 
     depth=str(decision.get("depth") or "smart")
     if depth=="apex":
@@ -499,6 +501,9 @@ def status():
         "proven_main_brain_challengers":True,
         "profile_outcome_learning":True,
         "adaptive_outcome_effort":True,
+        "confidence_governor":True,
+        "confidence_governor_status":confidence_status(),
+        "confidence_governor_policy":"auto-mode current-turn uncertainty can add verification, deeper reasoning, correction, or competition; easy/explicit-mode turns are preserved",
         "provider_reasoning_effort":True,
         "reasoning_budget_decoupled_from_visible_brevity":True,
         "reasoning_effort_levels":{"fast":"low","smart":"medium","deep":"high","apex":"high"},
