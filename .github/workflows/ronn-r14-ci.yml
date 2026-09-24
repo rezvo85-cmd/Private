@@ -1912,6 +1912,7 @@ jobs:
           import r23_browser_use_adapter as browser_use
           from r23_capabilities import capability_plan
           from r23_agent_runtime import status as agent_status
+          from r23_task_graph import build_task_graph, reconcile_task_graph
 
           os.environ.pop("RONN_BROWSER_USE_ENABLED",None)
           st=browser_use.status()
@@ -2162,6 +2163,83 @@ jobs:
           assert calls["collect"] == 0
           assert "browser_automation" not in blocked["executed"]
           assert "browser" not in blocked["executed"]
+
+          # Task Graph must explicitly represent browser interaction success/failure.
+          graph_decision={
+              "difficulty":3,
+              "profile":"knowledge",
+              "needs_live":False,
+              "verify":True,
+              "requirement_contract":{},
+              "capabilities":{
+                  "agent_runtime":True,
+                  "browser_url":True,
+                  "browser_interactive":True,
+                  "retrieval":{},
+              },
+          }
+          graph=build_task_graph(
+              "Open https://example.com and click More",
+              graph_decision,
+          )
+          assert graph["active"] is True
+          assert any(x["id"]=="interact_browser" for x in graph["nodes"])
+          success_graph=reconcile_task_graph(graph,run,graph_decision)
+          success_node=next(x for x in success_graph["nodes"] if x["id"]=="interact_browser")
+          assert success_node["state"] == "complete"
+
+          failed_graph=reconcile_task_graph(graph,failed_runtime,graph_decision)
+          failed_node=next(x for x in failed_graph["nodes"] if x["id"]=="interact_browser")
+          assert failed_node["state"] == "failed"
+          assert "interact_browser" in failed_graph["completion_proof"]["unresolved"]
+
+          # Defense in depth for the older executable paths as well.
+          old_computer_status=runtime_mod.computer_status
+          computer_calls={"status":0}
+          runtime_mod.computer_status=lambda: (
+              computer_calls.__setitem__("status",computer_calls["status"]+1)
+              or {"verified":True}
+          )
+          try:
+              blocked_computer=runtime_mod.execute(
+                  "ci","computer-no-permission","Use my computer",[],
+                  {
+                      "needs_live":False,
+                      "capabilities":{
+                          "agent_runtime":False,
+                          "computer_requested":True,
+                          "retrieval":{},
+                      },
+                  },
+              )
+          finally:
+              runtime_mod.computer_status=old_computer_status
+          assert computer_calls["status"] == 0
+          assert "computer_runtime" not in blocked_computer["planned"]
+
+          old_ws_write=runtime_mod.ws_write
+          code_calls={"write":0}
+          runtime_mod.ws_write=lambda *args,**kwargs: (
+              code_calls.__setitem__("write",code_calls["write"]+1)
+              or {"ok":True}
+          )
+          try:
+              blocked_code=runtime_mod.execute(
+                  "ci","code-no-permission","Run this",
+                  [{"name":"main.py","content":"print(1)"}],
+                  {
+                      "needs_live":False,
+                      "capabilities":{
+                          "agent_runtime":False,
+                          "code_fix_loop":True,
+                          "retrieval":{},
+                      },
+                  },
+              )
+          finally:
+              runtime_mod.ws_write=old_ws_write
+          assert code_calls["write"] == 0
+          assert "code_test_fix_retest" not in blocked_code["planned"]
 
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain
