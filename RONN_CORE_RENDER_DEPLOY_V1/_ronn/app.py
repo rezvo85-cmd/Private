@@ -1686,8 +1686,9 @@ def model_fallback_order(preferred_model: str, route: str):
         if nvidia_key_loaded() and route == "creator":
             order += [NVIDIA_MODEL]
         order += [SMART_MODEL, FAST_MODEL]
-    elif route in {"live","research","max","tools","r20-current","r20-research"}:
-        # Preserve Groq's tool-enabled route first; NVIDIA is a reasoning fallback.
+    elif route in {"live","research","max","tools","r20-current","r20-research","web-synthesis","research-limited"}:
+        # Live freshness comes from RONN's retrieval/evidence plane. Provider
+        # fallbacks are synthesis models only; none are assumed to have searched.
         if nvidia_key_loaded():
             order += [NVIDIA_MODEL]
         order += [SMART_MODEL, FAST_MODEL]
@@ -1735,15 +1736,10 @@ def minimal_cloud_request(model, messages, max_tokens, stream=True):
         "max_tokens": max_tokens,
         "temperature": 0.5,
     }
-    if model in {"groq/compound","groq/compound-mini"}:
-        payload.pop("temperature", None)
-        payload["compound_custom"] = {"tools":{"enabled_tools":["web_search","visit_website"]}}
     base_url, api_key, provider = provider_for_model(model)
     started=time.time()
     try:
         _headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"}
-        if provider == "groq" and model in {"groq/compound","groq/compound-mini"}:
-            _headers["Groq-Model-Version"]="latest"
         if provider == "openrouter":
             _headers["X-Title"]="RONN"
         r=requests.post(
