@@ -261,7 +261,12 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
             if br.get("ok"):
                 out["executed"].append("browser_automation")
                 for url in br.get("urls") or []:
-                    out["sources"].append({"url":url,"read":True,"kind":"browser_automation"})
+                    out["sources"].append({
+                        "url":url,
+                        "read":False,
+                        "interacted":True,
+                        "kind":"browser_automation",
+                    })
                 evidence.append(
                     "RONN INTERACTIVE BROWSER EVIDENCE (bounded Browser Use executor; R23 remains final-answer owner):\n"+
                     json.dumps(br,ensure_ascii=False)[:32000]

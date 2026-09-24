@@ -32,7 +32,7 @@ def should_activate(decision: dict, *, file_names=None, has_project=False) -> bo
     req=decision.get("requirement_contract") or {}
     if difficulty>=4:
         return True
-    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("model_competition"):
+    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("model_competition") or caps.get("browser_interactive"):
         return True
     if caps.get("autonomous_research") and difficulty>=3:
         return True
@@ -134,6 +134,14 @@ def build_task_graph(message: str, decision: dict, *, file_names=None, has_proje
         ))
         evidence_nodes.append("execute_verify")
 
+    if caps.get("browser_interactive"):
+        nodes.append(_node(
+            "interact_browser","Execute the approved interactive browser task","browser",
+            [anchor],
+            proof="bounded browser executor reports verified completion",
+        ))
+        evidence_nodes.append("interact_browser")
+
     if caps.get("computer_requested"):
         nodes.append(_node(
             "observe_computer","Observe the connected computer state through the verified runtime","computer",
@@ -230,7 +238,7 @@ def _refresh_states(graph):
         x["id"] for x in graph.get("nodes") or []
         if x.get("state")=="ready" and x.get("kind") not in {"understand","requirements","inspect"}
     ][:4]
-    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","computer","verify","synthesize"}]
+    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","browser","computer","verify","synthesize"}]
     graph["completion_proof"]={
         "required":[{"id":x.get("id"),"proof":x.get("proof"),"state":x.get("state")} for x in required],
         "proved":all(x.get("state")=="complete" for x in required if x.get("kind")!="synthesize") if required else True,
@@ -295,6 +303,16 @@ def reconcile_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[st
             if code.get("ok"):
                 detail="runtime reported success but verification proof is incomplete"
             _mark(graph,"execute_verify","failed",detail,True)
+
+    if "interact_browser" in _index(graph):
+        if contract.get("interactive_browser_verified"):
+            _mark(graph,"interact_browser","complete","interactive browser task verified complete",True)
+        elif "browser_automation" in (tool_run.get("planned") or []) or "interactive_browser_execution" in gaps:
+            detail="interactive browser task did not verify completion"
+            br=tool_run.get("browser_automation") or {}
+            if br.get("blocked"):
+                detail="interactive browser task stopped at a blocked/final action boundary"
+            _mark(graph,"interact_browser","failed",detail,True)
 
     if "observe_computer" in _index(graph):
         if contract.get("computer_observation_verified"):
@@ -381,6 +399,12 @@ def replan_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[str,A
         title="Rebuild only the missing dependency-analysis branch"
         proof="static dependency/world model is computed on the bounded recovery pass"
         deps=[x for x in ("inspect_context","requirements","understand") if (rows.get(x) or {}).get("state")=="complete"][-1:]
+    elif "interactive_browser_execution" in gaps or (rows.get("interact_browser") or {}).get("state")=="failed":
+        graph["dead_end"]=True
+        graph["dead_end_reason"]="interactive browser completion was not verified; do not auto-retry browser actions because that could duplicate clicks, form entries, or submissions"
+        graph["replanned"]=True
+        graph["replan_reason"]="unrecoverable_browser_action"
+        return _refresh_states(graph)
     elif "computer_observation" in gaps:
         graph["dead_end"]=True
         graph["dead_end_reason"]="connected computer observation is unavailable; no safe local recovery can manufacture that evidence"
