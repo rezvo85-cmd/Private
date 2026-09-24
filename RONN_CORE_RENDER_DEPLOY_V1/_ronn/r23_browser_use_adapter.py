@@ -51,10 +51,17 @@ def _installed() -> bool:
 
 
 def _groq_key() -> str:
-    return (
-        (os.getenv("GROQ_API_KEY") or "").strip()
-        or (os.getenv("CLOUD_API_KEY") or "").strip()
-    )
+    direct=(os.getenv("GROQ_API_KEY") or "").strip()
+    if direct:
+        return direct
+
+    # CLOUD_API_KEY is only safe to reuse when the configured cloud endpoint is
+    # actually Groq. RONN can point CLOUD_API_BASE at other OpenAI-compatible
+    # providers, and sending that key to Groq would be both incorrect and unsafe.
+    base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip().lower()
+    if "api.groq.com" in base:
+        return (os.getenv("CLOUD_API_KEY") or "").strip()
+    return ""
 
 
 def _urls(text: str) -> list[str]:
