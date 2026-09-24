@@ -155,7 +155,7 @@ STATIC = BASE / "static"
 DATA = BASE / "data"
 DATA.mkdir(exist_ok=True)
 DB_FILE = DATA / "ronn_memory.db"
-ENV_FILE = BASE.parent / ".env"
+ENV_FILE = Path(os.getenv("RONN_ENV_FILE") or (BASE.parent / ".env")).expanduser()
 INTEGRITY_MANIFEST = BASE / "integrity_manifest.json"
 
 def verify_package_integrity():
@@ -238,7 +238,9 @@ def verify_package_integrity():
         "mismatches":mismatches[:20],
     }
 
-load_dotenv(dotenv_path=ENV_FILE, override=True)
+# Explicit process/Render environment always wins. The dotenv file only fills
+# missing desktop settings; it must never shadow deployment secrets/config.
+load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 API_BASE = os.getenv("CLOUD_API_BASE", "https://api.groq.com/openai/v1").rstrip("/")
 API_KEY = (os.getenv("CLOUD_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "").strip())
