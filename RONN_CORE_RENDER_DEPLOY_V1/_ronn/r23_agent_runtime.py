@@ -296,7 +296,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         and caps.get("browser_interactive")
         and "browser_automation" not in out["executed"]
         and not out.get("browser_pages")
-        and "browser" not in out["executed"]
+        and "browser" not in out["planned"]
     ):
         out["planned"].append("browser_fallback")
         try:
