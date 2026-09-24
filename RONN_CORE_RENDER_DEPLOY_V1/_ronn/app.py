@@ -3340,7 +3340,14 @@ def approve_studio_plan(owner: str, plan_id: str):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(
+        STATIC / "index.html",
+        headers={
+            "Cache-Control":"no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma":"no-cache",
+            "Expires":"0",
+        },
+    )
 
 
 @app.head("/")
