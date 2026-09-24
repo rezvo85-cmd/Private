@@ -3530,7 +3530,9 @@ def feedback_api(body: FeedbackBody, request: Request):
     if body.rating not in (-1,1):
         raise HTTPException(400,"Rating must be -1 or 1.")
     owner=owner_id(request)
-    run=add_feedback(body.request_id,body.rating,body.note)
+    run=add_feedback(body.request_id,body.rating,body.note,owner=owner)
+    if not run:
+        raise HTTPException(404,"Feedback target not found.")
     learned={"router":False,"training_example":None,"failure_lesson":None}
     if run:
         try:
@@ -3540,12 +3542,12 @@ def feedback_api(body: FeedbackBody, request: Request):
             pass
     if body.rating>0:
         try:
-            learned["training_example"]=r19_training_promote(body.request_id)
+            learned["training_example"]=r19_training_promote(body.request_id,owner=owner)
         except Exception:
             pass
     else:
         try:
-            r19_training_discard(body.request_id)
+            r19_training_discard(body.request_id,owner=owner)
         except Exception:
             pass
         try:
