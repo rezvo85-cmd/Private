@@ -64,6 +64,9 @@ def run():
             "fromDatabase:",
             "name: RONN_MEMORY",
             "property: connectionString",
+            "key: CLOUD_API_KEY",
+            "key: RONN_CORE_TOKEN",
+            'key: RONN_PUBLIC_MODE',
         )) and "postgresql://" not in blueprint and "postgres://" not in blueprint and "password:" not in blueprint
         add(
             "database_blueprint_binding",
@@ -109,6 +112,25 @@ def run():
             database_url_configured,
             "DATABASE_URL is configured in the running Render service" if database_url_configured
             else "DATABASE_URL is missing from the running Render service",
+        )
+        core_token_configured=bool(os.getenv("RONN_CORE_TOKEN","").strip())
+        add(
+            "production_auth_binding",
+            core_token_configured,
+            "RONN_CORE_TOKEN protects private production APIs" if core_token_configured
+            else "RONN_CORE_TOKEN is missing; private production APIs would not have a service auth boundary",
+        )
+        provider_runtime_configured=bool(
+            (os.getenv("CLOUD_API_KEY") or "").strip()
+            or (os.getenv("GROQ_API_KEY") or "").strip()
+            or (os.getenv("NVIDIA_API_KEY") or "").strip()
+            or (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        )
+        add(
+            "provider_runtime_binding",
+            provider_runtime_configured,
+            "At least one model provider key is configured in the running service" if provider_runtime_configured
+            else "No model provider key is configured in the running service",
         )
 
     # Production should have the two runtime helpers available, while DeepEval
