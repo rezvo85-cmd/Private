@@ -1664,7 +1664,7 @@ def groq_model_catalog(ttl=300):
         return []
 
 def _general_chat_model_ids(ids):
-    bad=("whisper","tts","audio","speech","embedding","guard","moderation","safety")
+    bad=("whisper","tts","audio","speech","orpheus","embedding","guard","moderation","safety")
     usable=[m for m in ids if not any(x in m.lower() for x in bad)]
     def score(m):
         low=m.lower(); points=0
