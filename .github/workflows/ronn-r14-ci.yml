@@ -817,6 +817,88 @@ jobs:
           print("ecosystem retention/session/routine guards: ok")
           PY
 
+      - name: Persistent retention and sync-cursor smoke
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import tempfile
+          from pathlib import Path
+
+          import ecosystem_store as eco
+          import r15_trust as trust
+
+          with tempfile.TemporaryDirectory() as td:
+              root=Path(td)
+
+              # Isolate ecosystem storage and shrink limits for deterministic CI.
+              eco.DB=root/"ecosystem.sqlite3"
+              eco.MAX_SYNC_EVENTS_PER_OWNER=3
+              eco.MAX_ACTIONS_PER_OWNER=3
+              eco.MAX_CLAIMED_HANDOFFS_PER_OWNER=2
+              eco.MAX_OWNER_SESSIONS_PER_OWNER=3
+
+              owner="ci-owner"
+
+              # Sync history is bounded and stale cursors are explicitly flagged.
+              seqs=[]
+              for i in range(5):
+                  seqs.append(eco.record_sync(owner,"ci","r"+str(i),"upsert",{"i":i}))
+              with eco._db() as c:
+                  n=c.execute("SELECT COUNT(*) n FROM sync_events WHERE owner=?",(owner,)).fetchone()["n"]
+              assert n == 3
+              pulled=eco.pull_sync(owner,since=seqs[0],limit=100)
+              assert pulled["reset_required"] is True
+              assert pulled["oldest_cursor"] == seqs[2]-1
+              assert [e["seq"] for e in pulled["events"]] == seqs[2:]
+
+              # Audit history is bounded.
+              action_ids=[eco.log_action(owner,"ci.action",str(i),{"i":i}) for i in range(5)]
+              with eco._db() as c:
+                  rows=c.execute("SELECT id FROM actions WHERE owner=? ORDER BY id",(owner,)).fetchall()
+              assert [r["id"] for r in rows] == action_ids[-3:]
+
+              # Claimed handoffs are bounded but pending handoffs are never pruned.
+              claimed=[]
+              for i in range(4):
+                  hid=eco.create_handoff(owner,"dev","context",{"i":i})
+                  claimed.append(hid)
+                  assert eco.claim_handoff(owner,hid,"target")
+              pending=eco.create_handoff(owner,"dev","context",{"pending":True})
+              with eco._db() as c:
+                  claimed_count=c.execute("SELECT COUNT(*) n FROM handoffs WHERE owner=? AND status='claimed'",(owner,)).fetchone()["n"]
+                  pending_row=c.execute("SELECT status FROM handoffs WHERE id=?",(pending,)).fetchone()
+              assert claimed_count == 2
+              assert pending_row and pending_row["status"] == "pending"
+
+              # Owner-session rows are bounded independently of unlock throttling.
+              with eco._db() as c:
+                  now=1000.0
+                  for i in range(5):
+                      c.execute(
+                          "INSERT INTO owner_sessions(token_hash,owner,client_id,device_id,created,expires,revoked) VALUES(?,?,?,?,?,?,0)",
+                          (f"tok-{i}",owner,"ci","",now+i,now+99999+i),
+                      )
+                  eco._prune_owner_sessions(c,owner)
+                  sessions=c.execute("SELECT token_hash FROM owner_sessions WHERE owner=? ORDER BY created",(owner,)).fetchall()
+              assert [r["token_hash"] for r in sessions] == ["tok-2","tok-3","tok-4"]
+
+              # R15 trust journal keeps only the newest retained rollback records.
+              trust.DB=root/"trust.sqlite3"
+              trust.MAX_ACTIONS_PER_OWNER=3
+              aids=[]
+              for i in range(5):
+                  aids.append(trust.checkpoint(owner,"write",f"file-{i}",before={"i":i},after={"i":i+1})["id"])
+              with trust._db() as c:
+                  rows=c.execute("SELECT id FROM actions WHERE owner=? ORDER BY created_at,id",(owner,)).fetchall()
+              kept=[r["id"] for r in rows]
+              assert len(kept) == 3
+              assert set(kept) == set(aids[-3:])
+              assert trust.get(aids[-1]) is not None
+              assert trust.get(aids[0]) is None
+
+          print("persistent retention/sync cursor guards: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'
