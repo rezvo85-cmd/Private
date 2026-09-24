@@ -142,15 +142,24 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
         "architecture","dependency","dependencies","impact","simulate","simulation",
         "what will break","before changing","whole project","entire project","system design"
     ))
-    computer_words = any(x in low for x in (
-        "open the website","click","type into","use my computer","control my computer",
-        "browser agent","navigate to","download it","upload it"
+    browser_words = any(x in low for x in (
+        "open the website","click","type into","fill out","fill in","browser agent",
+        "navigate to","use the browser","on this website","press the button","select the",
+        "choose the","open this site"
     ))
+    computer_words = any(x in low for x in (
+        "use my computer","control my computer","my desktop","my screen","connected computer",
+        "computer agent"
+    ))
+    browser_interactive = bool(
+        browser_words and (has_url or "browser" in low or "website" in low or "site" in low)
+    )
 
     return {
         "strong_main_brain": True,
-        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or computer_words or execution_words)),
+        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or browser_interactive or computer_words or execution_words)),
         "browser_url": bool(has_url),
+        "browser_interactive": browser_interactive,
         "code_fix_loop": bool(coding and file_names and execution_words),
         "project_brain": bool(has_project or file_names or base.get("followup") or len(history) >= 6),
         "long_context": bool(len(history) >= 12 or base.get("followup") or has_project),
