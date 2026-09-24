@@ -1,11 +1,14 @@
 import sqlite3
 import time
 import json
+import os
 from pathlib import Path
 
 BASE=Path(__file__).resolve().parent
 DB=BASE/'data'/'tasks.sqlite3'
 DB.parent.mkdir(parents=True,exist_ok=True)
+MAX_TASKS_PER_OWNER=max(100,min(5000,int(os.getenv("RONN_MAX_TASKS_PER_OWNER","600") or "600")))
+MAX_CHECKPOINTS_PER_TASK=max(20,min(1000,int(os.getenv("RONN_MAX_CHECKPOINTS_PER_TASK","200") or "200")))
 
 def _db():
     c=sqlite3.connect(DB)
@@ -25,23 +28,52 @@ def _db():
     ''')
     return c
 
+
+def _prune_owner(c,owner):
+    rows=c.execute(
+        """SELECT task_id FROM tasks
+           WHERE owner=? AND status!='running'
+           ORDER BY updated DESC""",
+        (owner,),
+    ).fetchall()
+    stale=[r["task_id"] for r in rows[MAX_TASKS_PER_OWNER:]]
+    if not stale:
+        return 0
+    c.executemany("DELETE FROM checkpoints WHERE task_id=?",[(task_id,) for task_id in stale])
+    c.executemany("DELETE FROM tasks WHERE task_id=?",[(task_id,) for task_id in stale])
+    return len(stale)
+
+
+def _prune_checkpoints(c,task_id):
+    c.execute(
+        """DELETE FROM checkpoints WHERE task_id=? AND id NOT IN (
+             SELECT id FROM checkpoints WHERE task_id=? ORDER BY id DESC LIMIT ?
+           )""",
+        (task_id,task_id,MAX_CHECKPOINTS_PER_TASK),
+    )
+
 def start_task(task_id,owner,project_id,prompt,profile,difficulty,signature,plan):
     now=time.time()
     with _db() as c:
         c.execute('''INSERT OR REPLACE INTO tasks(task_id,owner,project_id,signature,prompt,profile,difficulty,status,plan_json,created,updated)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
                   (task_id,owner,project_id,signature,(prompt or '')[:16000],profile,int(difficulty),'running',json.dumps(plan,ensure_ascii=False),now,now))
+        _prune_owner(c,owner)
 
 def checkpoint(task_id,phase,status='complete',detail=''):
     now=time.time()
     with _db() as c:
         c.execute('INSERT INTO checkpoints(task_id,phase,status,detail,created) VALUES(?,?,?,?,?)',
                   (task_id,(phase or '')[:100],(status or '')[:40],(detail or '')[:4000],now))
+        _prune_checkpoints(c,task_id)
         c.execute('UPDATE tasks SET updated=? WHERE task_id=?',(now,task_id))
 
 def finish_task(task_id,status='complete'):
     with _db() as c:
+        row=c.execute('SELECT owner FROM tasks WHERE task_id=?',(task_id,)).fetchone()
         c.execute('UPDATE tasks SET status=?,updated=? WHERE task_id=?',((status or 'complete')[:40],time.time(),task_id))
+        if row:
+            _prune_owner(c,row["owner"])
 
 def get_task(task_id):
     with _db() as c:
@@ -55,9 +87,10 @@ def get_task(task_id):
     return out
 
 def recent_tasks(owner,limit=20):
+    limit=max(1,min(int(limit),100))
     with _db() as c:
         rows=c.execute('SELECT task_id,project_id,signature,prompt,profile,difficulty,status,created,updated FROM tasks WHERE owner=? ORDER BY updated DESC LIMIT ?',
-                       (owner,int(limit))).fetchall()
+                       (owner,limit)).fetchall()
     return [dict(x) for x in rows]
 
 def stats():
@@ -66,7 +99,14 @@ def stats():
         complete=c.execute("SELECT COUNT(*) n FROM tasks WHERE status='complete'").fetchone()['n']
         failed=c.execute("SELECT COUNT(*) n FROM tasks WHERE status='failed'").fetchone()['n']
         cps=c.execute('SELECT COUNT(*) n FROM checkpoints').fetchone()['n']
-    return {'tasks':total,'completed':complete,'failed':failed,'checkpoints':cps}
+    return {
+        'tasks':total,
+        'completed':complete,
+        'failed':failed,
+        'checkpoints':cps,
+        'max_tasks_per_owner':MAX_TASKS_PER_OWNER,
+        'max_checkpoints_per_task':MAX_CHECKPOINTS_PER_TASK,
+    }
 
 
 def latest_incomplete(owner, project_id=None):
