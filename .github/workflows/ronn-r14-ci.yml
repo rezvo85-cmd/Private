@@ -263,6 +263,168 @@ jobs:
           print("core auth boundary: ok")
           PY
 
+      - name: External capability ownership smoke
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import r23_workflow_runtime
+          import r23_deepeval_adapter
+          import document_engine
+
+          brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
+          requirements=Path("requirements.txt").read_text(encoding="utf-8").lower()
+
+          # R23 stays the only brain. Helpers must never be imported into it.
+          assert "docling" not in brain
+          assert "deepeval" not in brain
+          assert "langgraph" not in brain
+
+          # DeepEval is evaluation-only and must stay out of the production image.
+          assert "deepeval" not in requirements
+          assert r23_deepeval_adapter.status()["production_chat_dependency"] is False
+
+          # The document interface and workflow runtime both explicitly disclaim
+          # routing/final-answer ownership.
+          assert document_engine.status()["owns_final_answer"] is False
+          wf_status=r23_workflow_runtime.status()
+          assert wf_status["owns_model_routing"] is False
+          assert wf_status["owns_final_answer"] is False
+          assert wf_status["r23_plan_of_record"] is True
+          print("external capability ownership: ok")
+          PY
+
+      - name: Docling integration smoke
+        run: |
+          python - <<'PY'
+          import base64
+          import io
+          from docx import Document
+          from document_engine import extract_document, status
+
+          doc=Document()
+          doc.add_heading("RONN Docling Smoke", level=1)
+          doc.add_paragraph("Docling must remain a backend beneath RONN's one document interface.")
+          table=doc.add_table(rows=2, cols=2)
+          table.cell(0,0).text="Capability"
+          table.cell(0,1).text="Owner"
+          table.cell(1,0).text="Documents"
+          table.cell(1,1).text="document_engine.py"
+          buf=io.BytesIO()
+          doc.save(buf)
+          payload="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64," + base64.b64encode(buf.getvalue()).decode()
+
+          out=extract_document("ronn-docling-smoke.docx", payload)
+          print(out["meta"])
+          assert out["meta"]["backend"] == "docling"
+          assert out["meta"]["fallback_used"] is False
+          assert "RONN Docling Smoke" in out["text"]
+          st=status()
+          assert st["single_interface"] is True
+          assert st["docling"]["installed"] is True
+          assert st["docling"]["owns_routing"] is False
+          print("docling integration: ok")
+          PY
+
+      - name: LangGraph R23 boundary smoke
+        run: |
+          python - <<'PY'
+          import r23_workflow_runtime as workflow
+          from r23_task_graph import build_task_graph
+
+          simple={
+              "difficulty":1,
+              "needs_live":False,
+              "capabilities":{},
+              "task_graph":{"active":False,"nodes":[]},
+          }
+          assert workflow.eligible(simple) is False
+
+          decision={
+              "difficulty":5,
+              "profile":"research",
+              "depth":"deep",
+              "needs_live":True,
+              "needs_tools":True,
+              "verify":True,
+              "requirement_contract":{},
+              "capabilities":{
+                  "agent_runtime":True,
+                  "autonomous_research":True,
+                  "universal_retrieval":True,
+                  "retrieval":{},
+              },
+          }
+          decision["task_graph"]=build_task_graph(
+              "Research a current technical topic with evidence.",
+              decision,
+              has_project=True,
+          )
+          assert len(decision["task_graph"]["nodes"]) >= 6
+          assert workflow.eligible(decision) is True
+
+          calls=[]
+          def fake_executor(owner, request_id, message, files, current, depth="smart", repair_fn=None):
+              calls.append((request_id, depth))
+              contract={
+                  "retrieval":{
+                      "source_count":1,
+                      "read_page_count":1,
+                      "snippet_only_count":0,
+                      "explicit_browser_pages_read":0,
+                  },
+                  "structured_live_data":False,
+                  "computed_static_analysis":False,
+                  "runtime_execution":{
+                      "attempted":False,
+                      "reported_ok":False,
+                      "verified_success":False,
+                  },
+                  "computer_observation_verified":False,
+                  "errors":[],
+              }
+              suff={
+                  "version":"R23-EVIDENCE-SUFFICIENCY-1",
+                  "sufficient":True,
+                  "requirements":[{"name":"live_source_evidence","met":True,"detail":"1 page read"}],
+                  "gaps":[],
+                  "required_count":1,
+                  "met_count":1,
+                  "reason":"all_required_evidence_present",
+              }
+              contract["sufficiency"]=suff
+              return {
+                  "planned":["autonomous_research"],
+                  "executed":["autonomous_research"],
+                  "evidence":"READ PAGE: deterministic LangGraph smoke evidence",
+                  "sources":[{"url":"https://example.com/source","read":True}],
+                  "errors":[],
+                  "research":{
+                      "ok":True,
+                      "source_count":1,
+                      "read_count":1,
+                      "sources":[{"url":"https://example.com/source","read":True}],
+                  },
+                  "evidence_contract":contract,
+                  "evidence_sufficiency":suff,
+              }
+
+          result=workflow.run(
+              "ci-owner",
+              "ci-langgraph",
+              "Research a current technical topic with evidence.",
+              [],
+              decision,
+              executor=fake_executor,
+          )
+          print({"engine":result["engine"],"used_langgraph":result["used_langgraph"],"calls":calls})
+          assert result["engine"] == "langgraph"
+          assert result["used_langgraph"] is True
+          assert len(calls) == 1
+          assert result["task_graph"]["active"] is True
+          assert workflow.status()["simple_chat_skipped"] is True
+          print("langgraph R23 boundary: ok")
+          PY
+
       - name: R23 research relevance smoke
         run: |
           python - <<'PY'
@@ -478,3 +640,40 @@ jobs:
             exit 1
           fi
           echo "secret-pattern scan: ok"
+
+  external_eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/_ronn
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install DeepEval only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r eval_requirements.txt
+
+      - name: Run DeepEval integration smoke
+        run: |
+          python - <<'PY'
+          from r23_deepeval_adapter import status, run_non_llm_smoke
+
+          st=status()
+          result=run_non_llm_smoke()
+          print("status:",st)
+          print("result:",result)
+          assert st["installed"] is True
+          assert st["scope"] == "evaluation_only"
+          assert st["production_chat_dependency"] is False
+          assert result["ok"] is True
+          assert result["score"] == 100.0
+          PY
