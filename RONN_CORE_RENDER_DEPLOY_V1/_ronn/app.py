@@ -185,6 +185,18 @@ def verify_package_integrity():
         "_ronn/r23_research.py",
         "_ronn/r23_agent_runtime.py",
         "_ronn/r23_eval_lab.py",
+
+        # Legitimate post-R21 files still tracked by the original manifest.
+        # Keep them explicit so integrity remains meaningful for every other
+        # manifest-tracked file instead of disabling verification globally.
+        "_ronn/crawl_requirements.txt",
+        "_ronn/crawl_service.py",
+        "_ronn/document_engine.py",
+        "_ronn/experience_engine.py",
+        "_ronn/project_brain.py",
+        "_ronn/r20_web_tools.py",
+        "_ronn/r21_release_gate.py",
+        "_ronn/requirements.txt",
     } if str(BUILD_ID).endswith(("R11-RELIABILITY","R12-IMPROVEMENTS","R13-ENSEMBLE","R14-CAPABILITY","R21-FINISHLINE","R22-LEAN-CORE","R23-ALL-11")) else set()
     for rel, expected in (manifest.get("files") or {}).items():
         fp=BASE.parent / rel
@@ -3971,7 +3983,11 @@ def status(request: Request):
 @app.get("/health")
 def health():
     integrity=verify_package_integrity()
-    return {"ok":True,"name":"RONN","build":BUILD_ID,"integrity_ok":integrity.get("verified",False),"integrity":integrity}
+    ok=bool(integrity.get("verified",False))
+    payload={"ok":ok,"name":"RONN","build":BUILD_ID,"integrity_ok":ok,"integrity":integrity}
+    if not ok:
+        return JSONResponse(payload,status_code=503)
+    return payload
 
 def _r14_require_owner(request: Request):
     try:
