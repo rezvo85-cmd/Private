@@ -971,6 +971,7 @@ jobs:
           import asyncio
           from fastapi import HTTPException
           import crawl_service
+          import r17_browser
           import r20_web_tools
 
           assert crawl_service._CRAWL4AI_COMPONENTS is None
@@ -986,6 +987,28 @@ jobs:
           assert "ignore me" not in parsed["markdown"]
           assert parsed["links"][0]["href"] == "https://example.com/docs"
 
+          # Reader/browser URL shapes must reject credential-bearing URLs and
+          # nonstandard service ports before any DNS/network request occurs.
+          for unsafe in (
+              "https://user:pass@example.com/path",
+              "https://example.com:8443/path",
+              "http://example.com:8080/path",
+          ):
+              try:
+                  crawl_service._public_url(unsafe)
+                  raise AssertionError("Reader accepted unsafe URL: "+unsafe)
+              except HTTPException as exc:
+                  assert exc.status_code == 400
+              try:
+                  r17_browser.normalize_url(unsafe)
+                  raise AssertionError("R17 browser accepted unsafe URL: "+unsafe)
+              except ValueError:
+                  pass
+
+          assert r17_browser.normalize_url("https://example.com:443/path") == "https://example.com:443/path"
+          assert r17_browser.normalize_url("http://example.com:80/path") == "http://example.com:80/path"
+          assert crawl_service.BROWSER_ENABLED is False
+
           class FakeResponse:
               status_code = 200
               headers = {"Content-Type": "text/html; charset=utf-8"}
@@ -998,12 +1021,15 @@ jobs:
                   return None
 
           class FakeSession:
+              def __init__(self):
+                  self.trust_env=True
               def get(self, *args, **kwargs):
                   return FakeResponse()
 
           original_session = crawl_service.requests.Session
           original_public_url = crawl_service._public_url
-          crawl_service.requests.Session = lambda: FakeSession()
+          fake_session=FakeSession()
+          crawl_service.requests.Session = lambda: fake_session
           crawl_service._public_url = lambda url: url
           try:
               fallback = crawl_service._http_fallback("https://example.com", 5000)
@@ -1013,6 +1039,7 @@ jobs:
 
           assert fallback["ok"] is True
           assert fallback["reader"] == "http-fallback"
+          assert fake_session.trust_env is False
           assert fallback["title"] == "Fallback"
           assert "Recovered page" in fallback["markdown"]
 
@@ -1082,7 +1109,11 @@ jobs:
           assert result["title"] == "Authenticated"
           assert captured["headers"]["X-RONN-Reader-Token"] == "test-reader-secret"
 
-          print("reader resilience/auth/fast-path: ok")
+          health=asyncio.run(crawl_service.health())
+          assert health["standard_ports_only"] is True
+          assert health["url_credentials_blocked"] is True
+          assert health["environment_proxies_disabled"] is True
+          print("reader resilience/auth/url-safety/fast-path: ok")
           PY
 
       - name: Check browser JavaScript
