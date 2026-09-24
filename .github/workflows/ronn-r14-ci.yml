@@ -2326,16 +2326,15 @@ jobs:
               accept_downloads=False,
           )
           browser=Browser(browser_profile=profile)
-          safe_tools=Tools(exclude_actions=[
-              "upload_file","write_file","replace_file","read_file","evaluate",
-          ])
+          safe_tools=Tools(exclude_actions=list(adapter.BLOCKED_ACTIONS))
           assert llm.provider == "groq"
           assert browser.browser_profile.block_ip_addresses is True
           assert browser.browser_profile.enable_default_extensions is False
           assert browser.browser_profile.accept_downloads is False
           assert "example.com" in browser.browser_profile.allowed_domains
           actions=set(safe_tools.registry.registry.actions)
-          for blocked_action in ("upload_file","write_file","replace_file","read_file","evaluate"):
+          assert set(st["blocked_actions"]) == set(adapter.BLOCKED_ACTIONS)
+          for blocked_action in adapter.BLOCKED_ACTIONS:
               assert blocked_action not in actions
           assert "click" in actions
           assert "input" in actions
