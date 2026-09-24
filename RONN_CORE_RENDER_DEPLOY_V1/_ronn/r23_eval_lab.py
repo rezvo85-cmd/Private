@@ -407,13 +407,14 @@ def run():
         "capabilities":{"agent_runtime":True,"computer_requested":True},
         "requirement_contract":{"count":0,"hard_count":0,"density":"none"},
     }
+    task_graph_dead_base=task_graph_build(
+        "Inspect the connected computer and verify the observed state.",
+        task_graph_dead_decision,
+        file_names=[],
+        has_project=False,
+    )
     task_graph_dead=task_graph_reconcile(
-        task_graph_build(
-            "Inspect the connected computer and verify the observed state.",
-            task_graph_dead_decision,
-            file_names=[],
-            has_project=False,
-        ),
+        task_graph_dead_base,
         {
             "planned":["computer_runtime"],
             "executed":[],
@@ -608,6 +609,15 @@ def run():
                   and "gather_evidence" in task_graph_recovered.get("completed_nodes",[])
                   and "recover_research" in task_graph_recovered.get("completed_nodes",[])
                   and task_graph_recovered.get("dead_end") is False
+                  and any(
+                      x.get("id")=="observe_computer"
+                      for x in task_graph_dead_base.get("nodes") or []
+                  )
+                  and "observe_computer" in task_graph_dead.get("failed_nodes",[])
+                  and any(
+                      x.get("id")=="observe_computer"
+                      for x in task_graph_dead.get("completion_proof",{}).get("required",[])
+                  )
                   and task_graph_dead.get("dead_end") is True
                   and "computer observation" in task_graph_dead.get("dead_end_reason","")
                   and task_graph_dead.get("completion_proof",{}).get("unresolved")
