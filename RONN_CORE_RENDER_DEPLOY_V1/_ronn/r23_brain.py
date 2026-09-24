@@ -21,6 +21,11 @@ from r23_requirements import (
     directive_text as requirements_directive,
     status as requirements_status,
 )
+from r23_task_graph import (
+    build_task_graph,
+    directive_text as task_graph_directive,
+    status as task_graph_status,
+)
 
 R23_VERSION="R23-UNIFIED-BRAIN-1"
 
@@ -160,6 +165,14 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         policy["include_agent_directive"]=True
     if caps.get("universal_retrieval"):
         policy["include_evidence_plan"]=True
+    out["task_graph"]=build_task_graph(
+        message,
+        out,
+        file_names=file_names or [],
+        has_project=has_project,
+    )
+    if (out.get("task_graph") or {}).get("active"):
+        policy["include_task_graph"]=True
     out["prompt_policy"]=policy
     out["reason"]="R23 unified main brain with selective 11-capability runtime"
     return out
@@ -480,6 +493,7 @@ def directive(decision):
         ) if caps.get(key)
     ]
     requirement_block=requirements_directive(decision.get("requirement_contract") or {})
+    graph_block=task_graph_directive(decision.get("task_graph") or {})
     return (
         "RONN R23 UNIFIED BRAIN:\n"
         "- One strongest available main brain owns the final answer.\n"
@@ -488,6 +502,7 @@ def directive(decision):
         f"- Task profile: {decision.get('profile')}\n"
         + reasoning_contract(decision) + "\n"
         + (requirement_block + "\n" if requirement_block else "")
+        + (graph_block + "\n" if graph_block else "")
         + f"- Active capabilities: {', '.join(active) if active else 'main brain only'}\n"
         "- Use real tool evidence when present. Never claim an action succeeded without evidence.\n"
         "- Keep simple answers simple; use the larger capability plane only when the task earns it."
@@ -518,6 +533,9 @@ def status():
         "requirement_contract":True,
         "requirement_contract_status":requirements_status(),
         "requirement_contract_policy":"current-turn exact constraints are checklist-tracked; dense contracts add verification without forcing an extra provider call",
+        "task_graph":True,
+        "task_graph_status":task_graph_status(),
+        "task_graph_policy":"selective dependency graph + one bounded failed-branch recovery + dead-end detection + completion proofs",
         "provider_reasoning_effort":True,
         "reasoning_budget_decoupled_from_visible_brevity":True,
         "reasoning_effort_levels":{"fast":"low","smart":"medium","deep":"high","apex":"high"},

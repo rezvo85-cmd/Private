@@ -78,7 +78,19 @@ from r23_brain import (
     reasoning_effort_for_route as r23_reasoning_effort_for_route,
     reasoning_completion_budget as r23_reasoning_completion_budget,
 )
-from r23_agent_runtime import execute as r23_agent_execute, status as r23_agent_status
+from r23_agent_runtime import (
+    execute as r23_agent_execute,
+    status as r23_agent_status,
+    evidence_contract as r23_agent_evidence_contract,
+    evidence_sufficiency as r23_agent_evidence_sufficiency,
+)
+from r23_task_graph import (
+    build_task_graph as r23_task_graph_build,
+    reconcile_task_graph as r23_task_graph_reconcile,
+    recovery_decision as r23_task_graph_recovery_decision,
+    mark_recovery_attempted as r23_task_graph_mark_recovery,
+    merge_tool_runs as r23_task_graph_merge_tool_runs,
+)
 from r23_context import (
     compress_history as r23_compress_history,
     project_scope_active as r23_project_scope_active,
@@ -2105,6 +2117,17 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             }
             _r20["tool_arbitration"]=_tool_arbiter
 
+    # Tool arbitration can change the capability plane after the initial R23
+    # plan. Rebuild the dependency graph from the final current-turn decision
+    # before executing tools so the graph matches what will actually run.
+    if _r20.get("r23"):
+        _r20["task_graph"]=r23_task_graph_build(
+            body.message,
+            _r20,
+            file_names=_file_names,
+            has_project=_has_project_scope,
+        )
+
     _legacy_diag = bool(
         (not _r20.get("lean_core"))
         or body.files or body.images or _has_project_scope
@@ -2223,6 +2246,80 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 depth=str(_r20.get("depth") or "smart"),
                 repair_fn=_r16_repair_model,
             )
+
+            # Reconcile the plan against real tool outcomes. If exactly one
+            # distinct failed branch has a safe recovery path, retry only that
+            # branch once instead of restarting the whole task.
+            _task_graph=r23_task_graph_reconcile(
+                _r20.get("task_graph") or {},
+                _tool_run,
+                _r20,
+            )
+            _recovery_decision=r23_task_graph_recovery_decision(
+                _task_graph,
+                _r20,
+                has_files=bool(body.files),
+            )
+            if _recovery_decision:
+                _task_graph=r23_task_graph_mark_recovery(_task_graph)
+                _r20["task_graph"]=_task_graph
+                try:
+                    task_checkpoint(
+                        request_id,
+                        "Replan",
+                        "started",
+                        "A failed dependency branch has one bounded recovery path; retrying only that branch.",
+                    )
+                    yield (json.dumps({"stage":"Replanning failed branch"})+"\n").encode()
+                    _recovery_run=r23_agent_execute(
+                        owner,
+                        request_id+"_replan",
+                        _tool_message,
+                        body.files or [],
+                        _recovery_decision,
+                        depth=str(_recovery_decision.get("depth") or "deep"),
+                        repair_fn=_r16_repair_model,
+                    )
+                    _tool_run=r23_task_graph_merge_tool_runs(_tool_run,_recovery_run)
+
+                    # Recompute proof against the ORIGINAL task requirements, not
+                    # merely the narrowed recovery decision.
+                    _merged_contract=r23_agent_evidence_contract(_tool_run)
+                    _merged_sufficiency=r23_agent_evidence_sufficiency(
+                        _tool_run,
+                        _r20,
+                        contract=_merged_contract,
+                        depth=str(_r20.get("depth") or "smart"),
+                    )
+                    _merged_contract["sufficiency"]=_merged_sufficiency
+                    _tool_run["evidence_contract"]=_merged_contract
+                    _tool_run["evidence_sufficiency"]=_merged_sufficiency
+                    _task_graph=r23_task_graph_reconcile(_task_graph,_tool_run,_r20)
+                    task_checkpoint(
+                        request_id,
+                        "Replan",
+                        "complete" if _merged_sufficiency.get("sufficient") else "blocked",
+                        (
+                            "Bounded failed-branch recovery completed."
+                            if _merged_sufficiency.get("sufficient")
+                            else "Recovery completed but some proof requirements remain unresolved."
+                        ),
+                    )
+                except Exception as _replan_exc:
+                    _tool_run.setdefault("errors",[]).append(
+                        "task_graph_recovery:"+_replan_exc.__class__.__name__
+                    )
+                    _task_graph=r23_task_graph_reconcile(_task_graph,_tool_run,_r20)
+                    try:
+                        task_checkpoint(
+                            request_id,
+                            "Replan",
+                            "blocked",
+                            "The bounded recovery branch failed; completed branches were preserved.",
+                        )
+                    except Exception:
+                        pass
+            _r20["task_graph"]=_task_graph
             _web_research = _tool_run.get("research") or {}
         else:
             _tool_run = r20_tool_execute(
@@ -2369,6 +2466,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "tool_arbitration":_r20.get("tool_arbitration") or {},
         "main_brain_confidence":_r20.get("main_brain_confidence") or {},
         "requirement_contract":_r20.get("requirement_contract") or {},
+        "task_graph":_r20.get("task_graph") or {},
         "tool_hub":{
             "planned":_tool_run.get("planned") or [],
             "executed":_tool_run.get("executed") or [],
