@@ -1912,16 +1912,21 @@ jobs:
           import r23_browser_use_adapter as browser_use
           from r23_capabilities import capability_plan
           from r23_agent_runtime import status as agent_status
+          from r23_task_graph import build_task_graph, reconcile_task_graph
 
           os.environ.pop("RONN_BROWSER_USE_ENABLED",None)
           st=browser_use.status()
           print("browser-use core status:",st)
           assert st["enabled"] is False
+          assert st["ready"] is False
           assert st["scope"] == "bounded_browser_executor"
           assert st["r23_final_answer_owner"] is True
           assert st["lazy_loaded"] is True
           assert st["local_private_network_blocked"] is True
           assert st["irreversible_final_submit_blocked"] is True
+          assert st["local_file_actions_blocked"] is True
+          assert st["downloads_blocked"] is True
+          assert st["javascript_action_blocked"] is True
 
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
@@ -1941,6 +1946,12 @@ jobs:
               assert browser_use._groq_key() == ""
               os.environ["CLOUD_API_BASE"]="https://api.groq.com/openai/v1"
               assert browser_use._groq_key() == "not-a-groq-key"
+              os.environ["CLOUD_API_BASE"]="https://api.groq.com.invalid/openai/v1"
+              assert browser_use._groq_key() == ""
+              os.environ["CLOUD_API_BASE"]="http://api.groq.com/openai/v1"
+              assert browser_use._groq_key() == ""
+              os.environ["CLOUD_API_BASE"]="https://api.groq.com:8443/openai/v1"
+              assert browser_use._groq_key() == ""
               os.environ["GROQ_API_KEY"]="direct-groq-key"
               os.environ["CLOUD_API_BASE"]="https://openrouter.ai/api/v1"
               assert browser_use._groq_key() == "direct-groq-key"
@@ -1984,38 +1995,281 @@ jobs:
           assert computer["computer_requested"] is True
           assert computer["browser_interactive"] is False
 
+          # Agent Mode is the execution permission boundary.
+          no_agent_browser=capability_plan(
+              base,
+              "Open https://example.com and click the More information link",
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=False,
+          )
+          assert no_agent_browser["browser_url"] is True
+          assert no_agent_browser["browser_interactive"] is False
+          assert no_agent_browser["agent_runtime"] is False
+
+          no_agent_computer=capability_plan(
+              base,
+              "Use my computer and inspect my screen",
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=False,
+          )
+          assert no_agent_computer["computer_requested"] is False
+
+          coding_base={"difficulty":3,"profile":"coding","followup":False}
+          no_agent_code=capability_plan(
+              coding_base,
+              "Run this and fix this",
+              history=[],file_names=["main.py"],has_images=False,has_project=False,agent_mode=False,
+          )
+          assert no_agent_code["code_fix_loop"] is False
+
           # Interactive browser tasks must not also run the legacy text-browser
           # fetch path. Keep the two execution modes mutually exclusive.
           import r23_agent_runtime as runtime_mod
           old_extract=runtime_mod.extract_urls
           old_collect=runtime_mod.collect_pages
           old_browser_exec=runtime_mod.browser_use_execute
+          old_browser_status=runtime_mod.browser_use_status
+          decision={
+              "needs_live":False,
+              "capabilities":{
+                  "agent_runtime":True,
+                  "browser_url":True,
+                  "browser_interactive":True,
+                  "retrieval":{},
+              },
+          }
+
+          # Ready interactive executor: use Browser Use only, no duplicate read.
           calls={"collect":0,"interactive":0}
           runtime_mod.extract_urls=lambda message:["https://example.com"]
           runtime_mod.collect_pages=lambda urls: calls.__setitem__("collect",calls["collect"]+1) or []
+          runtime_mod.browser_use_status=lambda: {
+              "ready":True,"installed":True,"enabled":True,"configured":True
+          }
           runtime_mod.browser_use_execute=lambda message,depth="smart": (
               calls.__setitem__("interactive",calls["interactive"]+1)
               or {"ok":True,"urls":["https://example.com"],"result":"clicked","actions":["click"],"steps":1}
           )
           try:
-              decision={
-                  "needs_live":False,
-                  "capabilities":{
-                      "agent_runtime":True,
-                      "browser_url":True,
-                      "browser_interactive":True,
-                      "retrieval":{},
-                  },
-              }
               run=runtime_mod.execute("ci","browser-overlap","Open https://example.com and click More",[],decision)
           finally:
               runtime_mod.extract_urls=old_extract
               runtime_mod.collect_pages=old_collect
               runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
           assert calls["collect"] == 0
           assert calls["interactive"] == 1
           assert "browser_automation" in run["executed"]
           assert "browser" not in run["executed"]
+
+          # Unavailable interactive executor: preserve safe read-only evidence,
+          # do not call Browser Use, and do not claim the click happened.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          runtime_mod.collect_pages=lambda urls: (
+              calls.__setitem__("collect",calls["collect"]+1)
+              or [{"url":"https://example.com","status":200,"text":"fallback page","error":None}]
+          )
+          runtime_mod.browser_use_status=lambda: {
+              "ready":False,"installed":False,"enabled":False,"configured":False
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":False,"reason":"should_not_run"}
+          )
+          try:
+              fallback=runtime_mod.execute("ci","browser-fallback","Open https://example.com and click More",[],decision)
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["collect"] == 1
+          assert calls["interactive"] == 0
+          assert "browser" in fallback["executed"]
+          assert "browser_automation" not in fallback["executed"]
+          assert fallback["browser_automation"]["reason"] == "unavailable"
+          reqs={x["name"]:x for x in fallback["evidence_sufficiency"]["requirements"]}
+          assert reqs["explicit_url_read"]["met"] is True
+          assert reqs["interactive_browser_execution"]["met"] is False
+          assert fallback["evidence_sufficiency"]["sufficient"] is False
+
+          # If the safe reader itself fails while Browser Use is unavailable,
+          # do not immediately retry the exact same reader a second time.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          def failing_collect(urls):
+              calls["collect"] += 1
+              raise RuntimeError("reader unavailable")
+          runtime_mod.collect_pages=failing_collect
+          runtime_mod.browser_use_status=lambda: {
+              "ready":False,"installed":False,"enabled":False,"configured":False
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":False,"reason":"should_not_run"}
+          )
+          try:
+              failed_reader=runtime_mod.execute(
+                  "ci","browser-reader-failure",
+                  "Open https://example.com and click More",[],decision
+              )
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["collect"] == 1
+          assert calls["interactive"] == 0
+          assert any(x.startswith("browser:") for x in failed_reader["errors"])
+          assert "browser_fallback" not in failed_reader["planned"]
+
+          # Configured/ready can still fail at launch/runtime. In that case,
+          # Browser Use is attempted once, then the safe reader supplies
+          # read-only evidence without claiming the click succeeded.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          runtime_mod.collect_pages=lambda urls: (
+              calls.__setitem__("collect",calls["collect"]+1)
+              or [{"url":"https://example.com","status":200,"text":"runtime fallback page","error":None}]
+          )
+          runtime_mod.browser_use_status=lambda: {
+              "ready":True,"installed":True,"enabled":True,"configured":True
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":False,"reason":"browser_launch_failed"}
+          )
+          try:
+              failed_runtime=runtime_mod.execute(
+                  "ci","browser-runtime-fallback",
+                  "Open https://example.com and click More",[],decision
+              )
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["interactive"] == 1
+          assert calls["collect"] == 1
+          assert "browser_automation" not in failed_runtime["executed"]
+          assert "browser" in failed_runtime["executed"]
+          assert failed_runtime["browser_automation"]["reason"] == "browser_launch_failed"
+          reqs={x["name"]:x for x in failed_runtime["evidence_sufficiency"]["requirements"]}
+          assert reqs["explicit_url_read"]["met"] is True
+          assert reqs["interactive_browser_execution"]["met"] is False
+          assert failed_runtime["evidence_sufficiency"]["sufficient"] is False
+
+          # Defense in depth: even a malformed capability object cannot execute
+          # Browser Use if agent_runtime permission is false.
+          calls={"collect":0,"interactive":0}
+          runtime_mod.extract_urls=lambda message:["https://example.com"]
+          runtime_mod.collect_pages=lambda urls: calls.__setitem__("collect",calls["collect"]+1) or []
+          runtime_mod.browser_use_status=lambda: {
+              "ready":True,"installed":True,"enabled":True,"configured":True
+          }
+          runtime_mod.browser_use_execute=lambda message,depth="smart": (
+              calls.__setitem__("interactive",calls["interactive"]+1)
+              or {"ok":True,"urls":["https://example.com"],"result":"unexpected"}
+          )
+          no_permission={
+              "needs_live":False,
+              "capabilities":{
+                  "agent_runtime":False,
+                  "browser_url":True,
+                  "browser_interactive":True,
+                  "retrieval":{},
+              },
+          }
+          try:
+              blocked=runtime_mod.execute(
+                  "ci","browser-no-permission",
+                  "Open https://example.com and click More",[],no_permission
+              )
+          finally:
+              runtime_mod.extract_urls=old_extract
+              runtime_mod.collect_pages=old_collect
+              runtime_mod.browser_use_execute=old_browser_exec
+              runtime_mod.browser_use_status=old_browser_status
+          assert calls["interactive"] == 0
+          assert calls["collect"] == 0
+          assert "browser_automation" not in blocked["executed"]
+          assert "browser" not in blocked["executed"]
+
+          # Task Graph must explicitly represent browser interaction success/failure.
+          graph_decision={
+              "difficulty":3,
+              "profile":"knowledge",
+              "needs_live":False,
+              "verify":True,
+              "requirement_contract":{},
+              "capabilities":{
+                  "agent_runtime":True,
+                  "browser_url":True,
+                  "browser_interactive":True,
+                  "retrieval":{},
+              },
+          }
+          graph=build_task_graph(
+              "Open https://example.com and click More",
+              graph_decision,
+          )
+          assert graph["active"] is True
+          assert any(x["id"]=="interact_browser" for x in graph["nodes"])
+          success_graph=reconcile_task_graph(graph,run,graph_decision)
+          success_node=next(x for x in success_graph["nodes"] if x["id"]=="interact_browser")
+          assert success_node["state"] == "complete"
+
+          failed_graph=reconcile_task_graph(graph,failed_runtime,graph_decision)
+          failed_node=next(x for x in failed_graph["nodes"] if x["id"]=="interact_browser")
+          assert failed_node["state"] == "failed"
+          assert "interact_browser" in failed_graph["completion_proof"]["unresolved"]
+
+          # Defense in depth for the older executable paths as well.
+          old_computer_status=runtime_mod.computer_status
+          computer_calls={"status":0}
+          runtime_mod.computer_status=lambda: (
+              computer_calls.__setitem__("status",computer_calls["status"]+1)
+              or {"verified":True}
+          )
+          try:
+              blocked_computer=runtime_mod.execute(
+                  "ci","computer-no-permission","Use my computer",[],
+                  {
+                      "needs_live":False,
+                      "capabilities":{
+                          "agent_runtime":False,
+                          "computer_requested":True,
+                          "retrieval":{},
+                      },
+                  },
+              )
+          finally:
+              runtime_mod.computer_status=old_computer_status
+          assert computer_calls["status"] == 0
+          assert "computer_runtime" not in blocked_computer["planned"]
+
+          old_ws_write=runtime_mod.ws_write
+          code_calls={"write":0}
+          runtime_mod.ws_write=lambda *args,**kwargs: (
+              code_calls.__setitem__("write",code_calls["write"]+1)
+              or {"ok":True}
+          )
+          try:
+              blocked_code=runtime_mod.execute(
+                  "ci","code-no-permission","Run this",
+                  [{"name":"main.py","content":"print(1)"}],
+                  {
+                      "needs_live":False,
+                      "capabilities":{
+                          "agent_runtime":False,
+                          "code_fix_loop":True,
+                          "retrieval":{},
+                      },
+                  },
+              )
+          finally:
+              runtime_mod.ws_write=old_ws_write
+          assert code_calls["write"] == 0
+          assert "code_test_fix_retest" not in blocked_code["planned"]
 
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain
@@ -2074,7 +2328,7 @@ jobs:
           import importlib.metadata
 
           import r23_browser_use_adapter as adapter
-          from browser_use import Agent, Browser, BrowserProfile, ChatGroq
+          from browser_use import Agent, Browser, BrowserProfile, ChatGroq, Tools
 
           version=importlib.metadata.version("browser-use")
           print("browser-use version:",version)
@@ -2099,12 +2353,22 @@ jobs:
               block_ip_addresses=True,
               keep_alive=False,
               enable_default_extensions=False,
+              accept_downloads=False,
           )
           browser=Browser(browser_profile=profile)
+          safe_tools=Tools(exclude_actions=list(adapter.BLOCKED_ACTIONS))
           assert llm.provider == "groq"
           assert browser.browser_profile.block_ip_addresses is True
           assert browser.browser_profile.enable_default_extensions is False
+          assert browser.browser_profile.accept_downloads is False
           assert "example.com" in browser.browser_profile.allowed_domains
+          actions=set(safe_tools.registry.registry.actions)
+          assert set(st["blocked_actions"]) == set(adapter.BLOCKED_ACTIONS)
+          for blocked_action in adapter.BLOCKED_ACTIONS:
+              assert blocked_action not in actions
+          assert "click" in actions
+          assert "input" in actions
+          assert "navigate" in actions
 
           # The combined dependency environment must still import the actual RONN
           # application and pass the R23 benchmark. This catches transitive package

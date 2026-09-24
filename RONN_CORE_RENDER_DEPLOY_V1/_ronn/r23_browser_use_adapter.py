@@ -20,6 +20,13 @@ from typing import Any
 VERSION = "R23-BROWSER-USE-1"
 DEFAULT_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
 _TRUE = {"1", "true", "yes", "on"}
+BLOCKED_ACTIONS = (
+    "upload_file",
+    "write_file",
+    "replace_file",
+    "read_file",
+    "evaluate",
+)
 
 _INTERACTIVE_WORDS = (
     "open the website", "click", "type into", "fill out", "fill in",
@@ -55,11 +62,14 @@ def _groq_key() -> str:
     if direct:
         return direct
 
-    # CLOUD_API_KEY is only safe to reuse when the configured cloud endpoint is
-    # actually Groq. RONN can point CLOUD_API_BASE at other OpenAI-compatible
-    # providers, and sending that key to Groq would be both incorrect and unsafe.
-    base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip().lower()
-    if "api.groq.com" in base:
+    raw_base=(os.getenv("CLOUD_API_BASE") or "https://api.groq.com/openai/v1").strip()
+    try:
+        parsed=urlparse(raw_base)
+        host=(parsed.hostname or "").strip().lower()
+        port=parsed.port
+    except ValueError:
+        return ""
+    if parsed.scheme == "https" and host == "api.groq.com" and port in {None,443}:
         return (os.getenv("CLOUD_API_KEY") or "").strip()
     return ""
 
@@ -125,11 +135,14 @@ def requested(message: str) -> bool:
 def status() -> dict[str, Any]:
     key = bool(_groq_key())
     installed = _installed()
+    enabled = _enabled()
+    configured = bool(installed and key)
     return {
         "version": VERSION,
         "installed": installed,
-        "enabled": _enabled(),
-        "configured": bool(installed and key),
+        "enabled": enabled,
+        "configured": configured,
+        "ready": bool(enabled and configured),
         "provider": "groq" if key else "",
         "model": (os.getenv("RONN_BROWSER_USE_MODEL") or DEFAULT_MODEL).strip(),
         "scope": "bounded_browser_executor",
@@ -137,6 +150,10 @@ def status() -> dict[str, Any]:
         "lazy_loaded": True,
         "local_private_network_blocked": True,
         "irreversible_final_submit_blocked": True,
+        "local_file_actions_blocked": True,
+        "downloads_blocked": True,
+        "javascript_action_blocked": True,
+        "blocked_actions": list(BLOCKED_ACTIONS),
     }
 
 
@@ -164,7 +181,7 @@ def _timeout_seconds() -> int:
 
 async def _run(task: str, depth: str) -> dict[str, Any]:
     # Imports stay inside the execution path by design.
-    from browser_use import Agent, Browser, BrowserProfile, ChatGroq
+    from browser_use import Agent, Browser, BrowserProfile, ChatGroq, Tools
 
     key = _groq_key()
     if not key:
@@ -181,8 +198,10 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         block_ip_addresses=True,
         keep_alive=False,
         enable_default_extensions=False,
+        accept_downloads=False,
     )
     browser = Browser(browser_profile=profile)
+    tools = Tools(exclude_actions=list(BLOCKED_ACTIONS))
     llm = ChatGroq(
         model=model,
         api_key=key,
@@ -203,6 +222,7 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         max_history_items=8,
         generate_gif=False,
         directly_open_url=True,
+        tools=tools,
     )
 
     async def guard(agent_obj):

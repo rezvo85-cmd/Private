@@ -106,6 +106,12 @@ def run():
                 and browser_use.get("scope")=="bounded_browser_executor"
                 and browser_use.get("r23_final_answer_owner") is True
                 and browser_use.get("lazy_loaded") is True
+                and browser_use.get("local_file_actions_blocked") is True
+                and browser_use.get("downloads_blocked") is True
+                and browser_use.get("javascript_action_blocked") is True
+                and set(browser_use.get("blocked_actions") or [])=={
+                    "upload_file","write_file","replace_file","read_file","evaluate"
+                }
                 and not any(x in brain for x in external_names)
             )
             add("external_capability_boundaries",helpers_ok,{
@@ -116,6 +122,8 @@ def run():
                 "browser_use_installed":bool(browser_use.get("installed")),
                 "browser_use_enabled":bool(browser_use.get("enabled")),
                 "browser_use_scope":browser_use.get("scope"),
+                "browser_use_ready":bool(browser_use.get("ready")),
+                "browser_use_blocked_actions":browser_use.get("blocked_actions") or [],
                 "r23_brain_external_mentions":[x for x in external_names if x in brain],
             })
         except Exception as exc:

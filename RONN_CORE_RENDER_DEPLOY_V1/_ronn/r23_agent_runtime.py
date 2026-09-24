@@ -170,7 +170,7 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
             ),
         )
 
-    if caps.get("browser_interactive"):
+    if caps.get("agent_runtime") and caps.get("browser_interactive"):
         require(
             "interactive_browser_execution",
             bool(contract.get("interactive_browser_verified")),
@@ -191,7 +191,7 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
             "world/dependency model computed" if contract.get("computed_static_analysis") else "world/dependency model was requested but not computed",
         )
 
-    if caps.get("computer_requested"):
+    if caps.get("agent_runtime") and caps.get("computer_requested"):
         require(
             "computer_observation",
             bool(contract.get("computer_observation_verified")),
@@ -235,10 +235,16 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "evidence_sufficiency":{},
     }
     evidence=[]
+    browser_use_state=browser_use_status()
+    browser_use_ready=bool(browser_use_state.get("ready"))
 
     # 2) Full agent runtime: inspect explicit URLs with the safe browser.
+    # Preserve the read-only path whenever the optional interactive executor
+    # is not ready, so RONN still has page evidence instead of a dead end.
     urls=extract_urls(message)
-    if urls and caps.get("agent_runtime") and not caps.get("browser_interactive"):
+    if urls and caps.get("agent_runtime") and (
+        not caps.get("browser_interactive") or not browser_use_ready
+    ):
         out["planned"].append("browser")
         try:
             pages=collect_pages(urls[:4])
@@ -255,21 +261,54 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
     # still owns task selection, evidence requirements, and final synthesis.
     if caps.get("browser_interactive"):
         out["planned"].append("browser_automation")
+        if not browser_use_ready:
+            out["browser_automation"]={
+                "ok":False,
+                "reason":"unavailable",
+                "installed":bool(browser_use_state.get("installed")),
+                "enabled":bool(browser_use_state.get("enabled")),
+                "configured":bool(browser_use_state.get("configured")),
+            }
+            out["errors"].append("browser_automation:unavailable")
+        else:
+            try:
+                br=browser_use_execute(message,depth=depth)
+                out["browser_automation"]=br
+                if br.get("ok"):
+                    out["executed"].append("browser_automation")
+                    for url in br.get("urls") or []:
+                        out["sources"].append({"url":url,"read":True,"kind":"browser_automation"})
+                    evidence.append(
+                        "RONN INTERACTIVE BROWSER EVIDENCE (bounded Browser Use executor; R23 remains final-answer owner):\n"+
+                        json.dumps(br,ensure_ascii=False)[:32000]
+                    )
+                else:
+                    out["errors"].append("browser_automation:"+str(br.get("reason") or "failed"))
+            except Exception as exc:
+                out["errors"].append("browser_automation:"+exc.__class__.__name__)
+
+    # A configured Browser Use runtime can still fail at launch/runtime
+    # (for example, missing Chromium). Fall back to the safe read-only browser
+    # after the failed attempt, but never claim the requested interaction ran.
+    if (
+        urls
+        and caps.get("agent_runtime")
+        and caps.get("browser_interactive")
+        and "browser_automation" not in out["executed"]
+        and not out.get("browser_pages")
+        and "browser" not in out["planned"]
+    ):
+        out["planned"].append("browser_fallback")
         try:
-            br=browser_use_execute(message,depth=depth)
-            out["browser_automation"]=br
-            if br.get("ok"):
-                out["executed"].append("browser_automation")
-                for url in br.get("urls") or []:
-                    out["sources"].append({"url":url,"read":True,"kind":"browser_automation"})
-                evidence.append(
-                    "RONN INTERACTIVE BROWSER EVIDENCE (bounded Browser Use executor; R23 remains final-answer owner):\n"+
-                    json.dumps(br,ensure_ascii=False)[:32000]
-                )
-            else:
-                out["errors"].append("browser_automation:"+str(br.get("reason") or "failed"))
+            pages=collect_pages(urls[:4])
+            out["browser_pages"]=pages
+            out["executed"].append("browser")
+            evidence.append(
+                "RONN BROWSER FALLBACK EVIDENCE (read-only; requested interaction was not verified):\n"+
+                json.dumps(pages,ensure_ascii=False)[:30000]
+            )
         except Exception as exc:
-            out["errors"].append("browser_automation:"+exc.__class__.__name__)
+            out["errors"].append("browser_fallback:"+exc.__class__.__name__)
 
     # Weather stays structured instead of using generic search.
     low=str(message or "").lower()
@@ -357,7 +396,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
     # 3) Code -> test -> fix -> retest. Write the full runnable project slice,
     # then execute the best entry point. The repair loop is bounded.
     runnable=_runnable(files)
-    if caps.get("code_fix_loop") and runnable:
+    if caps.get("agent_runtime") and caps.get("code_fix_loop") and runnable:
         out["planned"].append("code_test_fix_retest")
         workspace="r23_"+str(request_id or "task")[-16:]
         try:
