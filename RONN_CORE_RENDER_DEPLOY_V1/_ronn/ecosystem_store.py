@@ -193,7 +193,7 @@ def _prune_owner_sessions(c, owner):
            WHERE owner=? AND token_hash NOT IN (
              SELECT token_hash FROM owner_sessions
              WHERE owner=? AND revoked=0
-             ORDER BY created DESC,token_hash DESC LIMIT ?
+             ORDER BY created DESC,rowid DESC LIMIT ?
            )""",
         (owner, owner, MAX_OWNER_SESSIONS_PER_OWNER),
     )
@@ -557,7 +557,7 @@ def _prune_claimed_handoffs(c, owner):
            WHERE owner=? AND status!='pending' AND id NOT IN (
              SELECT id FROM handoffs
              WHERE owner=? AND status!='pending'
-             ORDER BY COALESCE(claimed,created) DESC,id DESC LIMIT ?
+             ORDER BY COALESCE(claimed,created) DESC,rowid DESC LIMIT ?
            )""",
         (owner, owner, MAX_CLAIMED_HANDOFFS_PER_OWNER),
     )
