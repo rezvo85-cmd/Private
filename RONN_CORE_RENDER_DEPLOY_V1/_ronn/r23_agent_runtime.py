@@ -170,7 +170,7 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
             ),
         )
 
-    if caps.get("browser_interactive"):
+    if caps.get("agent_runtime") and caps.get("browser_interactive"):
         require(
             "interactive_browser_execution",
             bool(contract.get("interactive_browser_verified")),
@@ -191,7 +191,7 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
             "world/dependency model computed" if contract.get("computed_static_analysis") else "world/dependency model was requested but not computed",
         )
 
-    if caps.get("computer_requested"):
+    if caps.get("agent_runtime") and caps.get("computer_requested"):
         require(
             "computer_observation",
             bool(contract.get("computer_observation_verified")),
@@ -373,7 +373,7 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
     # 3) Code -> test -> fix -> retest. Write the full runnable project slice,
     # then execute the best entry point. The repair loop is bounded.
     runnable=_runnable(files)
-    if caps.get("code_fix_loop") and runnable:
+    if caps.get("agent_runtime") and caps.get("code_fix_loop") and runnable:
         out["planned"].append("code_test_fix_retest")
         workspace="r23_"+str(request_id or "task")[-16:]
         try:
