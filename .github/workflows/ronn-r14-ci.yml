@@ -444,6 +444,103 @@ jobs:
           print("vault durability / SQLite backup consistency: ok")
           PY
 
+      - name: Training and monitor retention smoke
+        run: |
+          python - <<'PY'
+          import tempfile
+          import time
+          from pathlib import Path
+
+          import r18_monitor as monitor
+          import r19_training_data as training
+
+          # Training candidates: stale/unrated responses and positive examples
+          # must stay bounded instead of growing forever.
+          old_training_db=training.DB
+          old_ttl=training.PENDING_TTL_SECONDS
+          old_pending=training.MAX_PENDING_PER_OWNER
+          old_examples=training.MAX_EXAMPLES_PER_OWNER
+          with tempfile.TemporaryDirectory() as td:
+              training.DB=Path(td)/"training.db"
+              training.PENDING_TTL_SECONDS=10
+              training.MAX_PENDING_PER_OWNER=3
+              training.MAX_EXAMPLES_PER_OWNER=4
+              now=int(time.time())
+
+              with training._db() as c:
+                  c.execute(
+                      "INSERT INTO pending VALUES(?,?,?,?,?,?,?)",
+                      ("expired","owner","general","old","old","model",now-100),
+                  )
+                  c.commit()
+
+              for i in range(6):
+                  assert training.stage(f"req-{i}","owner",f"prompt {i}",f"response {i}") is True
+              s=training.stats("owner")
+              assert s["pending_feedback"] <= 3
+              assert training.pending_example("expired") is None
+
+              with training._db() as c:
+                  c.execute(
+                      "INSERT INTO pending VALUES(?,?,?,?,?,?,?)",
+                      ("expired-promote","owner","general","old","old","model",now-100),
+                  )
+                  c.commit()
+              assert training.promote("expired-promote") is None
+
+              for i in range(7):
+                  training.add("owner",f"p{i}",f"r{i}")
+              s=training.stats("owner")
+              assert s["examples"] <= 4
+              assert s["max_pending_per_owner"] == 3
+              assert s["max_examples_per_owner"] == 4
+
+          training.DB=old_training_db
+          training.PENDING_TTL_SECONDS=old_ttl
+          training.MAX_PENDING_PER_OWNER=old_pending
+          training.MAX_EXAMPLES_PER_OWNER=old_examples
+
+          # Monitor watches and alert history must also stay bounded, while
+          # duplicate URLs reuse the existing watch and owners can delete watches.
+          old_monitor_db=monitor.DB
+          old_watch_limit=monitor.MAX_WATCHES_PER_OWNER
+          old_alert_limit=monitor.MAX_ALERTS_PER_OWNER
+          with tempfile.TemporaryDirectory() as td:
+              monitor.DB=Path(td)/"monitor.db"
+              monitor.MAX_WATCHES_PER_OWNER=3
+              monitor.MAX_ALERTS_PER_OWNER=4
+
+              first=monitor.add("owner","One","https://example.com/one",900)
+              duplicate=monitor.add("owner","Duplicate","https://example.com/one",900)
+              assert duplicate["id"] == first["id"]
+              monitor.add("owner","Two","https://example.com/two",900)
+              monitor.add("owner","Three","https://example.com/three",900)
+              try:
+                  monitor.add("owner","Four","https://example.com/four",900)
+                  raise AssertionError("monitor watch limit was bypassed")
+              except ValueError:
+                  pass
+              assert len(monitor.list_watches("owner")) == 3
+
+              watch=monitor.get(first["id"])
+              with monitor._db() as c:
+                  for i in range(8):
+                      monitor._alert(c,watch,f"alert-{i}")
+                  c.commit()
+                  count=c.execute("SELECT COUNT(*) n FROM alerts WHERE owner='owner'").fetchone()["n"]
+              assert count == 4
+              assert monitor.remove("other-owner",first["id"]) is False
+              assert monitor.remove("owner",first["id"]) is True
+              assert monitor.get(first["id"]) is None
+              assert monitor.status()["max_alerts_per_owner"] == 4
+
+          monitor.DB=old_monitor_db
+          monitor.MAX_WATCHES_PER_OWNER=old_watch_limit
+          monitor.MAX_ALERTS_PER_OWNER=old_alert_limit
+
+          print("training/monitor retention bounds: ok")
+          PY
+
       - name: Core auth boundary smoke
         run: |
           python - <<'PY'

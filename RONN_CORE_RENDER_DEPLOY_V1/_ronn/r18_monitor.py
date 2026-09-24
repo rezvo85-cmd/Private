@@ -1,12 +1,14 @@
 """RONN R18 proactive/deployment monitoring while the Core is awake."""
 from __future__ import annotations
-import json, sqlite3, threading, time, uuid
+import os, sqlite3, threading, time, uuid
 from pathlib import Path
 from r17_browser import fetch as browser_fetch
 
 BASE=Path(__file__).resolve().parent
 DB=BASE/"data"/"r18_monitor.db"
 DB.parent.mkdir(exist_ok=True)
+MAX_WATCHES_PER_OWNER=max(5,min(500,int(os.getenv("RONN_MONITOR_MAX_WATCHES_PER_OWNER","50") or "50")))
+MAX_ALERTS_PER_OWNER=max(50,min(5000,int(os.getenv("RONN_MONITOR_MAX_ALERTS_PER_OWNER","500") or "500")))
 _STOP=threading.Event(); _THREAD=None; _LOCK=threading.Lock()
 
 def _db():
@@ -16,14 +18,26 @@ def _db():
       last_ok INTEGER,last_status INTEGER,last_error TEXT,last_checked INTEGER,next_check INTEGER)""")
     c.execute("""CREATE TABLE IF NOT EXISTS alerts(
       id TEXT PRIMARY KEY,watch_id TEXT,owner TEXT,message TEXT,created_at INTEGER,seen INTEGER DEFAULT 0)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_monitor_watches_owner ON watches(owner,enabled,next_check)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_monitor_alerts_owner_created ON alerts(owner,created_at DESC)")
     c.commit();return c
 
 def add(owner,label,url,interval_s=900):
-    wid="watch_"+uuid.uuid4().hex[:16];now=int(time.time())
+    owner=str(owner)[:120];url=str(url)[:1500]
     interval=max(300,min(int(interval_s),86400))
     with _db() as c:
+        existing=c.execute(
+            "SELECT * FROM watches WHERE owner=? AND url=? LIMIT 1",
+            (owner,url),
+        ).fetchone()
+        if existing:
+            return dict(existing)
+        count=c.execute("SELECT COUNT(*) n FROM watches WHERE owner=?",(owner,)).fetchone()["n"]
+        if int(count)>=MAX_WATCHES_PER_OWNER:
+            raise ValueError("Monitor watch limit reached. Remove an old watch before adding another.")
+        wid="watch_"+uuid.uuid4().hex[:16];now=int(time.time())
         c.execute("INSERT INTO watches VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-          (wid,str(owner)[:120],str(label or url)[:180],str(url)[:1500],interval,1,None,None,"",0,now));c.commit()
+          (wid,owner,str(label or url)[:180],url,interval,1,None,None,"",0,now));c.commit()
     return get(wid)
 
 def ensure(owner,label,url,interval_s=900):
@@ -37,11 +51,31 @@ def get(wid):
     return dict(r) if r else None
 
 def list_watches(owner):
-    with _db() as c:rows=c.execute("SELECT * FROM watches WHERE owner=? ORDER BY label",(str(owner),)).fetchall()
+    with _db() as c:
+        rows=c.execute(
+            "SELECT * FROM watches WHERE owner=? ORDER BY label LIMIT ?",
+            (str(owner),MAX_WATCHES_PER_OWNER),
+        ).fetchall()
     return [dict(x) for x in rows]
 
+
+def remove(owner,wid):
+    with _db() as c:
+        c.execute("DELETE FROM alerts WHERE owner=? AND watch_id=?",(str(owner),str(wid)))
+        cur=c.execute("DELETE FROM watches WHERE owner=? AND id=?",(str(owner),str(wid)))
+        c.commit()
+    return cur.rowcount>0
+
+
 def _alert(c,w,message):
-    c.execute("INSERT INTO alerts VALUES(?,?,?,?,?,0)",("alert_"+uuid.uuid4().hex[:16],w["id"],w["owner"],message[:800],int(time.time())))
+    owner=str(w["owner"])
+    c.execute(
+        "INSERT INTO alerts VALUES(?,?,?,?,?,0)",
+        ("alert_"+uuid.uuid4().hex[:16],w["id"],owner,message[:800],int(time.time())),
+    )
+    c.execute("""DELETE FROM alerts WHERE owner=? AND id NOT IN (
+        SELECT id FROM alerts WHERE owner=? ORDER BY created_at DESC,id DESC LIMIT ?
+    )""",(owner,owner,MAX_ALERTS_PER_OWNER))
 
 def check(wid):
     w=get(wid)
@@ -87,4 +121,11 @@ def status():
     with _db() as c:
         w=c.execute("SELECT COUNT(*) n FROM watches WHERE enabled=1").fetchone()["n"]
         a=c.execute("SELECT COUNT(*) n FROM alerts WHERE seen=0").fetchone()["n"]
-    return {"running":bool(_THREAD and _THREAD.is_alive()),"active_watches":int(w),"unseen_alerts":int(a),"minimum_interval_s":300}
+    return {
+        "running":bool(_THREAD and _THREAD.is_alive()),
+        "active_watches":int(w),
+        "unseen_alerts":int(a),
+        "minimum_interval_s":300,
+        "max_watches_per_owner":MAX_WATCHES_PER_OWNER,
+        "max_alerts_per_owner":MAX_ALERTS_PER_OWNER,
+    }
