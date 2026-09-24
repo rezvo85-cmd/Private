@@ -413,8 +413,11 @@ def _vault_key():
     if stable:
         if local and local != stable:
             # Local/offline installations may already have encrypted items.
-            # Migrate them atomically before switching to the stable server key.
+            # Never silently keep using a legacy local-only key on Render if
+            # migration to the durable server key fails.
             if not _migrate_vault_ciphertexts(local, stable):
+                if (os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID")):
+                    raise RuntimeError("Vault key migration failed; refusing to use the legacy local key on Render.")
                 return local
         _write_local_vault_key(stable)
         return stable
