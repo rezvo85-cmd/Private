@@ -1923,6 +1923,9 @@ jobs:
           assert st["lazy_loaded"] is True
           assert st["local_private_network_blocked"] is True
           assert st["irreversible_final_submit_blocked"] is True
+          assert st["local_file_actions_blocked"] is True
+          assert st["downloads_blocked"] is True
+          assert st["javascript_action_blocked"] is True
 
           assert browser_use.requested("Open https://example.com and click the More information link") is True
           assert browser_use.requested("Read https://example.com and summarize it") is False
@@ -2217,7 +2220,7 @@ jobs:
           import importlib.metadata
 
           import r23_browser_use_adapter as adapter
-          from browser_use import Agent, Browser, BrowserProfile, ChatGroq
+          from browser_use import Agent, Browser, BrowserProfile, ChatGroq, Tools
 
           version=importlib.metadata.version("browser-use")
           print("browser-use version:",version)
@@ -2242,12 +2245,23 @@ jobs:
               block_ip_addresses=True,
               keep_alive=False,
               enable_default_extensions=False,
+              accept_downloads=False,
           )
           browser=Browser(browser_profile=profile)
+          safe_tools=Tools(exclude_actions=[
+              "upload_file","write_file","replace_file","read_file","evaluate",
+          ])
           assert llm.provider == "groq"
           assert browser.browser_profile.block_ip_addresses is True
           assert browser.browser_profile.enable_default_extensions is False
+          assert browser.browser_profile.accept_downloads is False
           assert "example.com" in browser.browser_profile.allowed_domains
+          actions=set(safe_tools.registry.registry.actions)
+          for blocked_action in ("upload_file","write_file","replace_file","read_file","evaluate"):
+              assert blocked_action not in actions
+          assert "click" in actions
+          assert "input" in actions
+          assert "navigate" in actions
 
           # The combined dependency environment must still import the actual RONN
           # application and pass the R23 benchmark. This catches transitive package
