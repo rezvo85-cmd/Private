@@ -1,11 +1,13 @@
 import sqlite3
 import time
 import json
+import os
 from pathlib import Path
 
 BASE=Path(__file__).resolve().parent
 DB=BASE/'data'/'tasks.sqlite3'
 DB.parent.mkdir(parents=True,exist_ok=True)
+MAX_TERMINAL_TASKS_PER_OWNER=max(100,min(5000,int(os.getenv("RONN_TASK_HISTORY_MAX_TERMINAL_PER_OWNER","500") or "500")))
 
 def _db():
     c=sqlite3.connect(DB)
@@ -21,9 +23,23 @@ def _db():
       status TEXT, detail TEXT DEFAULT '', created REAL
     );
     CREATE INDEX IF NOT EXISTS idx_task_owner_updated ON tasks(owner,updated DESC);
+    CREATE INDEX IF NOT EXISTS idx_task_owner_status_updated ON tasks(owner,status,updated DESC);
     CREATE INDEX IF NOT EXISTS idx_checkpoint_task ON checkpoints(task_id,id);
     ''')
     return c
+
+
+def _prune_terminal(c,owner):
+    owner=str(owner)
+    rows=c.execute("""SELECT task_id FROM tasks
+        WHERE owner=? AND status IN ('complete','cancelled','failed')
+        ORDER BY updated DESC,task_id DESC LIMIT -1 OFFSET ?""",
+        (owner,MAX_TERMINAL_TASKS_PER_OWNER)).fetchall()
+    stale=[r["task_id"] for r in rows]
+    if not stale:return 0
+    c.executemany("DELETE FROM checkpoints WHERE task_id=?",[(task_id,) for task_id in stale])
+    c.executemany("DELETE FROM tasks WHERE task_id=?",[(task_id,) for task_id in stale])
+    return len(stale)
 
 def start_task(task_id,owner,project_id,prompt,profile,difficulty,signature,plan):
     now=time.time()
@@ -40,8 +56,12 @@ def checkpoint(task_id,phase,status='complete',detail=''):
         c.execute('UPDATE tasks SET updated=? WHERE task_id=?',(now,task_id))
 
 def finish_task(task_id,status='complete'):
+    status=(status or 'complete')[:40]
     with _db() as c:
-        c.execute('UPDATE tasks SET status=?,updated=? WHERE task_id=?',((status or 'complete')[:40],time.time(),task_id))
+        c.execute('UPDATE tasks SET status=?,updated=? WHERE task_id=?',(status,time.time(),task_id))
+        if status in {'complete','cancelled','failed'}:
+            row=c.execute('SELECT owner FROM tasks WHERE task_id=?',(task_id,)).fetchone()
+            if row:_prune_terminal(c,row['owner'])
 
 def get_task(task_id):
     with _db() as c:
@@ -55,9 +75,11 @@ def get_task(task_id):
     return out
 
 def recent_tasks(owner,limit=20):
+    limit=max(1,min(int(limit),100))
     with _db() as c:
+        _prune_terminal(c,owner)
         rows=c.execute('SELECT task_id,project_id,signature,prompt,profile,difficulty,status,created,updated FROM tasks WHERE owner=? ORDER BY updated DESC LIMIT ?',
-                       (owner,int(limit))).fetchall()
+                       (owner,limit)).fetchall()
     return [dict(x) for x in rows]
 
 def stats():
@@ -66,7 +88,16 @@ def stats():
         complete=c.execute("SELECT COUNT(*) n FROM tasks WHERE status='complete'").fetchone()['n']
         failed=c.execute("SELECT COUNT(*) n FROM tasks WHERE status='failed'").fetchone()['n']
         cps=c.execute('SELECT COUNT(*) n FROM checkpoints').fetchone()['n']
-    return {'tasks':total,'completed':complete,'failed':failed,'checkpoints':cps}
+    return {
+        'tasks':total,
+        'completed':complete,
+        'failed':failed,
+        'checkpoints':cps,
+        'retention':{
+            'terminal_per_owner':MAX_TERMINAL_TASKS_PER_OWNER,
+            'active_tasks_pruned':False,
+        },
+    }
 
 
 def latest_incomplete(owner, project_id=None):
