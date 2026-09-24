@@ -267,7 +267,9 @@ async def _run(task: str, depth: str) -> dict[str, Any]:
         }
     finally:
         try:
-            await browser.kill()
+            # Cleanup must not be able to hold the RONN worker indefinitely
+            # after the main browser-task timeout has already fired.
+            await asyncio.wait_for(browser.kill(), timeout=10)
         except Exception:
             pass
 
