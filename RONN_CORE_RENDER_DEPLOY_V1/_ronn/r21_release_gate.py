@@ -91,23 +91,32 @@ def run():
             from docling_adapter import status as docling_status
             from r23_workflow_runtime import status as workflow_status
             from r23_deepeval_adapter import status as deepeval_status
+            from r23_browser_use_adapter import status as browser_use_status
             brain=(BASE/"r23_brain.py").read_text(encoding="utf-8").lower()
             docling=docling_status()
             workflow=workflow_status()
             deepeval=deepeval_status()
+            browser_use=browser_use_status()
+            external_names=("docling","deepeval","langgraph","browser_use")
             helpers_ok=bool(
                 docling.get("available")
                 and workflow.get("langgraph_available")
                 and workflow.get("no_duplicate_action_replay")
                 and not deepeval.get("installed")
-                and not any(x in brain for x in ("docling","deepeval","langgraph"))
+                and browser_use.get("scope")=="bounded_browser_executor"
+                and browser_use.get("r23_final_answer_owner") is True
+                and browser_use.get("lazy_loaded") is True
+                and not any(x in brain for x in external_names)
             )
             add("external_capability_boundaries",helpers_ok,{
                 "docling_available":bool(docling.get("available")),
                 "langgraph_available":bool(workflow.get("langgraph_available")),
                 "no_duplicate_action_replay":bool(workflow.get("no_duplicate_action_replay")),
                 "deepeval_in_production":bool(deepeval.get("installed")),
-                "r23_brain_external_mentions":[x for x in ("docling","deepeval","langgraph") if x in brain],
+                "browser_use_installed":bool(browser_use.get("installed")),
+                "browser_use_enabled":bool(browser_use.get("enabled")),
+                "browser_use_scope":browser_use.get("scope"),
+                "r23_brain_external_mentions":[x for x in external_names if x in brain],
             })
         except Exception as exc:
             add("external_capability_boundaries",False,str(exc)[:240])
