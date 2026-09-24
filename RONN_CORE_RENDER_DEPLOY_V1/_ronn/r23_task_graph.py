@@ -134,6 +134,14 @@ def build_task_graph(message: str, decision: dict, *, file_names=None, has_proje
         ))
         evidence_nodes.append("execute_verify")
 
+    if caps.get("computer_requested"):
+        nodes.append(_node(
+            "observe_computer","Observe the connected computer state through the verified runtime","computer",
+            [anchor],
+            proof="connected computer observation is explicitly verified",
+        ))
+        evidence_nodes.append("observe_computer")
+
     reason_deps=_unique(([anchor] if anchor else [])+evidence_nodes)
     nodes.append(_node(
         "solve","Produce the solution from the gathered context/evidence","reason",
@@ -287,6 +295,12 @@ def reconcile_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[st
             if code.get("ok"):
                 detail="runtime reported success but verification proof is incomplete"
             _mark(graph,"execute_verify","failed",detail,True)
+
+    if "observe_computer" in _index(graph):
+        if contract.get("computer_observation_verified"):
+            _mark(graph,"observe_computer","complete","connected computer observation verified",True)
+        elif "computer_runtime" in (tool_run.get("planned") or []) or "computer_observation" in gaps:
+            _mark(graph,"observe_computer","failed","connected computer observation was not verified",True)
 
     # If this is the bounded recovery pass, close the recovery node according
     # to whether its original failed branch was actually repaired.
