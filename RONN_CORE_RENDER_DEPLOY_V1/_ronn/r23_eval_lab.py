@@ -43,6 +43,7 @@ from r23_quality_lab import (
     status as quality_status,
 )
 from r23_confidence import apply_confidence_governor, status as confidence_status
+from r23_requirements import extract_requirements
 from r23_task_graph import (
     build_task_graph as task_graph_build,
     reconcile_task_graph as task_graph_reconcile,
@@ -310,6 +311,9 @@ def run():
     )
     requirement_contract=requirement_plan.get("requirement_contract") or {}
     requirement_prompt=brain_directive(requirement_plan)
+    requirement_plain_with=extract_requirements(
+        "Explain caching with one example and compare memory usage."
+    )
 
     task_graph_simple=plan("hi").get("task_graph") or {}
     task_graph_hard=hard_plan.get("task_graph") or {}
@@ -624,6 +628,7 @@ def run():
                   and requirement_contract.get("count",0)>=4
                   and requirement_contract.get("hard_count",0)>=3
                   and requirement_contract.get("density")=="high"
+                  and requirement_plain_with.get("count")==0
                   and requirement_plan.get("verify") is True
                   and requirement_plan.get("prompt_policy",{}).get("include_requirement_contract") is True
                   and requirement_plan.get("prompt_policy",{}).get("include_verification_directive") is True
