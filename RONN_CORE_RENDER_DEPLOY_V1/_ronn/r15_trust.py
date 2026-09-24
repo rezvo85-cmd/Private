@@ -21,7 +21,7 @@ def _prune_owner(c, owner):
         """DELETE FROM actions
            WHERE owner=? AND id NOT IN (
              SELECT id FROM actions WHERE owner=?
-             ORDER BY updated_at DESC,created_at DESC,id DESC LIMIT ?
+             ORDER BY updated_at DESC,created_at DESC,rowid DESC LIMIT ?
            )""",
         (str(owner),str(owner),MAX_ACTIONS_PER_OWNER),
     )
