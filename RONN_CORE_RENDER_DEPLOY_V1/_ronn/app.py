@@ -1961,6 +1961,40 @@ def _explicit_json_answer_requested(message: str) -> bool:
     ))
 
 
+def _internal_payload_prefix_state(text: str, original_message: str="") -> str:
+    """Tri-state pre-display guard for streamed provider output.
+
+    Returns:
+      probe - not enough prefix yet to decide safely
+      hold  - response begins like JSON/tool protocol; buffer until completion
+      pass  - ordinary visible answer can stream normally
+    """
+    if _explicit_json_answer_requested(original_message):
+        return "pass"
+    raw=str(text or "").lstrip()
+    if not raw:
+        return "probe"
+    low=raw.lower()
+    if raw[0] in "{[":
+        return "hold"
+
+    protocol_prefixes=(
+        "```json",
+        "groq_web_search",
+        "web_search",
+        "visit_website",
+        "browser.search",
+        "browser.open",
+        "searxng",
+        "crawl4ai",
+    )
+    if any(x.startswith(low) for x in protocol_prefixes):
+        return "probe"
+    if any(low.startswith(x) for x in protocol_prefixes):
+        return "hold"
+    return "pass"
+
+
 def looks_like_internal_tool_payload(text: str, original_message: str="") -> bool:
     """Block provider/tool planner protocol from ever becoming a visible assistant answer."""
     raw=(text or "").strip()
@@ -2007,6 +2041,26 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
     _gap_prefix = ""
     _gap_released = not _gap_buffer
     _gap_detected = False
+    _protocol_state = "pass" if _guard_live else "probe"
+    _protocol_pending = ""
+
+    def _visible_nonlive_chunks(piece: str):
+        nonlocal _gap_prefix, _gap_released, _gap_detected
+        emitted=[]
+        if not piece:
+            return emitted
+        if _gap_buffer and not _gap_released:
+            _gap_prefix += piece
+            if r23_gap_signal(_gap_prefix, original_message, profile).get("required"):
+                _gap_detected = True
+            elif not _gap_detected and r23_gap_prefix_ready(_gap_prefix):
+                emitted.append(_gap_prefix)
+                _gap_prefix = ""
+                _gap_released = True
+        elif not _gap_detected:
+            emitted.append(piece)
+        return emitted
+
     with r:
         if not r.ok:
             if r.status_code == 429:
@@ -2029,34 +2083,74 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                 if clean:
                     full += clean
                     if not _guard_live:
-                        if _gap_buffer and not _gap_released:
-                            _gap_prefix += clean
-                            if r23_gap_signal(_gap_prefix, original_message, profile).get("required"):
-                                _gap_detected = True
-                            elif not _gap_detected and r23_gap_prefix_ready(_gap_prefix):
-                                yield json.dumps({"token":_gap_prefix}) + "\n"
-                                _gap_prefix = ""
-                                _gap_released = True
-                        elif not _gap_detected:
-                            yield json.dumps({"token":clean}) + "\n"
+                        piece=clean
+                        if _protocol_state == "hold":
+                            piece=""
+                        elif _protocol_state == "probe":
+                            _protocol_pending += clean
+                            next_state=_internal_payload_prefix_state(_protocol_pending, original_message)
+                            if next_state == "probe":
+                                piece=""
+                            elif next_state == "hold":
+                                _protocol_state = "hold"
+                                piece=""
+                            else:
+                                _protocol_state = "pass"
+                                piece = _protocol_pending
+                                _protocol_pending = ""
+                        for visible in _visible_nonlive_chunks(piece):
+                            yield json.dumps({"token":visible}) + "\n"
             except Exception:
                 continue
         tail = filt.flush()
         if tail:
             full += tail
             if not _guard_live:
-                if _gap_buffer and not _gap_released:
-                    _gap_prefix += tail
-                    if r23_gap_signal(_gap_prefix, original_message, profile).get("required"):
-                        _gap_detected = True
-                    elif not _gap_detected and r23_gap_prefix_ready(_gap_prefix):
-                        yield json.dumps({"token":_gap_prefix}) + "\n"
-                        _gap_prefix = ""
-                        _gap_released = True
-                elif not _gap_detected:
-                    yield json.dumps({"token":tail}) + "\n"
+                piece=tail
+                if _protocol_state == "hold":
+                    piece=""
+                elif _protocol_state == "probe":
+                    _protocol_pending += tail
+                    next_state=_internal_payload_prefix_state(_protocol_pending, original_message)
+                    if next_state == "probe":
+                        piece=""
+                    elif next_state == "hold":
+                        _protocol_state = "hold"
+                        piece=""
+                    else:
+                        _protocol_state = "pass"
+                        piece = _protocol_pending
+                        _protocol_pending = ""
+                for visible in _visible_nonlive_chunks(piece):
+                    yield json.dumps({"token":visible}) + "\n"
+
+    # A very short non-protocol prefix may still be waiting when the provider
+    # closes. Release it through the normal gap buffer now.
+    if not _guard_live and _protocol_state == "probe" and _protocol_pending:
+        final_state=_internal_payload_prefix_state(_protocol_pending, original_message)
+        if final_state == "hold":
+            _protocol_state = "hold"
+        else:
+            _protocol_state = "pass"
+            for visible in _visible_nonlive_chunks(_protocol_pending):
+                yield json.dumps({"token":visible}) + "\n"
+            _protocol_pending = ""
 
     full = full.strip()
+    _internal_payload = looks_like_internal_tool_payload(full, original_message)
+
+    # If we held a JSON-looking answer but it is legitimate user-visible output,
+    # release it once at completion. Internal planner/tool payload stays hidden
+    # and is recovered below.
+    if not _guard_live and _protocol_state == "hold" and not _internal_payload and full:
+        yield json.dumps({"token":full}) + "\n"
+        _protocol_state = "pass"
+        _gap_released = True
+
+    # Prevent the ordinary knowledge-gap release path from ever exposing an
+    # internal planner that the protocol guard intentionally held back.
+    if _internal_payload:
+        _gap_released = True
 
     # If the first short sentence admitted a factual knowledge gap, do not show it.
     # Retrieve evidence and let the same selected main brain answer again.
@@ -2120,7 +2214,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
     # Never surface model-generated search/tool protocol. If a live provider leaks
     # its private planner, use RONN's deterministic retrieval pipeline and then a
     # normal synthesis model. Do not ask the same Compound planner to try again.
-    if _guard_live and looks_like_internal_tool_payload(full, original_message):
+    if _internal_payload:
         try:
             _recovery_messages = retry_messages or []
             _recovery_depth = "deep" if profile in {"research","analysis","coding","mathscience"} else "smart"
@@ -2154,7 +2248,7 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
         except Exception:
             full=""
 
-    if _guard_live and full:
+    if (_guard_live or _internal_payload) and full:
         yield json.dumps({"token":full}) + "\n"
     # Critical R5.1 reliability fix: HTTP 200 + empty stream is NOT success.
     # Retry as a normal completion and cascade through backup models automatically.
@@ -2167,13 +2261,13 @@ def stream_response(r, owner: str, original_message: str, route: str, model: str
                 pass
             recovered, used_model = nonstream_with_fallback(model, route, retry_messages, 1000)
             recovered=(recovered or "").strip()
-            if recovered and (not _guard_live or not looks_like_internal_tool_payload(recovered, original_message)):
+            if recovered and not looks_like_internal_tool_payload(recovered, original_message):
                 full=recovered
                 if used_model != model:
                     model=used_model; route="backup"
                     yield json.dumps({"meta":{"route":"backup","model":model,"profile":profile,"reason":"empty_stream_recovery"}}) + "\n"
                 yield json.dumps({"token":full}) + "\n"
-            elif recovered and _guard_live:
+            elif recovered:
                 full=""
         except Exception as exc:
             if request_id:
