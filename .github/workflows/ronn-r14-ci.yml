@@ -2047,10 +2047,20 @@ jobs:
           assert browser.browser_profile.enable_default_extensions is False
           assert "example.com" in browser.browser_profile.allowed_domains
 
+          # The combined dependency environment must still import the actual RONN
+          # application and pass the R23 benchmark. This catches transitive package
+          # downgrades that a Browser Use-only constructor smoke would miss.
+          import app
+          assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
+          r23=app.r23_eval_run()
+          assert r23.get("all_11_ready") is True
+          assert r23.get("score") == 100.0
+
           # Importing the adapter must never pull Browser Use into the main brain.
           import r23_brain
           assert "browser_use" not in open("r23_brain.py",encoding="utf-8").read().lower()
-          print("Browser Use dependency/API compatibility: ok")
+          print("openai-agents version:",importlib.metadata.version("openai-agents"))
+          print("Browser Use dependency/API/full-app compatibility: ok")
           PY
 
   external_eval:
