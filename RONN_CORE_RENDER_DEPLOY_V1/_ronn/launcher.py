@@ -145,7 +145,7 @@ def clean_env_file():
         # Core auth/security and desktop behavior. Stable signing/vault keys must
         # never be stripped or older encrypted Vault data can become unreadable.
         "RONN_CORE_TOKEN", "RONN_SESSION_SIGNING_KEY", "RONN_VAULT_MASTER_KEY",
-        "RONN_PUBLIC_MODE", "RONN_CORS_ORIGINS",
+        "RONN_PUBLIC_MODE", "RONN_CORS_ORIGINS", "RONN_BIND_HOST",
         "RONN_RATE_LIMIT_PER_MINUTE", "RONN_RATE_LIMIT_MAX_KEYS",
         "RONN_OWNER_UNLOCK_RATE_LIMIT_PER_MINUTE", "RONN_MAX_BODY_BYTES",
 
