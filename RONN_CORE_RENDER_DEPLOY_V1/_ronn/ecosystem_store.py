@@ -188,9 +188,13 @@ def _prune_expired_sessions(c, now=None):
 
 
 def _prune_owner_sessions(c, owner):
+    # Keep revocation records until their normal expiry. Signed sessions remain
+    # cryptographically valid across redeploys, so deleting an unexpired revoked
+    # row would remove the server-side revocation proof and could re-enable it.
+    # Only excess active sessions are eligible for retention pruning.
     c.execute(
         """DELETE FROM owner_sessions
-           WHERE owner=? AND token_hash NOT IN (
+           WHERE owner=? AND revoked=0 AND token_hash NOT IN (
              SELECT token_hash FROM owner_sessions
              WHERE owner=? AND revoked=0
              ORDER BY created DESC,rowid DESC LIMIT ?
