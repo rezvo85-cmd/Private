@@ -70,8 +70,8 @@ def _needs_live(message,profile):
         r"\b(?:new release|new drop|just dropped|dropping|restock|restocked|restocking|in stock|sold out|available now)\b",
         r"\b(?:weather|forecast|news|score|standings|schedule|price today|stock price|who won|release date|current version|open now)\b",
     ))
-    natural=_natural_lookup_intent(message)
-    new_lookup=bool(re.search(r"\bnew\b",low) and natural and profile not in {"creative","writing","coding"})
+    natural=_natural_lookup_intent(message) and profile not in {"creative","writing"}
+    new_lookup=bool(re.search(r"\bnew\b",low) and natural and profile!="coding")
     return bool(profile=="research" or _local_intent(message) or freshness or natural or new_lookup)
 
 def deterministic_plan(message,history=None,file_names=None,has_images=False,has_project=False,agent_mode=True,explicit_mode="auto"):
