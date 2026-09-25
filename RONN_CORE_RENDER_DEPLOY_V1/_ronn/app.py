@@ -195,6 +195,9 @@ def verify_package_integrity():
         "_ronn/r23_context.py",
         "_ronn/r23_research.py",
         "_ronn/r23_agent_runtime.py",
+        "_ronn/r23_task_graph.py",
+        "_ronn/r23_workflow_runtime.py",
+        "_ronn/r23_tool_arbiter.py",
         "_ronn/r23_eval_lab.py",
 
         # Legitimate post-R21 files still tracked by the original manifest.
@@ -533,6 +536,17 @@ def _legacy_owner_authorized(request: Request) -> bool:
 
 @app.middleware("http")
 async def public_guard(request: Request, call_next):
+    if request.url.path.startswith("/bridge/roblox/"):
+        # Bridge endpoints use their own bearer-token auth, but still get a
+        # strict body-size boundary before FastAPI parses attacker-controlled JSON.
+        cl=request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > min(MAX_BODY_BYTES,3*1024*1024):
+                    return JSONResponse({"detail":"Roblox bridge request too large."},status_code=413)
+            except ValueError:
+                pass
+
     if request.url.path.startswith("/api/"):
         private_api=(
             _legacy_private_route(request.url.path)
