@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-VERSION="R23-TASK-GRAPH-1"
+VERSION="R23-TASK-GRAPH-2"
 MAX_NODES=14
 
 
@@ -32,7 +32,7 @@ def should_activate(decision: dict, *, file_names=None, has_project=False) -> bo
     req=decision.get("requirement_contract") or {}
     if difficulty>=4:
         return True
-    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("model_competition") or caps.get("browser_interactive"):
+    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("model_competition") or caps.get("browser_interactive") or caps.get("roblox_studio"):
         return True
     if caps.get("autonomous_research") and difficulty>=3:
         return True
@@ -150,6 +150,25 @@ def build_task_graph(message: str, decision: dict, *, file_names=None, has_proje
         ))
         evidence_nodes.append("observe_computer")
 
+    if caps.get("roblox_studio"):
+        proof=(
+            "selected Studio was modified and Play-test evidence verified the request"
+            if caps.get("roblox_studio_verify")
+            else (
+                "selected Studio mutation completed with real MCP evidence"
+                if caps.get("roblox_studio_mutate")
+                else "selected Studio was inspected through the official MCP"
+            )
+        )
+        nodes.append(_node(
+            "operate_roblox_studio",
+            "Inspect, change, and verify the selected Roblox Studio project",
+            "roblox",
+            [anchor],
+            proof=proof,
+        ))
+        evidence_nodes.append("operate_roblox_studio")
+
     reason_deps=_unique(([anchor] if anchor else [])+evidence_nodes)
     nodes.append(_node(
         "solve","Produce the solution from the gathered context/evidence","reason",
@@ -238,7 +257,7 @@ def _refresh_states(graph):
         x["id"] for x in graph.get("nodes") or []
         if x.get("state")=="ready" and x.get("kind") not in {"understand","requirements","inspect"}
     ][:4]
-    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","browser","computer","verify","synthesize"}]
+    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","browser","computer","roblox","verify","synthesize"}]
     graph["completion_proof"]={
         "required":[{"id":x.get("id"),"proof":x.get("proof"),"state":x.get("state")} for x in required],
         "proved":all(x.get("state")=="complete" for x in required if x.get("kind")!="synthesize") if required else True,
@@ -320,6 +339,27 @@ def reconcile_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[st
         elif "computer_runtime" in (tool_run.get("planned") or []) or "computer_observation" in gaps:
             _mark(graph,"observe_computer","failed","connected computer observation was not verified",True)
 
+    if "operate_roblox_studio" in _index(graph):
+        studio_contract=contract.get("roblox_studio") or {}
+        observed=bool(studio_contract.get("observed"))
+        changed=bool(studio_contract.get("modified"))
+        verified=bool(studio_contract.get("playtest_verified"))
+        caps=(decision.get("capabilities") or {})
+        success=observed
+        if caps.get("roblox_studio_mutate"):
+            success=success and changed
+        if caps.get("roblox_studio_verify"):
+            success=success and verified
+        if success:
+            detail=(
+                "official Studio MCP Play-test evidence verified the requested change"
+                if verified else
+                ("official Studio MCP mutation completed" if changed else "official Studio MCP inspection completed")
+            )
+            _mark(graph,"operate_roblox_studio","complete",detail,True)
+        elif "roblox_studio_mcp" in (tool_run.get("planned") or []) or any(x.startswith("roblox_studio_") for x in gaps):
+            _mark(graph,"operate_roblox_studio","failed","Studio MCP evidence did not satisfy the requested change/verification boundary",True)
+
     # If this is the bounded recovery pass, close the recovery node according
     # to whether its original failed branch was actually repaired.
     if graph.get("recovery_attempted") and graph.get("recovery_kind"):
@@ -380,6 +420,16 @@ def replan_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[str,A
     title=""
     proof=""
     deps=[]
+
+    # Roblox Studio edits are stateful and the dedicated Studio agent already owns
+    # a bounded inspect/edit/playtest/repair loop. Never replay the whole branch
+    # through generic task-graph recovery or it could duplicate edits.
+    if any(x.startswith("roblox_studio_") for x in gaps) or (rows.get("operate_roblox_studio") or {}).get("state")=="failed":
+        graph["dead_end"]=True
+        graph["dead_end_reason"]="Roblox Studio verification remained incomplete after the dedicated bounded repair loop; do not blindly replay mutating Studio actions"
+        graph["replanned"]=True
+        graph["replan_reason"]="unrecoverable_studio_action_after_bounded_repairs"
+        return _refresh_states(graph)
 
     # Interactive browser actions are stateful/mutating. If their evidence
     # boundary fails, stop before considering generic URL-read/research recovery;
