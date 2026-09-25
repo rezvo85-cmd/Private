@@ -2287,12 +2287,17 @@ jobs:
 
           const index=fs.readFileSync("static/index.html","utf8");
           const sw=fs.readFileSync("static/service-worker.js","utf8");
-          const version="RONN-R23-PLAN-GUARD2";
+          const version="RONN-R23-ROBLOX-MCP1";
           if(!index.includes("/static/app.js?v="+version))throw new Error("index app.js cache-bust version mismatch");
           if(!index.includes("/static/style.css?v="+version))throw new Error("index style cache-bust version mismatch");
           if(!sw.includes("/static/app.js?v="+version))throw new Error("service worker asset version mismatch");
-          if(!sw.includes("ronn-assets-r23-plan-guard2"))throw new Error("service worker cache name mismatch");
+          if(!sw.includes("ronn-assets-r23-roblox-mcp1"))throw new Error("service worker cache name mismatch");
           if(!src.includes("/service-worker.js?v="+version))throw new Error("service worker registration version mismatch");
+          if(!index.includes('id="robloxStudioCard"'))throw new Error("Roblox Studio settings panel missing");
+          if(!src.includes("/api/roblox/pair/start"))throw new Error("Roblox pairing UI not wired");
+          if(!src.includes("/api/roblox/bridge/windows.zip"))throw new Error("Roblox bridge download UI not wired");
+          if(!src.includes("/api/roblox/select"))throw new Error("Roblox Studio target selector not wired");
+          console.log("Roblox Studio setup UI wiring: ok");
           console.log("web asset version/cache bust consistency: ok");
           JS
 
