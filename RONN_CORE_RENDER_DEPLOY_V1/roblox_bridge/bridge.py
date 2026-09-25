@@ -237,6 +237,18 @@ def _walk_for_studios(value: Any) -> list[dict[str, Any]]:
             return
         if not isinstance(node, dict):
             return
+
+        # Some Studio MCP versions return a raw list of Studio rows instead of
+        # wrapping them in a "studios" property.
+        direct_id = (
+            node.get("studio_id")
+            or node.get("studioId")
+            or node.get("instance_id")
+            or node.get("instanceId")
+        )
+        if direct_id:
+            out.append(node)
+
         for key in ("studios", "studio_instances", "studioInstances"):
             rows = node.get(key)
             if isinstance(rows, list):
