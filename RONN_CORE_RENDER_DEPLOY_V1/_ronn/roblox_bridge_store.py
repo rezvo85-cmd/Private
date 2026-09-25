@@ -496,23 +496,37 @@ class RobloxBridgeStore:
         return int(cur.rowcount or 0)
 
 
-_DEFAULT_STORE: RobloxBridgeStore | None = None
+_DEFAULT_STORE: Any | None = None
 _DEFAULT_LOCK = threading.Lock()
 
 
-def default_store() -> RobloxBridgeStore:
+def _postgres_url() -> str:
+    url = str(os.getenv("DATABASE_URL") or "").strip()
+    return url if url.startswith(("postgresql://", "postgres://")) else ""
+
+
+def default_store():
+    """Use RONN_MEMORY Postgres in production; SQLite is a safe local/test fallback."""
     global _DEFAULT_STORE
     if _DEFAULT_STORE is None:
         with _DEFAULT_LOCK:
             if _DEFAULT_STORE is None:
-                _DEFAULT_STORE = RobloxBridgeStore()
+                url = _postgres_url()
+                if url:
+                    from roblox_bridge_store_pg import PostgresRobloxBridgeStore
+                    _DEFAULT_STORE = PostgresRobloxBridgeStore(url)
+                else:
+                    _DEFAULT_STORE = RobloxBridgeStore()
     return _DEFAULT_STORE
 
 
 def status() -> dict[str, Any]:
+    backend = "postgres" if _postgres_url() else "sqlite"
     return {
         "version": VERSION,
+        "backend": backend,
         "persistent_queue": True,
+        "cross_deploy_durable": backend == "postgres",
         "pair_ttl_seconds": PAIR_TTL_SECONDS,
         "bridge_online_seconds": BRIDGE_ONLINE_SECONDS,
         "max_job_attempts": MAX_JOB_ATTEMPTS,
