@@ -7,11 +7,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="RONN">
-  <link rel="manifest" href="/manifest.webmanifest?v=RONN-R23-PLAN-GUARD2">
+  <link rel="manifest" href="/manifest.webmanifest?v=RONN-R23-ROBLOX-MCP1">
   <link rel="apple-touch-icon" sizes="192x192" href="/static/ronn_home_icon_v2.png">
   <title>RONN</title>
-  <link rel="stylesheet" href="/static/style.css?v=RONN-R23-PLAN-GUARD2">
-  <link rel="stylesheet" href="/static/mobile_fit.css?v=RONN-R23-PLAN-GUARD2">
+  <link rel="stylesheet" href="/static/style.css?v=RONN-R23-ROBLOX-MCP1">
+  <link rel="stylesheet" href="/static/mobile_fit.css?v=RONN-R23-ROBLOX-MCP1">
 </head>
 <body class="ronn19">
 <div class="webAuthGate hidden" id="webAuthGate" aria-live="polite">
@@ -251,6 +251,43 @@
         <div class="r19CapabilityMatrix" id="r19CapabilityMatrix"><div class="emptyState">Checking RONN systems…</div></div>
       </div>
 
+      <div class="r19CapabilityCard" id="robloxStudioCard">
+        <div class="r19CapabilityHead">
+          <div>
+            <span class="eyebrow">ROBLOX STUDIO · OFFICIAL MCP</span>
+            <h2>RONN Roblox Developer</h2>
+            <p>Connect this PC once. Then ask RONN in normal chat to inspect, build, repair, Play-test, read Output, and retest your open Roblox Studio project.</p>
+          </div>
+          <span class="opState" id="robloxStudioState">Not connected</span>
+        </div>
+        <div class="diagnosticActions">
+          <button class="primarySmall" id="robloxPairBtn">Connect Roblox Studio</button>
+          <button class="ghost" id="robloxBridgeDownloadBtn">Download Windows bridge</button>
+          <button class="ghost" id="robloxRefreshBtn">Refresh</button>
+          <button class="ghost hidden" id="robloxDisconnectBtn">Disconnect bridge</button>
+        </div>
+        <div class="recoveryBox hidden" id="robloxPairBox">
+          <b>One-time pairing code</b>
+          <pre id="robloxPairCode">—</pre>
+          <p id="robloxPairExpiry">This code expires in 10 minutes and works once.</p>
+          <div class="diagnosticActions">
+            <button class="ghost" id="robloxCopyPairBtn">Copy code</button>
+          </div>
+        </div>
+        <div class="ownerList" id="robloxStudioList">
+          <div class="emptyState">Download the bridge, enable Studio MCP, then connect this PC.</div>
+        </div>
+        <details class="ownerAdvanced">
+          <summary>First-time setup</summary>
+          <div class="ownerList">
+            <div class="ownerRow"><div><b>1 · Enable Roblox Studio MCP</b><small>Studio → Assistant → … → Manage MCP Servers → Enable Studio as MCP server.</small></div></div>
+            <div class="ownerRow"><div><b>2 · Install the RONN bridge</b><small>Download the ZIP above, extract it, then run install_windows.bat once.</small></div></div>
+            <div class="ownerRow"><div><b>3 · Pair this PC</b><small>Press Connect Roblox Studio, then run PAIR_AND_RUN_WINDOWS.bat and enter the RONN URL plus the one-time code.</small></div></div>
+            <div class="ownerRow"><div><b>4 · Just ask RONN</b><small>Example: “Inspect my Roblox Studio game, fix the Stand bug, Play-test it, check Output, and retest until the result is verified.”</small></div></div>
+          </div>
+        </details>
+      </div>
+
       <div class="ownerAccessCard hidden" id="ownerAccessCard">
         <div class="ownerAccessHead"><div><span class="eyebrow">OWNER</span><h2>Owner tools</h2><p>This device stays connected automatically, including after RONN updates.</p></div><span class="opState active" id="opStatus">Active</span></div>
         <div class="ownerPanel hidden" id="ownerPanel">
@@ -281,7 +318,7 @@
   <div class="modalCard"><span class="eyebrow">CONFIRM ACTION</span><h2>Clear this conversation?</h2><p>This removes the messages from this local chat. It does not delete other conversations or project memory.</p><div><button class="ghost" id="cancelClearBtn">Cancel</button><button class="dangerButton" id="confirmClearBtn">Clear conversation</button></div></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="/static/app.js?v=RONN-R23-PLAN-GUARD2"></script>
+<script src="/static/app.js?v=RONN-R23-ROBLOX-MCP1"></script>
 <script>
 /* RONN_CRITICAL_UI_RESCUE: independent bindings for essential controls.
    This intentionally does not depend on the optional diagnostics/project UI. */
