@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import io
+import zipfile
 import sqlite3
 import time
 import threading
@@ -3319,6 +3321,43 @@ def studio_approve_api(body: StudioApproveBody, request: Request):
 @app.post("/api/roblox/pair/start")
 def roblox_pair_start(request: Request):
     return roblox_bridge_store().start_pairing(owner_id(request))
+
+
+@app.get("/api/roblox/bridge/windows.zip")
+def roblox_bridge_windows_zip(request: Request):
+    # Owner-authenticated convenience package. The ZIP contains no provider keys,
+    # owner tokens, pairing codes, project data, or generated configuration.
+    bridge_dir=BASE.parent / "roblox_bridge"
+    allowed=(
+        "bridge.py",
+        "requirements.txt",
+        "install_windows.bat",
+        "PAIR_AND_RUN_WINDOWS.bat",
+        "RUN_WINDOWS.bat",
+        "README.md",
+    )
+    missing=[name for name in allowed if not (bridge_dir/name).is_file()]
+    if missing:
+        raise HTTPException(503,"RONN Roblox Bridge package is incomplete: "+", ".join(missing))
+    buf=io.BytesIO()
+    with zipfile.ZipFile(buf,"w",compression=zipfile.ZIP_DEFLATED,compresslevel=9) as zf:
+        for name in allowed:
+            zf.writestr(
+                "RONN_Roblox_Bridge/"+name,
+                (bridge_dir/name).read_bytes(),
+            )
+    data=buf.getvalue()
+    if not data or len(data)>2*1024*1024:
+        raise HTTPException(500,"RONN Roblox Bridge package could not be built safely.")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition":'attachment; filename="RONN_Roblox_Bridge_Windows.zip"',
+            "Cache-Control":"no-store",
+            "X-RONN-Bridge-Version":"1.0.0",
+        },
+    )
 
 
 @app.get("/api/roblox/status")
