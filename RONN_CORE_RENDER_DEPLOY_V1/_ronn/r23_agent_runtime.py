@@ -21,6 +21,7 @@ from r18_research import extract_urls, collect_pages
 from r20_tool_hub import weather as weather_tool
 from r23_research import research as autonomous_research
 from r23_browser_use_adapter import execute as browser_use_execute, status as browser_use_status
+from roblox_studio_agent import run as roblox_studio_run, status as roblox_studio_agent_status
 from experience_engine import learn_lesson
 
 
@@ -89,6 +90,17 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
             or autofix.get("final_verified")
         )
     )
+    studio_run=out.get("roblox_studio") or {}
+    studio_calls=list(studio_run.get("calls") or [])
+    studio_observed=bool(
+        studio_run.get("available")
+        and any(
+            isinstance(x,dict)
+            and x.get("ok")
+            and x.get("phase") in {"state","inspect","verify","cleanup"}
+            for x in studio_calls
+        )
+    )
 
     return {
         "version":"R23-EVIDENCE-CONTRACT-1",
@@ -111,6 +123,15 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
         "computer_observation_verified":bool(
             "computer_runtime_inspect" in executed and (out.get("computer") or {}).get("verified")
         ),
+        "roblox_studio":{
+            "available":bool(studio_run.get("available")),
+            "observed":studio_observed,
+            "modified":bool(studio_run.get("modified")),
+            "verification_attempted":bool(studio_run.get("verification_attempted")),
+            "playtest_verified":bool(studio_run.get("playtest_verified")),
+            "target":studio_run.get("target") or {},
+            "reason":str(studio_run.get("reason") or "")[:180],
+        },
         "errors":[str(x)[:180] for x in (out.get("errors") or [])[:8]],
         "rules":[
             "SEARCH SNIPPET ONLY is discovery evidence, not proof of page contents.",
@@ -119,6 +140,7 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
             "Computed static analysis is derived evidence, not proof that changed code executed successfully.",
             "Use the word verified for execution success only when runtime_execution.verified_success is true or another explicit verified tool result proves the claim.",
             "If evidence is incomplete or conflicting, state the limitation instead of filling the gap from confidence.",
+            "Roblox Studio changes are runtime-verified only when playtest_verified is true; planning, edits, or a clean static inspection alone are not runtime proof.",
         ],
     }
 
@@ -198,6 +220,26 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
             "connected computer observation verified" if contract.get("computer_observation_verified") else "computer observation was not verified",
         )
 
+    if caps.get("roblox_studio"):
+        studio_contract=contract.get("roblox_studio") or {}
+        require(
+            "roblox_studio_observation",
+            bool(studio_contract.get("observed")),
+            "selected Studio was inspected through the official MCP" if studio_contract.get("observed") else "no verified Roblox Studio observation was returned",
+        )
+        if caps.get("roblox_studio_mutate"):
+            require(
+                "roblox_studio_change",
+                bool(studio_contract.get("modified")),
+                "Studio mutation returned successfully" if studio_contract.get("modified") else "requested Studio mutation was not completed",
+            )
+        if caps.get("roblox_studio_verify"):
+            require(
+                "roblox_studio_playtest",
+                bool(studio_contract.get("playtest_verified")),
+                "Studio Play test and console evidence verified the requested behavior" if studio_contract.get("playtest_verified") else "runtime Play-test evidence did not prove the requested change",
+            )
+
     gaps=[x["name"] for x in requirements if not x["met"]]
     return {
         "version":"R23-EVIDENCE-SUFFICIENCY-1",
@@ -213,7 +255,7 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
 
 
 def execute(owner: str, request_id: str, message: str, files, decision: dict,
-            *, depth="smart", repair_fn=None) -> dict[str,Any]:
+            *, depth="smart", repair_fn=None, studio_fn=None, studio_checkpoint_fn=None) -> dict[str,Any]:
     caps=(decision or {}).get("capabilities") or {}
     retrieval=(caps.get("retrieval") or {})
     out={
@@ -230,11 +272,43 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "code_loop":{},
         "learning":{},
         "computer":{},
+        "roblox_studio":{},
         "recovery":{},
         "evidence_contract":{},
         "evidence_sufficiency":{},
     }
     evidence=[]
+
+    # Roblox Studio is a bounded local executor under R23. The local bridge uses
+    # the official Studio MCP; the already-selected main brain supplies only
+    # schema-constrained plans and still owns final synthesis.
+    if caps.get("roblox_studio"):
+        out["planned"].append("roblox_studio_mcp")
+        try:
+            studio_run=roblox_studio_run(
+                owner,
+                message,
+                model_fn=studio_fn,
+                depth=depth,
+                checkpoint_fn=studio_checkpoint_fn,
+            )
+            out["roblox_studio"]=studio_run
+            if studio_run.get("available"):
+                out["executed"].append("roblox_studio_mcp")
+            if studio_run.get("modified"):
+                out["executed"].append("roblox_studio_edit")
+            if studio_run.get("playtest_verified"):
+                out["executed"].append("roblox_studio_playtest_verified")
+            if not studio_run.get("ok"):
+                out["errors"].append(
+                    "roblox_studio:"+str(studio_run.get("reason") or "not_verified")
+                )
+            evidence.append(
+                "RONN ROBLOX STUDIO MCP EVIDENCE (official Studio MCP via paired local bridge; R23 remains the only final-answer owner):\n"
+                + json.dumps(studio_run,ensure_ascii=False)[:70000]
+            )
+        except Exception as exc:
+            out["errors"].append("roblox_studio:"+exc.__class__.__name__)
 
     # 2) Full agent runtime: inspect explicit URLs with the safe browser.
     urls=extract_urls(message)
@@ -478,7 +552,7 @@ def status():
     cs=computer_status()
     bu=browser_use_status()
     return {
-        "version":"R23-AGENT-3",
+        "version":"R23-AGENT-4",
         "browser":True,
         "browser_use":bu,
         "research":True,
@@ -489,6 +563,7 @@ def status():
         "verified_failure_learning":True,
         "computer_adapter":True,
         "computer_verified":bool(cs.get("verified")),
+        "roblox_studio_mcp":roblox_studio_agent_status(),
         "evidence_contract":True,
         "evidence_sufficiency_gate":True,
         "bounded_research_recovery":True,
