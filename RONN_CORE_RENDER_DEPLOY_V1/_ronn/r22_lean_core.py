@@ -17,6 +17,11 @@ def _profile(message: str, file_names=None) -> str:
     hay = low + " " + names
 
     if any(x in hay for x in (
+        "roblox","roblox studio","luau","serverscriptservice","replicatedstorage",
+        "starterplayerscripts","startergui","remoteevent","remotefunction","datamodel"
+    )):
+        return "roblox"
+    if any(x in hay for x in (
         "code","script","debug","python","javascript","typescript","html","css",
         ".py",".js",".ts",".json","exception","stack trace","traceback",
         "bug in","fix my code","compile error","runtime error","syntax error"
@@ -130,7 +135,7 @@ def _prompt_policy(profile: str, difficulty: int, *, history=None, file_names=No
                    verify=False, needs_tools=False, followup=False):
     file_names = file_names or []
     history = history or []
-    specialized = profile in {"coding","mathscience","writing","creative","analysis","research"}
+    specialized = profile in {"coding","roblox","mathscience","writing","creative","analysis","research"}
 
     return {
         "include_tool_directive": bool(needs_tools),
@@ -144,7 +149,7 @@ def _prompt_policy(profile: str, difficulty: int, *, history=None, file_names=No
         "include_knowledge_base": bool(has_project or file_names),
         "include_contradiction_scan": bool(difficulty >= 3 or has_project or file_names),
         "include_verification_directive": bool(verify),
-        "include_skill_context": bool(specialized and (difficulty >= 2 or profile in {"coding","writing"})),
+        "include_skill_context": bool(specialized and (difficulty >= 2 or profile in {"coding","roblox","writing"})),
         "include_tool_catalog": False,
         "context_budget_chars": 7000 if difficulty <= 1 and not has_project and not file_names else (
             13000 if difficulty <= 3 else 22000
@@ -170,7 +175,7 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         specialist = "vision"
     elif live:
         specialist = "research"
-    elif profile == "coding":
+    elif profile in {"coding","roblox"}:
         specialist = "coding"
     else:
         specialist = "general"
