@@ -135,6 +135,10 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
     apply_requirement_contract(out,message)
 
     retrieval=caps.get("retrieval") or {}
+    if caps.get("roblox_studio"):
+        out["needs_tools"]=True
+        out["tool_mode"]="roblox"
+        out["verify"]=bool(out.get("verify") or caps.get("roblox_studio_verify"))
     if caps.get("universal_retrieval"):
         out["needs_live"]=True
         out["needs_tools"]=True
@@ -163,7 +167,7 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         policy["include_failure_lessons"]=True
     if caps.get("agent_runtime"):
         policy["include_agent_directive"]=True
-    if caps.get("universal_retrieval"):
+    if caps.get("universal_retrieval") or caps.get("roblox_studio"):
         policy["include_evidence_plan"]=True
     out["task_graph"]=build_task_graph(
         message,
@@ -215,7 +219,7 @@ def competition_pair(primary_model, profile, providers, models):
         # they are allowed to become a primary brain. Task-relevant ordering
         # keeps the comparison useful rather than random.
         challenger_order=(
-            ("or_deepseek","or_qwen") if profile=="coding"
+            ("or_deepseek","or_qwen") if profile in {"coding","roblox"}
             else (("or_qwen","or_deepseek") if profile in {"writing","analysis","knowledge","research","mathscience"} else ())
         )
         for key in challenger_order:
@@ -226,7 +230,7 @@ def competition_pair(primary_model, profile, providers, models):
             if signal.get("certified"):
                 add(challenger,"certified_shadow_challenger")
 
-        if profile=="coding":
+        if profile in {"coding","roblox"}:
             add(models.get("or_deepseek"),"coding_specialist")
         elif profile in {"creative","writing"}:
             add(models.get("or_qwen"),"general_specialist")
