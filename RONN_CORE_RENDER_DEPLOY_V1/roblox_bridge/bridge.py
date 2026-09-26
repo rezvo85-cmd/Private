@@ -23,7 +23,7 @@ import requests
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-VERSION = "RONN-ROBLOX-BRIDGE-1.0.0"
+VERSION = "RONN-ROBLOX-BRIDGE-1.1.0"
 HEARTBEAT_SECONDS = 6.0
 CATALOG_REFRESH_SECONDS = 12.0
 POLL_SECONDS = 0.8
@@ -387,12 +387,16 @@ async def _pull(server: str, token: str):
     return list(data.get("jobs") or [])
 
 
-async def _complete(server: str, token: str, job_id: str, *, result=None, error=""):
+async def _complete(server: str, token: str, job_id: str, claim_token: str, *, result=None, error=""):
     return await asyncio.to_thread(
         _post,
         server + f"/bridge/roblox/jobs/{job_id}/result",
         token=token,
-        payload={"result": result or {}, "error": str(error or "")[:4000]},
+        payload={
+            "claim_token": str(claim_token or ""),
+            "result": result or {},
+            "error": str(error or "")[:4000],
+        },
         timeout=HTTP_TIMEOUT,
     )
 
@@ -418,7 +422,11 @@ async def _connected_worker(server: str, token: str, config: dict[str, Any], con
 
         for job in jobs:
             job_id = str(job.get("job_id") or "")
+            claim_token = str(job.get("claim_token") or "")
             kind = str(job.get("kind") or "")
+            if not claim_token:
+                conn.last_error = "Bridge job was missing a claim generation token."
+                continue
             try:
                 if kind != "mcp_tool":
                     raise ValueError("Unsupported bridge job kind.")
@@ -428,7 +436,7 @@ async def _connected_worker(server: str, token: str, config: dict[str, Any], con
                 if not isinstance(arguments, dict):
                     arguments = {}
                 result = await conn.call(name, arguments)
-                await _complete(server, token, job_id, result=result)
+                await _complete(server, token, job_id, claim_token, result=result)
                 if name == "list_roblox_studios":
                     await _heartbeat(server, token, conn, config)
                     last_heartbeat = time.monotonic()
@@ -436,7 +444,7 @@ async def _connected_worker(server: str, token: str, config: dict[str, Any], con
                 message = f"{exc.__class__.__name__}: {exc}"
                 conn.last_error = message[:300]
                 try:
-                    await _complete(server, token, job_id, error=message)
+                    await _complete(server, token, job_id, claim_token, error=message)
                 except Exception:
                     pass
 
