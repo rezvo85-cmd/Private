@@ -144,6 +144,7 @@ from roblox_studio_gateway import (
     select_target as roblox_gateway_select_target,
     manual_tool_call as roblox_gateway_tool_call,
     capability_status as roblox_gateway_capability_status,
+    bridge_compatible as roblox_bridge_compatible,
 )
 from roblox_studio_agent import run as roblox_studio_agent_run, status as roblox_studio_agent_status
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
@@ -883,6 +884,7 @@ class RobloxBridgePullBody(BaseModel):
     limit: int = 1
 
 class RobloxBridgeResultBody(BaseModel):
+    claim_token: str = ""
     result: dict = Field(default_factory=dict)
     error: str = ""
 
@@ -3355,7 +3357,7 @@ def roblox_bridge_windows_zip(request: Request):
         headers={
             "Content-Disposition":'attachment; filename="RONN_Roblox_Bridge_Windows.zip"',
             "Cache-Control":"no-store",
-            "X-RONN-Bridge-Version":"1.0.0",
+            "X-RONN-Bridge-Version":"1.1.0",
         },
     )
 
@@ -3446,9 +3448,18 @@ def roblox_bridge_heartbeat_api(body: RobloxBridgeHeartbeatBody, request: Reques
 @app.post("/bridge/roblox/jobs/pull")
 def roblox_bridge_pull_api(body: RobloxBridgePullBody, request: Request):
     token,_info=_bridge_auth(request)
+    bridge_version=(_info.get("metadata") or {}).get("bridge_version")
+    if not roblox_bridge_compatible(bridge_version):
+        # Never hand a mutating job to an older bridge that cannot echo claim
+        # generations. It may stay paired only long enough to download/update.
+        return {
+            "jobs":[],
+            "upgrade_required":True,
+            "minimum_bridge_version":"1.1.0",
+        }
     try:
         jobs=roblox_bridge_store().pull(token,limit=max(1,min(int(body.limit or 1),4)))
-        return {"jobs":jobs}
+        return {"jobs":jobs,"upgrade_required":False}
     except PermissionError as exc:
         raise HTTPException(401,str(exc))
 
@@ -3460,11 +3471,12 @@ def roblox_bridge_result_api(job_id: str, body: RobloxBridgeResultBody, request:
         return roblox_bridge_store().complete(
             token,
             job_id,
+            claim_token=body.claim_token,
             result=body.result,
             error=body.error,
         )
     except PermissionError as exc:
-        raise HTTPException(401,str(exc))
+        raise HTTPException(409,str(exc))
     except ValueError as exc:
         raise HTTPException(400,str(exc))
 

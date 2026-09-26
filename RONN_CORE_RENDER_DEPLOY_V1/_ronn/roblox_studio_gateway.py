@@ -12,7 +12,8 @@ from typing import Any
 
 from roblox_bridge_store import default_store, status as store_status
 
-VERSION = "RONN-ROBLOX-STUDIO-GATEWAY-1"
+VERSION = "RONN-ROBLOX-STUDIO-GATEWAY-3"
+MIN_BRIDGE_VERSION = (1, 1, 0)
 
 # Official Roblox Studio MCP tools documented by Roblox. The bridge also reports
 # the live tool catalog/schema, but this allowlist prevents a compromised planner
@@ -83,6 +84,14 @@ def _norm(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def bridge_compatible(version: Any) -> bool:
+    text=_norm(version)
+    match=re.search(r"(\d+)\.(\d+)\.(\d+)",text)
+    if not match:
+        return False
+    return tuple(int(x) for x in match.groups()) >= MIN_BRIDGE_VERSION
+
+
 def _studio_id(row: dict[str, Any]) -> str:
     return _norm(
         row.get("studio_id")
@@ -114,7 +123,7 @@ def _online_bridge(owner: str, bridge_id: str | None = None) -> dict[str, Any] |
     status = default_store().status(owner)
     bridges = [
         x for x in status.get("bridges") or []
-        if x.get("online") and x.get("mcp_connected")
+        if x.get("online") and x.get("mcp_connected") and bridge_compatible(x.get("bridge_version"))
     ]
     if bridge_id:
         return next((x for x in bridges if x.get("bridge_id") == bridge_id), None)
@@ -128,22 +137,33 @@ def _online_bridge(owner: str, bridge_id: str | None = None) -> dict[str, Any] |
 
 def status(owner: str) -> dict[str, Any]:
     data = default_store().status(owner)
+    bridges=[]
+    for raw in data.get("bridges") or []:
+        row=dict(raw)
+        row["compatible"]=bridge_compatible(row.get("bridge_version"))
+        row["upgrade_required"]=bool(
+            row.get("online")
+            and row.get("mcp_connected")
+            and not row["compatible"]
+        )
+        bridges.append(row)
     online = [
-        x for x in data.get("bridges") or []
-        if x.get("online") and x.get("mcp_connected")
+        x for x in bridges
+        if x.get("online") and x.get("mcp_connected") and x.get("compatible")
     ]
     return {
         "version": VERSION,
         "online": bool(online),
-        "bridge_count": len(data.get("bridges") or []),
+        "bridge_count": len(bridges),
         "online_bridge_count": len(online),
         "selected_bridge_id": data.get("selected_bridge_id"),
         "selected_studio_id": data.get("selected_studio_id"),
-        "bridges": data.get("bridges") or [],
+        "bridges": bridges,
         "transport": "outbound_https_queue_to_local_stdio_mcp",
+        "minimum_bridge_version": ".".join(str(x) for x in MIN_BRIDGE_VERSION),
+        "upgrade_required": any(x.get("upgrade_required") for x in bridges),
         "store": store_status(),
     }
-
 
 def tool_catalog(owner: str, bridge_id: str | None = None) -> list[dict[str, Any]]:
     bridge = _online_bridge(owner, bridge_id)
@@ -315,12 +335,26 @@ def call_tool(
         "mcp_tool",
         {"name": name, "arguments": args},
         bridge_id=str(bridge.get("bridge_id")),
+        retry_safe=bool(name in READ_ONLY_TOOLS),
     )
     row = default_store().wait(owner, queued["job_id"], timeout=timeout)
     if row.get("status") != "completed":
+        retry_safe=bool(name in READ_ONLY_TOOLS)
+        ambiguous_mutation=bool(
+            not retry_safe
+            and (row.get("status") == "uncertain" or row.get("timed_out"))
+        )
+        if ambiguous_mutation:
+            reason="mutation_delivery_uncertain"
+        elif row.get("timed_out"):
+            reason="bridge_job_timeout"
+        else:
+            reason="bridge_job_failed"
         return {
             "ok": False,
-            "reason": "bridge_job_failed" if not row.get("timed_out") else "bridge_job_timeout",
+            "reason": reason,
+            "uncertain": ambiguous_mutation,
+            "retry_safe": retry_safe,
             "tool": name,
             "job_id": row.get("job_id"),
             "error": row.get("error") or "",
@@ -387,6 +421,10 @@ def capability_status(owner: str | None = None) -> dict[str, Any]:
         "tool_allowlist_count": len(OFFICIAL_TOOL_ALLOWLIST),
         "read_only_tools": sorted(READ_ONLY_TOOLS),
         "mutating_tools": sorted(MUTATING_TOOLS),
+        "mutation_jobs_auto_retry": False,
+        "read_only_jobs_auto_retry": True,
+        "stale_completion_protection": True,
+        "minimum_bridge_version": ".".join(str(x) for x in MIN_BRIDGE_VERSION),
         "owns_model_routing": False,
         "owns_final_answer": False,
     }

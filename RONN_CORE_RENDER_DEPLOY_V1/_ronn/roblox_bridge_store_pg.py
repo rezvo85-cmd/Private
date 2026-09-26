@@ -12,7 +12,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-VERSION = "RONN-ROBLOX-BRIDGE-PG-1"
+VERSION = "RONN-ROBLOX-BRIDGE-PG-2"
 PAIR_TTL_SECONDS = 600
 BRIDGE_ONLINE_SECONDS = 25
 DEFAULT_LEASE_SECONDS = 75
@@ -130,7 +130,9 @@ class PostgresRobloxBridgeStore:
                         lease_until BIGINT,
                         completed_at BIGINT,
                         result_json TEXT,
-                        error TEXT
+                        error TEXT,
+                        retry_safe BOOLEAN NOT NULL DEFAULT TRUE,
+                        claim_token TEXT
                     );
                     CREATE INDEX IF NOT EXISTS idx_ronn_roblox_jobs_pull
                         ON ronn_roblox_jobs(owner, status, available_at, created_at);
@@ -138,6 +140,9 @@ class PostgresRobloxBridgeStore:
                         ON ronn_roblox_jobs(owner, created_at DESC);
                     """
                 )
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE ronn_roblox_jobs ADD COLUMN IF NOT EXISTS retry_safe BOOLEAN NOT NULL DEFAULT TRUE")
+                cur.execute("ALTER TABLE ronn_roblox_jobs ADD COLUMN IF NOT EXISTS claim_token TEXT")
             conn.commit()
         self._initialized = True
 
@@ -385,6 +390,7 @@ class PostgresRobloxBridgeStore:
         payload: dict[str, Any],
         *,
         bridge_id: str | None = None,
+        retry_safe: bool = True,
     ) -> dict[str, Any]:
         owner = str(owner or "").strip()
         kind = re.sub(r"[^a-z0-9_.-]", "", str(kind or "").lower())[:64]
@@ -401,9 +407,9 @@ class PostgresRobloxBridgeStore:
                 cur.execute(
                     """INSERT INTO ronn_roblox_jobs(
                         job_id,owner,bridge_id,kind,payload_json,status,attempts,
-                        created_at,available_at
-                    ) VALUES(%s,%s,%s,%s,%s,'queued',0,%s,%s)""",
-                    (job_id, owner, bridge_id, kind, raw, now, now),
+                        created_at,available_at,retry_safe,claim_token
+                    ) VALUES(%s,%s,%s,%s,%s,'queued',0,%s,%s,%s,NULL)""",
+                    (job_id, owner, bridge_id, kind, raw, now, now, bool(retry_safe)),
                 )
             conn.commit()
         return {
@@ -414,18 +420,31 @@ class PostgresRobloxBridgeStore:
 
     def _requeue_expired(self, cur, now: int):
         cur.execute(
-            """SELECT job_id,attempts FROM ronn_roblox_jobs
+            """SELECT job_id,attempts,retry_safe,claim_token FROM ronn_roblox_jobs
                WHERE status='claimed' AND lease_until IS NOT NULL AND lease_until<%s
                FOR UPDATE SKIP LOCKED""",
             (now,),
         )
         rows = cur.fetchall()
         for row in rows:
-            if int(row["attempts"]) >= MAX_JOB_ATTEMPTS:
+            if not bool(row["retry_safe"]):
+                cur.execute(
+                    """UPDATE ronn_roblox_jobs
+                       SET status='uncertain',completed_at=%s,error=%s,
+                           lease_until=NULL
+                       WHERE job_id=%s AND status='claimed' AND claim_token=%s""",
+                    (
+                        now,
+                        "Mutation delivery became uncertain after the bridge lease expired; inspect Studio state before any further edit.",
+                        row["job_id"],
+                        row["claim_token"],
+                    ),
+                )
+            elif int(row["attempts"]) >= MAX_JOB_ATTEMPTS:
                 cur.execute(
                     """UPDATE ronn_roblox_jobs
                        SET status='failed',completed_at=%s,error=%s,
-                           claimed_bridge_id=NULL,lease_until=NULL
+                           claimed_bridge_id=NULL,lease_until=NULL,claim_token=NULL
                        WHERE job_id=%s""",
                     (now, "Bridge lease expired too many times.", row["job_id"]),
                 )
@@ -433,7 +452,8 @@ class PostgresRobloxBridgeStore:
                 cur.execute(
                     """UPDATE ronn_roblox_jobs
                        SET status='queued',available_at=%s,
-                           claimed_at=NULL,claimed_bridge_id=NULL,lease_until=NULL
+                           claimed_at=NULL,claimed_bridge_id=NULL,lease_until=NULL,
+                           claim_token=NULL
                        WHERE job_id=%s""",
                     (now + 1, row["job_id"]),
                 )
@@ -474,12 +494,13 @@ class PostgresRobloxBridgeStore:
                 out = []
                 for row in rows:
                     lease_until = now + lease_seconds
+                    claim_token = secrets.token_urlsafe(24)
                     cur.execute(
                         """UPDATE ronn_roblox_jobs
                            SET status='claimed',claimed_at=%s,claimed_bridge_id=%s,
-                               lease_until=%s,attempts=attempts+1
+                               lease_until=%s,attempts=attempts+1,claim_token=%s
                            WHERE job_id=%s AND status='queued'""",
-                        (now, auth["bridge_id"], lease_until, row["job_id"]),
+                        (now, auth["bridge_id"], lease_until, claim_token, row["job_id"]),
                     )
                     out.append({
                         "job_id": row["job_id"],
@@ -488,6 +509,7 @@ class PostgresRobloxBridgeStore:
                         "attempt": int(row["attempts"]) + 1,
                         "created_at": int(row["created_at"]),
                         "lease_until": lease_until,
+                        "claim_token": claim_token,
                     })
             conn.commit()
         return out
@@ -497,6 +519,7 @@ class PostgresRobloxBridgeStore:
         token: str,
         job_id: str,
         *,
+        claim_token: str,
         result=None,
         error: str = "",
     ) -> dict[str, Any]:
@@ -512,7 +535,7 @@ class PostgresRobloxBridgeStore:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT owner,status,claimed_bridge_id
+                    """SELECT owner,status,claimed_bridge_id,claim_token,retry_safe
                        FROM ronn_roblox_jobs WHERE job_id=%s
                        FOR UPDATE""",
                     (job_id,),
@@ -529,17 +552,27 @@ class PostgresRobloxBridgeStore:
                         "status": row["status"],
                     }
 
-                if row["status"] != "claimed" or row["claimed_bridge_id"] != auth["bridge_id"]:
+                supplied_claim=str(claim_token or "").strip()
+                current_claim=str(row["claim_token"] or "")
+                if (
+                    not supplied_claim
+                    or not current_claim
+                    or not secrets.compare_digest(supplied_claim,current_claim)
+                    or row["claimed_bridge_id"] != auth["bridge_id"]
+                ):
                     conn.rollback()
-                    raise PermissionError("This bridge does not own the job lease.")
+                    raise PermissionError("This bridge completion is stale or does not own the current job claim.")
+                if row["status"] not in {"claimed","uncertain"}:
+                    conn.rollback()
+                    raise PermissionError("This job is no longer accepting results for that claim.")
 
                 status = "failed" if error else "completed"
                 cur.execute(
                     """UPDATE ronn_roblox_jobs
                        SET status=%s,completed_at=%s,result_json=%s,error=%s,
                            lease_until=NULL
-                       WHERE job_id=%s""",
-                    (status, now, result_json, error, job_id),
+                       WHERE job_id=%s AND claim_token=%s""",
+                    (status, now, result_json, error, job_id, current_claim),
                 )
             conn.commit()
 
@@ -553,7 +586,8 @@ class PostgresRobloxBridgeStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """SELECT job_id,bridge_id,kind,status,attempts,created_at,claimed_at,
-                              claimed_bridge_id,lease_until,completed_at,result_json,error
+                              claimed_bridge_id,lease_until,completed_at,result_json,error,
+                              retry_safe,claim_token
                        FROM ronn_roblox_jobs
                        WHERE owner=%s AND job_id=%s""",
                     (str(owner or ""), str(job_id or "")),
@@ -576,6 +610,8 @@ class PostgresRobloxBridgeStore:
             "completed_at": int(row["completed_at"]) if row["completed_at"] else None,
             "result": _json_load(row["result_json"], {}),
             "error": row["error"] or "",
+            "retry_safe": bool(row["retry_safe"]),
+            "claim_active": bool(row["claim_token"]),
         }
 
     def wait(
@@ -591,7 +627,7 @@ class PostgresRobloxBridgeStore:
             row = self.get_job(owner, job_id)
             if not row:
                 raise ValueError("Job was not found.")
-            if row["status"] in {"completed", "failed"}:
+            if row["status"] in {"completed", "failed", "uncertain"}:
                 return row
             time.sleep(max(0.05, min(float(poll), 1.0)))
 

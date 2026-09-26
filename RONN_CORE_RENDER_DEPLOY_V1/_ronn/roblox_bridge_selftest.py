@@ -47,7 +47,7 @@ def test_store_and_gateway():
         ]
         studios=[{"studio_id":"studio-ci-1","name":"CI Place","place_id":"123"}]
         store.heartbeat(token,{
-            "bridge_version":"ci",
+            "bridge_version":"RONN-ROBLOX-BRIDGE-1.1.0",
             "mcp_connected":True,
             "tools":tools,
             "studios":studios,
@@ -55,6 +55,8 @@ def test_store_and_gateway():
         status=store.status(owner)
         assert status["online"] is True
         assert status["bridges"][0]["studios"][0]["studio_id"] == "studio-ci-1"
+        assert gateway.bridge_compatible("RONN-ROBLOX-BRIDGE-1.1.0") is True
+        assert gateway.bridge_compatible("RONN-ROBLOX-BRIDGE-1.0.0") is False
 
         original_default=gateway.default_store
         gateway.default_store=lambda: store
@@ -78,10 +80,15 @@ def test_store_and_gateway():
                         payload=job["payload"]
                         assert payload["name"] == "get_studio_state"
                         assert payload["arguments"]["studio_id"] == "studio-ci-1"
-                        store.complete(token,job["job_id"],result={
-                            "ok":True,
-                            "content":[{"type":"text","text":"Edit"}],
-                        })
+                        store.complete(
+                            token,
+                            job["job_id"],
+                            claim_token=job["claim_token"],
+                            result={
+                                "ok":True,
+                                "content":[{"type":"text","text":"Edit"}],
+                            },
+                        )
                         return
                     raise AssertionError("gateway job was never queued")
                 except Exception as exc:
@@ -114,6 +121,73 @@ def test_store_and_gateway():
 
         assert store.revoke(owner,"pc-12345678") == 1
         assert store.authenticate(token) is None
+
+
+def test_claim_generation_and_unsafe_delivery():
+    with tempfile.TemporaryDirectory() as td:
+        store=RobloxBridgeStore(Path(td)/"lease.db")
+        owner="owner_lease_ci"
+        pair=store.start_pairing(owner)
+        paired=store.pair_bridge(pair["pair_code"],"pc-lease-ci","Lease CI",{})
+        token=paired["token"]
+
+        # Safe read: an expired claim may be retried, but the old executor's
+        # completion must never be accepted after a new claim generation exists.
+        safe=store.enqueue(owner,"mcp_tool",{"name":"script_read"},bridge_id="pc-lease-ci",retry_safe=True)
+        first=store.pull(token,limit=1)[0]
+        with store._connect() as conn:
+            conn.execute("UPDATE jobs SET lease_until=? WHERE job_id=?",(0,safe["job_id"]))
+        # First pull only requeues with a tiny delay.
+        assert store.pull(token,limit=1) == []
+        with store._connect() as conn:
+            conn.execute("UPDATE jobs SET available_at=? WHERE job_id=?",(0,safe["job_id"]))
+        second=store.pull(token,limit=1)[0]
+        assert first["claim_token"] != second["claim_token"]
+        try:
+            store.complete(
+                token,
+                safe["job_id"],
+                claim_token=first["claim_token"],
+                result={"ok":True,"source":"stale"},
+            )
+            raise AssertionError("stale safe-read completion was accepted")
+        except PermissionError:
+            pass
+        finished=store.complete(
+            token,
+            safe["job_id"],
+            claim_token=second["claim_token"],
+            result={"ok":True,"source":"current"},
+        )
+        assert finished["status"] == "completed"
+        assert finished["result"]["source"] == "current"
+
+        # Unsafe mutation: lease ambiguity is terminal UNCERTAIN, never queued
+        # for blind replay. A late result from the exact original claim can still
+        # resolve it because no second executor was issued.
+        unsafe=store.enqueue(
+            owner,
+            "mcp_tool",
+            {"name":"multi_edit"},
+            bridge_id="pc-lease-ci",
+            retry_safe=False,
+        )
+        mutation=store.pull(token,limit=1)[0]
+        with store._connect() as conn:
+            conn.execute("UPDATE jobs SET lease_until=? WHERE job_id=?",(0,unsafe["job_id"]))
+        assert store.pull(token,limit=1) == []
+        uncertain=store.get_job(owner,unsafe["job_id"])
+        assert uncertain["status"] == "uncertain", uncertain
+        assert uncertain["retry_safe"] is False
+
+        resolved=store.complete(
+            token,
+            unsafe["job_id"],
+            claim_token=mutation["claim_token"],
+            result={"ok":True,"changed":True},
+        )
+        assert resolved["status"] == "completed"
+        assert resolved["result"]["changed"] is True
 
 
 def test_r23_routing():
@@ -220,10 +294,76 @@ def test_bounded_studio_agent():
         agent.studio.call_tool=originals["call_tool"]
 
 
+def test_agent_never_replays_uncertain_mutation():
+    originals={
+        "status":agent.studio.status,
+        "resolve_target":agent.studio.resolve_target,
+        "tool_catalog":agent.studio.tool_catalog,
+        "call_tool":agent.studio.call_tool,
+    }
+    target={"bridge_id":"pc-uncertain","studio_id":"studio-uncertain","name":"Uncertain Place","place_id":"999"}
+    catalog=[
+        {"name":"get_studio_state","description":"","inputSchema":{}},
+        {"name":"script_read","description":"","inputSchema":{}},
+        {"name":"multi_edit","description":"","inputSchema":{}},
+        {"name":"start_stop_play","description":"","inputSchema":{}},
+        {"name":"get_console_output","description":"","inputSchema":{}},
+    ]
+    model_phases=[]
+    def fake_model(messages,max_tokens=1600):
+        system=messages[0]["content"]
+        model_phases.append(system)
+        if "phase inspection" in system:
+            return '{"summary":"inspect","calls":[{"name":"script_read","arguments":{"path":"ServerScriptService/Main"}}]}'
+        if "phase edit" in system:
+            return '{"summary":"edit","calls":[{"name":"multi_edit","arguments":{"edits":[{"path":"ServerScriptService/Main","newText":"-- maybe landed"}]}}]}'
+        raise AssertionError("RONN should stop before verification/repair after ambiguous mutation delivery")
+
+    try:
+        agent.studio.status=lambda owner: {"online":True}
+        agent.studio.resolve_target=lambda owner,**kwargs: {"ok":True,"target":target,"studios":[target]}
+        agent.studio.tool_catalog=lambda owner,bridge_id=None: catalog
+        def fake_call(owner,name,arguments,**kwargs):
+            if name=="multi_edit":
+                return {
+                    "ok":False,
+                    "tool":name,
+                    "uncertain":True,
+                    "reason":"mutation_delivery_uncertain",
+                    "studio_id":kwargs.get("studio_id"),
+                }
+            return {
+                "ok":True,
+                "tool":name,
+                "studio_id":kwargs.get("studio_id"),
+                "result":{"ok":True},
+            }
+        agent.studio.call_tool=fake_call
+        result=agent.run(
+            "owner-ci",
+            "Fix my Roblox Studio script and playtest it.",
+            model_fn=fake_model,
+            depth="deep",
+        )
+        assert result["ok"] is False
+        assert result["reason"] == "mutation_delivery_uncertain", result
+        assert result["repair_passes"] == 0
+        names=[x.get("name") for x in result["calls"]]
+        assert names.count("multi_edit") == 1
+        assert "start_stop_play" not in names
+    finally:
+        agent.studio.status=originals["status"]
+        agent.studio.resolve_target=originals["resolve_target"]
+        agent.studio.tool_catalog=originals["tool_catalog"]
+        agent.studio.call_tool=originals["call_tool"]
+
+
 def run():
     test_store_and_gateway()
+    test_claim_generation_and_unsafe_delivery()
     test_r23_routing()
     test_bounded_studio_agent()
+    test_agent_never_replays_uncertain_mutation()
     print("RONN Roblox Studio MCP selftest: PASS")
     return True
 

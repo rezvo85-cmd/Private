@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import roblox_studio_gateway as studio
 
-VERSION = "RONN-R23-ROBLOX-STUDIO-AGENT-1"
+VERSION = "RONN-R23-ROBLOX-STUDIO-AGENT-2"
 MAX_INSPECT_CALLS = 7
 MAX_EDIT_CALLS = 7
 MAX_VERIFY_CALLS = 6
@@ -431,6 +431,20 @@ def run(
     evidence.extend(edit_results)
     result["calls"].extend(edit_results)
     result["modified"] = any(x.get("ok") and x.get("name") in EDIT_TOOLS for x in edit_results)
+    edit_uncertain=any(
+        bool((x.get("result") or {}).get("uncertain"))
+        for x in edit_results
+        if isinstance(x,dict)
+    )
+
+    if edit_uncertain:
+        # Exactly-once delivery cannot be proven after a mutating MCP timeout.
+        # Do NOT stack a second repair on top of a change that may already have
+        # landed. The next RONN turn begins with a fresh Studio inspection.
+        result["reason"] = "mutation_delivery_uncertain"
+        result["errors"].append("mutation_delivery_uncertain_no_replay")
+        result["evidence"] = evidence
+        return result
 
     if not all(x.get("ok") for x in edit_results):
         result["reason"] = "edit_tool_failed"
@@ -479,8 +493,18 @@ def run(
                 evidence.extend(cleanup_results)
                 result["calls"].extend(cleanup_results)
 
+        verify_uncertain=any(
+            bool((x.get("result") or {}).get("uncertain"))
+            for x in verify_results
+            if isinstance(x,dict)
+        )
         assessment = _assess_verification(model_fn, message, evidence)
         result["assessment"] = assessment
+
+        if verify_uncertain:
+            result["reason"] = "verification_delivery_uncertain"
+            result["errors"].append("verification_mutation_uncertain_no_repair")
+            break
 
         names = {x.get("name") for x in verify_results if x.get("ok")}
         runtime_observed = bool(
@@ -554,4 +578,5 @@ def status() -> dict[str, Any]:
         "max_verify_calls": MAX_VERIFY_CALLS,
         "max_repair_passes": MAX_REPAIR_PASSES,
         "playtest_evidence_required": True,
+        "ambiguous_mutation_auto_replay": False,
     }
