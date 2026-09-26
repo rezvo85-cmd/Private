@@ -12,7 +12,8 @@ from typing import Any
 
 from roblox_bridge_store import default_store, status as store_status
 
-VERSION = "RONN-ROBLOX-STUDIO-GATEWAY-2"
+VERSION = "RONN-ROBLOX-STUDIO-GATEWAY-3"
+MIN_BRIDGE_VERSION = (1, 1, 0)
 
 # Official Roblox Studio MCP tools documented by Roblox. The bridge also reports
 # the live tool catalog/schema, but this allowlist prevents a compromised planner
@@ -83,6 +84,14 @@ def _norm(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def bridge_compatible(version: Any) -> bool:
+    text=_norm(version)
+    match=re.search(r"(\d+)\.(\d+)\.(\d+)",text)
+    if not match:
+        return False
+    return tuple(int(x) for x in match.groups()) >= MIN_BRIDGE_VERSION
+
+
 def _studio_id(row: dict[str, Any]) -> str:
     return _norm(
         row.get("studio_id")
@@ -114,7 +123,7 @@ def _online_bridge(owner: str, bridge_id: str | None = None) -> dict[str, Any] |
     status = default_store().status(owner)
     bridges = [
         x for x in status.get("bridges") or []
-        if x.get("online") and x.get("mcp_connected")
+        if x.get("online") and x.get("mcp_connected") and bridge_compatible(x.get("bridge_version"))
     ]
     if bridge_id:
         return next((x for x in bridges if x.get("bridge_id") == bridge_id), None)
@@ -139,8 +148,10 @@ def status(owner: str) -> dict[str, Any]:
         "online_bridge_count": len(online),
         "selected_bridge_id": data.get("selected_bridge_id"),
         "selected_studio_id": data.get("selected_studio_id"),
-        "bridges": data.get("bridges") or [],
+        "bridges": bridges,
         "transport": "outbound_https_queue_to_local_stdio_mcp",
+        "minimum_bridge_version": ".".join(str(x) for x in MIN_BRIDGE_VERSION),
+        "upgrade_required": any(x.get("upgrade_required") for x in bridges),
         "store": store_status(),
     }
 
@@ -399,6 +410,7 @@ def capability_status(owner: str | None = None) -> dict[str, Any]:
         "mutation_jobs_auto_retry": False,
         "read_only_jobs_auto_retry": True,
         "stale_completion_protection": True,
+        "minimum_bridge_version": ".".join(str(x) for x in MIN_BRIDGE_VERSION),
         "owns_model_routing": False,
         "owns_final_answer": False,
     }
