@@ -23,7 +23,7 @@ import requests
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-VERSION = "RONN-ROBLOX-BRIDGE-1.0.0"
+VERSION = "RONN-ROBLOX-BRIDGE-1.1.0"
 HEARTBEAT_SECONDS = 6.0
 CATALOG_REFRESH_SECONDS = 12.0
 POLL_SECONDS = 0.8
@@ -317,7 +317,13 @@ class StudioMcpConnection:
             except Exception as exc:
                 self.last_error = "list_roblox_studios:" + exc.__class__.__name__
 
-    async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float = 60.0,
+    ) -> dict[str, Any]:
         if not self._session or not self.connected:
             raise RuntimeError("Studio MCP is not connected.")
         if name not in ALLOWED_TOOLS:
@@ -329,7 +335,18 @@ class StudioMcpConnection:
             studio_id = str(args.get("studio_id") or "").strip()
             if not studio_id:
                 raise ValueError("studio_id is required for Roblox Studio MCP tool calls.")
-        result = await self._session.call_tool(name, arguments=args)
+
+        timeout_seconds = max(5.0, min(float(timeout_seconds or 60.0), 144.0))
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(name, arguments=args),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Studio MCP tool {name} exceeded {timeout_seconds:.0f}s."
+            ) from exc
+
         payload = _jsonable(result)
         if not isinstance(payload, dict):
             payload = {"content": payload}
@@ -397,6 +414,45 @@ async def _complete(server: str, token: str, job_id: str, *, result=None, error=
     )
 
 
+async def _call_tool_with_heartbeats(
+    server: str,
+    token: str,
+    config: dict[str, Any],
+    conn: StudioMcpConnection,
+    name: str,
+    arguments: dict[str, Any],
+    timeout_seconds: float,
+):
+    """Keep the bridge online while a long Studio MCP tool is running."""
+    task = asyncio.create_task(
+        conn.call(
+            name,
+            arguments,
+            timeout_seconds=timeout_seconds,
+        )
+    )
+    while not task.done():
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=HEARTBEAT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            try:
+                await _heartbeat(server, token, conn, config)
+            except PermissionError:
+                task.cancel()
+                raise
+            except Exception as exc:
+                # A transient heartbeat/network failure must not duplicate or
+                # cancel a Studio mutation that is already in progress.
+                conn.last_error = (
+                    "heartbeat_during_tool:"
+                    + exc.__class__.__name__
+                )[:300]
+    return await task
+
+
 async def _connected_worker(server: str, token: str, config: dict[str, Any], conn: StudioMcpConnection):
     last_heartbeat = 0.0
     last_catalog = time.monotonic()
@@ -427,7 +483,24 @@ async def _connected_worker(server: str, token: str, config: dict[str, Any], con
                 arguments = payload.get("arguments")
                 if not isinstance(arguments, dict):
                     arguments = {}
-                result = await conn.call(name, arguments)
+                tool_timeout = payload.get("tool_timeout_seconds", 60.0)
+                try:
+                    tool_timeout = max(
+                        5.0,
+                        min(float(tool_timeout or 60.0), 144.0),
+                    )
+                except (TypeError, ValueError):
+                    tool_timeout = 60.0
+
+                result = await _call_tool_with_heartbeats(
+                    server,
+                    token,
+                    config,
+                    conn,
+                    name,
+                    arguments,
+                    tool_timeout,
+                )
                 await _complete(server, token, job_id, result=result)
                 if name == "list_roblox_studios":
                     await _heartbeat(server, token, conn, config)
