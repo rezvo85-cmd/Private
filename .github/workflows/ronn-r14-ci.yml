@@ -53,6 +53,15 @@ jobs:
       - name: Roblox Studio MCP cloud integration selftest
         run: |
           python roblox_bridge_selftest.py
+          python - <<'PY'
+          from pathlib import Path
+          for name in ("roblox_bridge_store.py","roblox_bridge_store_pg.py"):
+              src=Path(name).read_text(encoding="utf-8")
+              assert "claim_token" in src
+              assert "retry_safe" in src
+              assert "status='uncertain'" in src
+          print("Roblox queue no-replay semantics present in SQLite + Postgres")
+          PY
           if grep -Eq '^mcp([<>=~! ]|$)' requirements.txt; then
             echo "The MCP SDK must stay local-only and must not enter Core production requirements."
             exit 1
@@ -2350,7 +2359,7 @@ jobs:
           import importlib.metadata
           import bridge
 
-          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.0.0"
+          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.1.0"
           assert "list_roblox_studios" in bridge.ALLOWED_TOOLS
           assert "multi_edit" in bridge.ALLOWED_TOOLS
           assert "execute_luau" in bridge.ALLOWED_TOOLS
