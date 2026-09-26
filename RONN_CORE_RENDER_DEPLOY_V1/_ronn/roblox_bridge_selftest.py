@@ -47,7 +47,7 @@ def test_store_and_gateway():
         ]
         studios=[{"studio_id":"studio-ci-1","name":"CI Place","place_id":"123"}]
         store.heartbeat(token,{
-            "bridge_version":"ci",
+            "bridge_version":"RONN-ROBLOX-BRIDGE-1.1.0",
             "mcp_connected":True,
             "tools":tools,
             "studios":studios,
@@ -55,6 +55,8 @@ def test_store_and_gateway():
         status=store.status(owner)
         assert status["online"] is True
         assert status["bridges"][0]["studios"][0]["studio_id"] == "studio-ci-1"
+        assert gateway.bridge_compatible("RONN-ROBLOX-BRIDGE-1.1.0") is True
+        assert gateway.bridge_compatible("RONN-ROBLOX-BRIDGE-1.0.0") is False
 
         original_default=gateway.default_store
         gateway.default_store=lambda: store
@@ -292,11 +294,76 @@ def test_bounded_studio_agent():
         agent.studio.call_tool=originals["call_tool"]
 
 
+def test_agent_never_replays_uncertain_mutation():
+    originals={
+        "status":agent.studio.status,
+        "resolve_target":agent.studio.resolve_target,
+        "tool_catalog":agent.studio.tool_catalog,
+        "call_tool":agent.studio.call_tool,
+    }
+    target={"bridge_id":"pc-uncertain","studio_id":"studio-uncertain","name":"Uncertain Place","place_id":"999"}
+    catalog=[
+        {"name":"get_studio_state","description":"","inputSchema":{}},
+        {"name":"script_read","description":"","inputSchema":{}},
+        {"name":"multi_edit","description":"","inputSchema":{}},
+        {"name":"start_stop_play","description":"","inputSchema":{}},
+        {"name":"get_console_output","description":"","inputSchema":{}},
+    ]
+    model_phases=[]
+    def fake_model(messages,max_tokens=1600):
+        system=messages[0]["content"]
+        model_phases.append(system)
+        if "phase inspection" in system:
+            return '{"summary":"inspect","calls":[{"name":"script_read","arguments":{"path":"ServerScriptService/Main"}}]}'
+        if "phase edit" in system:
+            return '{"summary":"edit","calls":[{"name":"multi_edit","arguments":{"edits":[{"path":"ServerScriptService/Main","newText":"-- maybe landed"}]}}]}'
+        raise AssertionError("RONN should stop before verification/repair after ambiguous mutation delivery")
+
+    try:
+        agent.studio.status=lambda owner: {"online":True}
+        agent.studio.resolve_target=lambda owner,**kwargs: {"ok":True,"target":target,"studios":[target]}
+        agent.studio.tool_catalog=lambda owner,bridge_id=None: catalog
+        def fake_call(owner,name,arguments,**kwargs):
+            if name=="multi_edit":
+                return {
+                    "ok":False,
+                    "tool":name,
+                    "uncertain":True,
+                    "reason":"mutation_delivery_uncertain",
+                    "studio_id":kwargs.get("studio_id"),
+                }
+            return {
+                "ok":True,
+                "tool":name,
+                "studio_id":kwargs.get("studio_id"),
+                "result":{"ok":True},
+            }
+        agent.studio.call_tool=fake_call
+        result=agent.run(
+            "owner-ci",
+            "Fix my Roblox Studio script and playtest it.",
+            model_fn=fake_model,
+            depth="deep",
+        )
+        assert result["ok"] is False
+        assert result["reason"] == "mutation_delivery_uncertain", result
+        assert result["repair_passes"] == 0
+        names=[x.get("name") for x in result["calls"]]
+        assert names.count("multi_edit") == 1
+        assert "start_stop_play" not in names
+    finally:
+        agent.studio.status=originals["status"]
+        agent.studio.resolve_target=originals["resolve_target"]
+        agent.studio.tool_catalog=originals["tool_catalog"]
+        agent.studio.call_tool=originals["call_tool"]
+
+
 def run():
     test_store_and_gateway()
     test_claim_generation_and_unsafe_delivery()
     test_r23_routing()
     test_bounded_studio_agent()
+    test_agent_never_replays_uncertain_mutation()
     print("RONN Roblox Studio MCP selftest: PASS")
     return True
 
