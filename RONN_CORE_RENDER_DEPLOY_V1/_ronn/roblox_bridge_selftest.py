@@ -78,10 +78,15 @@ def test_store_and_gateway():
                         payload=job["payload"]
                         assert payload["name"] == "get_studio_state"
                         assert payload["arguments"]["studio_id"] == "studio-ci-1"
-                        store.complete(token,job["job_id"],result={
-                            "ok":True,
-                            "content":[{"type":"text","text":"Edit"}],
-                        })
+                        store.complete(
+                            token,
+                            job["job_id"],
+                            claim_token=job["claim_token"],
+                            result={
+                                "ok":True,
+                                "content":[{"type":"text","text":"Edit"}],
+                            },
+                        )
                         return
                     raise AssertionError("gateway job was never queued")
                 except Exception as exc:
@@ -114,6 +119,73 @@ def test_store_and_gateway():
 
         assert store.revoke(owner,"pc-12345678") == 1
         assert store.authenticate(token) is None
+
+
+def test_claim_generation_and_unsafe_delivery():
+    with tempfile.TemporaryDirectory() as td:
+        store=RobloxBridgeStore(Path(td)/"lease.db")
+        owner="owner_lease_ci"
+        pair=store.start_pairing(owner)
+        paired=store.pair_bridge(pair["pair_code"],"pc-lease-ci","Lease CI",{})
+        token=paired["token"]
+
+        # Safe read: an expired claim may be retried, but the old executor's
+        # completion must never be accepted after a new claim generation exists.
+        safe=store.enqueue(owner,"mcp_tool",{"name":"script_read"},bridge_id="pc-lease-ci",retry_safe=True)
+        first=store.pull(token,limit=1)[0]
+        with store._connect() as conn:
+            conn.execute("UPDATE jobs SET lease_until=? WHERE job_id=?",(0,safe["job_id"]))
+        # First pull only requeues with a tiny delay.
+        assert store.pull(token,limit=1) == []
+        with store._connect() as conn:
+            conn.execute("UPDATE jobs SET available_at=? WHERE job_id=?",(0,safe["job_id"]))
+        second=store.pull(token,limit=1)[0]
+        assert first["claim_token"] != second["claim_token"]
+        try:
+            store.complete(
+                token,
+                safe["job_id"],
+                claim_token=first["claim_token"],
+                result={"ok":True,"source":"stale"},
+            )
+            raise AssertionError("stale safe-read completion was accepted")
+        except PermissionError:
+            pass
+        finished=store.complete(
+            token,
+            safe["job_id"],
+            claim_token=second["claim_token"],
+            result={"ok":True,"source":"current"},
+        )
+        assert finished["status"] == "completed"
+        assert finished["result"]["source"] == "current"
+
+        # Unsafe mutation: lease ambiguity is terminal UNCERTAIN, never queued
+        # for blind replay. A late result from the exact original claim can still
+        # resolve it because no second executor was issued.
+        unsafe=store.enqueue(
+            owner,
+            "mcp_tool",
+            {"name":"multi_edit"},
+            bridge_id="pc-lease-ci",
+            retry_safe=False,
+        )
+        mutation=store.pull(token,limit=1)[0]
+        with store._connect() as conn:
+            conn.execute("UPDATE jobs SET lease_until=? WHERE job_id=?",(0,unsafe["job_id"]))
+        assert store.pull(token,limit=1) == []
+        uncertain=store.get_job(owner,unsafe["job_id"])
+        assert uncertain["status"] == "uncertain", uncertain
+        assert uncertain["retry_safe"] is False
+
+        resolved=store.complete(
+            token,
+            unsafe["job_id"],
+            claim_token=mutation["claim_token"],
+            result={"ok":True,"changed":True},
+        )
+        assert resolved["status"] == "completed"
+        assert resolved["result"]["changed"] is True
 
 
 def test_r23_routing():
@@ -222,6 +294,7 @@ def test_bounded_studio_agent():
 
 def run():
     test_store_and_gateway()
+    test_claim_generation_and_unsafe_delivery()
     test_r23_routing()
     test_bounded_studio_agent()
     print("RONN Roblox Studio MCP selftest: PASS")
