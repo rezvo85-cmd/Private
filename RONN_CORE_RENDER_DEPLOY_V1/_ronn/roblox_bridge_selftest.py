@@ -80,6 +80,7 @@ def test_store_and_gateway():
                         payload=job["payload"]
                         assert payload["name"] == "get_studio_state"
                         assert payload["arguments"]["studio_id"] == "studio-ci-1"
+                        assert 5 <= float(payload["tool_timeout_seconds"]) < 150
                         store.complete(
                             token,
                             job["job_id"],
@@ -222,6 +223,41 @@ def test_r23_routing():
     assert action["verify"] is True
     assert any(x.get("id") == "operate_roblox_studio" for x in action["task_graph"]["nodes"])
 
+    # Short follow-ups must retain Roblox/Studio context instead of falling back
+    # to generic chat and silently skipping the real Studio executor.
+    history=[
+        {"role":"user","content":"Fix my Roblox Studio stand movement and playtest it."},
+        {"role":"assistant","content":"I inspected the stand controller and started the repair."},
+    ]
+    followup=r23_plan(
+        "continue",
+        history=history,
+        file_names=[],
+        has_images=False,
+        has_project=True,
+        agent_mode=True,
+        explicit_mode="auto",
+    )
+    follow_caps=followup["capabilities"]
+    assert followup["profile"] == "roblox", followup
+    assert follow_caps["roblox_studio"] is True, follow_caps
+    assert follow_caps["roblox_studio_mutate"] is True, follow_caps
+    assert follow_caps["roblox_studio_verify"] is True, follow_caps
+
+    unrelated=r23_plan(
+        "continue",
+        history=[
+            {"role":"user","content":"Help me rewrite my school paragraph."},
+            {"role":"assistant","content":"I shortened the paragraph."},
+        ],
+        file_names=[],
+        has_images=False,
+        has_project=True,
+        agent_mode=True,
+        explicit_mode="auto",
+    )
+    assert unrelated["capabilities"]["roblox_studio"] is False, unrelated
+
 
 def test_bounded_studio_agent():
     originals={
@@ -279,7 +315,9 @@ def test_bounded_studio_agent():
         assert result["verification_attempted"] is True
         assert result["playtest_verified"] is True
         assert result["ok"] is True
-        assert result["rollback_ready"] is True
+        assert result["rollback_ready"] is False
+        assert result["prechange_script_evidence"] is True
+        assert result["rollback_mode"] == "no_automatic_studio_rollback"
         assert result["repair_passes"] == 0
         assert all(x[2].get("studio_id") == "studio-agent-1" for x in calls)
         names=[x[0] for x in calls]
@@ -293,6 +331,81 @@ def test_bounded_studio_agent():
         agent.studio.tool_catalog=originals["tool_catalog"]
         agent.studio.call_tool=originals["call_tool"]
 
+
+
+def test_gameplay_requires_direct_proof():
+    originals={
+        "status":agent.studio.status,
+        "resolve_target":agent.studio.resolve_target,
+        "tool_catalog":agent.studio.tool_catalog,
+        "call_tool":agent.studio.call_tool,
+    }
+    target={"bridge_id":"pc-gameplay","studio_id":"studio-gameplay","name":"JoJo","place_id":"999"}
+    catalog=[
+        {"name":"get_studio_state","description":"","inputSchema":{}},
+        {"name":"script_read","description":"","inputSchema":{}},
+        {"name":"multi_edit","description":"","inputSchema":{}},
+        {"name":"start_stop_play","description":"","inputSchema":{}},
+        {"name":"get_console_output","description":"","inputSchema":{}},
+        {"name":"subagent","description":"","inputSchema":{}},
+    ]
+
+    mode={"direct":False}
+
+    def fake_model(messages,max_tokens=1600):
+        system=messages[0]["content"]
+        if "phase inspection" in system:
+            return '{"summary":"inspect","calls":[{"name":"script_read","arguments":{"path":"ServerScriptService/Stand"}}]}'
+        if "phase edit" in system or "phase repair" in system:
+            return '{"summary":"edit","calls":[{"name":"multi_edit","arguments":{"edits":[{"path":"ServerScriptService/Stand","newText":"-- fixed"}]}}]}'
+        if "phase verification" in system:
+            if mode["direct"]:
+                return '{"summary":"verify","calls":[{"name":"subagent","arguments":{"type":"playtest","task":"Summon the Stand, walk, and verify it follows the player."}},{"name":"get_console_output","arguments":{}}],"cleanup_calls":[]}'
+            return '{"summary":"verify","calls":[{"name":"start_stop_play","arguments":{"mode":"start"}},{"name":"get_console_output","arguments":{}}],"cleanup_calls":[{"name":"start_stop_play","arguments":{"mode":"stop"}}]}'
+        if "evidence-only Roblox verification judge" in system:
+            return '{"passed":true,"reason":"The supplied evidence reports success.","repairable":false}'
+        raise AssertionError("unexpected model phase")
+
+    try:
+        agent.studio.status=lambda owner: {"online":True}
+        agent.studio.resolve_target=lambda owner,**kwargs: {"ok":True,"target":target,"studios":[target]}
+        agent.studio.tool_catalog=lambda owner,bridge_id=None: catalog
+        agent.studio.call_tool=lambda owner,name,arguments,**kwargs: {
+            "ok":True,
+            "tool":name,
+            "studio_id":kwargs.get("studio_id"),
+            "result":{"ok":True,"content":[{"type":"text","text":"ok"}]},
+        }
+
+        weak=agent.run(
+            "owner-gameplay",
+            "Fix my Roblox Stand barrage follow movement and make sure it works.",
+            model_fn=fake_model,
+            depth="deep",
+            mutate_hint=True,
+            verify_hint=True,
+        )
+        assert weak["gameplay_proof_required"] is True
+        assert weak["playtest_verified"] is False
+        assert weak["ok"] is False
+
+        mode["direct"]=True
+        strong=agent.run(
+            "owner-gameplay",
+            "Fix my Roblox Stand barrage follow movement and make sure it works.",
+            model_fn=fake_model,
+            depth="deep",
+            mutate_hint=True,
+            verify_hint=True,
+        )
+        assert strong["gameplay_proof_required"] is True
+        assert strong["playtest_verified"] is True, strong
+        assert strong["ok"] is True, strong
+    finally:
+        agent.studio.status=originals["status"]
+        agent.studio.resolve_target=originals["resolve_target"]
+        agent.studio.tool_catalog=originals["tool_catalog"]
+        agent.studio.call_tool=originals["call_tool"]
 
 def test_agent_never_replays_uncertain_mutation():
     originals={
@@ -363,6 +476,7 @@ def run():
     test_claim_generation_and_unsafe_delivery()
     test_r23_routing()
     test_bounded_studio_agent()
+    test_gameplay_requires_direct_proof()
     test_agent_never_replays_uncertain_mutation()
     print("RONN Roblox Studio MCP selftest: PASS")
     return True
