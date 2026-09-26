@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 R22_VERSION = "R22-LEAN-CORE-1"
-PROFILES = {"chat","knowledge","coding","mathscience","writing","research","creative","analysis"}
+PROFILES = {"chat","knowledge","coding","roblox","mathscience","writing","research","creative","analysis"}
 DEPTHS = {"fast","smart","deep","apex"}
 
 
@@ -130,6 +130,26 @@ def _followup(message: str, history) -> bool:
     ))
 
 
+def _history_mentions_roblox(history) -> bool:
+    """Carry Roblox specialization through short follow-ups without guessing.
+
+    Only recent explicit Roblox/Studio/Luau context qualifies; a generic project
+    plus "continue" must not silently become a Studio mutation.
+    """
+    terms=(
+        "roblox","roblox studio","luau","serverscriptservice","replicatedstorage",
+        "serverstorage","starterplayer","startergui","remoteevent","remotefunction",
+        "modulescript","localscript","datamodel","rbxl","rbxlx","studio mcp",
+    )
+    for item in list(history or [])[-8:]:
+        if not isinstance(item,dict):
+            continue
+        text=_norm(item.get("content") or item.get("text") or "")
+        if text and any(term in text for term in terms):
+            return True
+    return False
+
+
 def _prompt_policy(profile: str, difficulty: int, *, history=None, file_names=None,
                    has_images=False, has_project=False, needs_live=False,
                    verify=False, needs_tools=False, followup=False):
@@ -166,6 +186,11 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
     live = _needs_live(message)
     followup = _followup(message, history)
 
+    # "continue", "do it", "fix it", etc. should keep the prior Roblox
+    # specialization only when recent conversation explicitly established it.
+    if followup and profile == "chat" and _history_mentions_roblox(history):
+        profile = "roblox"
+
     mode = _norm(explicit_mode or "auto")
     if mode in {"live","max"}:
         live = True
@@ -197,7 +222,7 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
 
     verify = bool(
         _explicit_verification(message)
-        or (profile == "coding" and _execution_intent(message))
+        or (profile in {"coding","roblox"} and _execution_intent(message))
         or difficulty >= 7
     )
 
