@@ -291,6 +291,8 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
                 model_fn=studio_fn,
                 depth=depth,
                 checkpoint_fn=studio_checkpoint_fn,
+                mutate_hint=bool(caps.get("roblox_studio_mutate")),
+                verify_hint=bool(caps.get("roblox_studio_verify")),
             )
             out["roblox_studio"]=studio_run
             if studio_run.get("available"):

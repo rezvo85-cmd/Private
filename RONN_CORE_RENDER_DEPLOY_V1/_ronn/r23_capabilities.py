@@ -29,11 +29,32 @@ def _tokens(text: str):
     return re.findall(r"[A-Za-z0-9_+.#-]{2,48}", str(text or ""))
 
 
-def roblox_studio_intent(message: str, *, profile: str = "", has_project: bool = False) -> dict[str, Any]:
+def _recent_roblox_context(history) -> bool:
+    terms=(
+        "roblox","roblox studio","luau","serverscriptservice","replicatedstorage",
+        "serverstorage","starterplayer","startergui","remoteevent","remotefunction",
+        "modulescript","localscript","datamodel","rbxl","rbxlx","studio mcp",
+    )
+    for item in list(history or [])[-8:]:
+        if not isinstance(item,dict):
+            continue
+        text=_norm(item.get("content") or item.get("text") or "")
+        if text and any(term in text for term in terms):
+            return True
+    return False
+
+
+def roblox_studio_intent(
+    message: str,
+    *,
+    profile: str = "",
+    has_project: bool = False,
+    history=None,
+) -> dict[str, Any]:
     """Detect when the user wants RONN to operate on an actual Roblox Studio project.
 
-    Ordinary Roblox questions stay normal chat. The Studio executor is activated only
-    for an action/inspection request that refers to Roblox/Studio/Luau project work.
+    Ordinary Roblox questions stay normal chat. Short follow-ups can continue a
+    Studio task only when recent conversation explicitly established Roblox context.
     """
     low = _norm(message)
     p = str(profile or "").strip().lower()
@@ -52,37 +73,68 @@ def roblox_studio_intent(message: str, *, profile: str = "", has_project: bool =
         "check the game", "open my", "work on", "continue", "set up",
         "setup", "wire", "connect", "put in", "modify", "restore",
     )
-    studio_explicit = any(term in low for term in context_terms)
-    action = any(term in low for term in action_terms)
-
-    # R23's Roblox profile can carry short follow-ups ("fix it", "continue") once
-    # the active project is known, but never turns a generic Roblox question into
-    # a mutating Studio job.
-    project_followup = bool(
-        has_project
-        and p == "roblox"
-        and re.match(
-            r"^(?:do that|continue|keep going|fix it|repair it|test it|retest|"
-            r"check it|go ahead|do it|add it|change it|update it)\b",
-            low,
-        )
-    )
-    requested = bool((studio_explicit and action) or project_followup)
-    mutate = bool(requested and any(term in low for term in (
+    mutation_terms = (
         "fix", "repair", "build", "make", "create", "add", "implement",
         "edit", "change", "update", "replace", "remove", "delete",
         "wire", "connect", "put in", "modify", "restore", "set up", "setup",
-    )))
-    verify = bool(requested and (mutate or any(term in low for term in (
+    )
+    verification_terms = (
         "test", "playtest", "retest", "verify", "make sure", "check everything",
         "no bugs", "works", "working",
-    ))))
+    )
+
+    studio_explicit = any(term in low for term in context_terms)
+    action = any(term in low for term in action_terms)
+
+    followup_match = re.match(
+        r"^(?:do that|continue|keep going|fix it|repair it|test it|retest|"
+        r"check it|go ahead|do it|add it|change it|update it)\b",
+        low,
+    )
+    recent_roblox = _recent_roblox_context(history)
+    project_followup = bool(
+        has_project
+        and followup_match
+        and (p == "roblox" or recent_roblox)
+    )
+
+    requested = bool((studio_explicit and action) or project_followup)
+
+    followup_mutation = bool(
+        project_followup
+        and re.match(
+            r"^(?:do that|continue|keep going|fix it|repair it|go ahead|do it|"
+            r"add it|change it|update it)\b",
+            low,
+        )
+    )
+    followup_verify_only = bool(
+        project_followup
+        and re.match(r"^(?:test it|retest|check it)\b",low)
+    )
+
+    mutate = bool(
+        requested
+        and (
+            any(term in low for term in mutation_terms)
+            or followup_mutation
+        )
+    )
+    verify = bool(
+        requested
+        and (
+            mutate
+            or any(term in low for term in verification_terms)
+            or followup_verify_only
+        )
+    )
     return {
         "requested": requested,
         "mutate": mutate,
         "verify": verify,
         "explicit": studio_explicit,
         "project_followup": project_followup,
+        "recent_roblox_context": recent_roblox,
     }
 
 
@@ -238,6 +290,7 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
         message,
         profile=profile,
         has_project=bool(has_project),
+        history=history,
     )
     has_url = bool(re.search(r"https?://[^\s]+", str(message or ""), re.I))
     execution_words = any(x in low for x in (

@@ -64,6 +64,14 @@ _VERIFY_WORDS = (
     "no bugs", "works", "working", "retest",
 )
 
+_GAMEPLAY_TERMS = (
+    "stand", "combat", "attack", "barrage", "ability", "move", "movement",
+    "walk", "run", "jump", "dash", "summon", "desummon", "animation", "pose",
+    "hitbox", "damage", "stun", "cooldown", "npc", "enemy", "tool", "inventory",
+    "ui", "button", "menu", "camera", "keyboard", "mouse", "input", "click",
+    "vfx", "sfx", "particle", "sound", "character", "player",
+)
+
 
 def _clip(value: Any, limit: int = 18000) -> str:
     if isinstance(value, str):
@@ -200,6 +208,11 @@ def _verification_requested(message: str) -> bool:
     return _mutating_request(message) or any(word in low for word in _VERIFY_WORDS)
 
 
+def _gameplay_behavior_request(message: str) -> bool:
+    low = re.sub(r"\s+", " ", str(message or "")).lower()
+    return any(term in low for term in _GAMEPLAY_TERMS)
+
+
 def _planner_system(phase: str, allowed: set[str]) -> str:
     return f"""You are the Roblox Studio execution planner inside RONN R23.
 R23 remains the single main brain. Produce only a compact JSON tool plan for phase {phase}.
@@ -269,7 +282,8 @@ def _verification_plan(model_fn, message: str, target, catalog, evidence) -> dic
     if not allowed:
         return {"calls": [], "cleanup_calls": []}
     system = _planner_system("verification", allowed) + """
-Verification must use actual Studio evidence. For gameplay/runtime changes, prefer a real Play test plus get_console_output.
+Verification must use actual Studio evidence. For gameplay/runtime changes, use a real Play test plus get_console_output.
+When the request is about visible gameplay behavior (combat, movement, UI, input, abilities, animations, etc.), use the playtest subagent when it is available, or explicit character/input simulation that directly exercises the requested behavior. Merely starting Play mode and seeing a clean console is not enough.
 If you start Play mode, include an explicit cleanup_calls entry that stops Play mode even when the test fails.
 The subagent tool may be used only in explore/playtest mode as a bounded Studio observer; it never owns RONN's final answer.
 Return JSON:
@@ -321,6 +335,8 @@ def run(
     model_fn: Callable | None,
     depth: str = "smart",
     checkpoint_fn=None,
+    mutate_hint: bool = False,
+    verify_hint: bool = False,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "version": VERSION,
@@ -330,6 +346,9 @@ def run(
         "verification_attempted": False,
         "playtest_verified": False,
         "rollback_ready": False,
+        "rollback_mode": "no_automatic_studio_rollback",
+        "prechange_script_evidence": False,
+        "gameplay_proof_required": False,
         "target": {},
         "calls": [],
         "errors": [],
@@ -391,21 +410,29 @@ def run(
     evidence.extend(inspected)
     result["calls"].extend(inspected)
 
-    mutate = _mutating_request(message)
+    mutate = bool(mutate_hint or _mutating_request(message))
+    verification_required = bool(
+        verify_hint or _verification_requested(message)
+    )
     result["mutation_requested"] = mutate
+    result["verification_required"] = verification_required
+    result["gameplay_proof_required"] = bool(
+        verification_required and _gameplay_behavior_request(message)
+    )
     if not mutate:
         result["ok"] = bool(evidence) and all(x.get("ok") for x in evidence)
         result["reason"] = "inspection_complete"
         result["evidence"] = evidence
         return result
 
-    # The inspection evidence itself is the pre-change checkpoint. script_read
-    # calls retain exact source text in the returned MCP result when the planner
-    # is about to modify known scripts.
-    result["rollback_ready"] = any(
+    # Capture pre-change script evidence when available, but do not call it a
+    # rollback until RONN has actually restored the DataModel. Roblox Studio MCP
+    # currently exposes edits, not a transactional undo primitive.
+    result["prechange_script_evidence"] = any(
         x.get("name") == "script_read" and x.get("ok")
         for x in evidence
     )
+    result["rollback_ready"] = False
 
     try:
         edits = _edit_plan(model_fn, message, target, catalog, evidence)
@@ -450,7 +477,7 @@ def run(
         result["reason"] = "edit_tool_failed"
         result["errors"].append("one_or_more_edit_calls_failed")
 
-    if not _verification_requested(message):
+    if not verification_required:
         result["ok"] = result["modified"] and all(x.get("ok") for x in edit_results)
         result["reason"] = "modified_not_runtime_verified"
         result["evidence"] = evidence
@@ -511,15 +538,34 @@ def run(
             "subagent" in names
             or "start_stop_play" in names
             or "character_navigation" in names
+            or "user_keyboard_input" in names
+            or "user_mouse_input" in names
+        )
+        direct_gameplay_proof = bool(
+            "subagent" in names
+            or "character_navigation" in names
+            or "user_keyboard_input" in names
+            or "user_mouse_input" in names
         )
         console_observed = "get_console_output" in names
         calls_ok = bool(verify_results) and all(x.get("ok") for x in verify_results)
+        gameplay_proof_ok = bool(
+            not result["gameplay_proof_required"]
+            or direct_gameplay_proof
+        )
         result["playtest_verified"] = bool(
             assessment.get("passed")
             and calls_ok
             and runtime_observed
             and console_observed
+            and gameplay_proof_ok
         )
+        if assessment.get("passed") and not gameplay_proof_ok:
+            result["assessment"] = {
+                "passed": False,
+                "reason": "Gameplay behavior was not directly exercised by a playtest subagent or player-input/navigation evidence.",
+                "repairable": True,
+            }
 
         if result["playtest_verified"]:
             result["ok"] = True
@@ -578,5 +624,7 @@ def status() -> dict[str, Any]:
         "max_verify_calls": MAX_VERIFY_CALLS,
         "max_repair_passes": MAX_REPAIR_PASSES,
         "playtest_evidence_required": True,
+        "gameplay_direct_proof_required": True,
+        "automatic_studio_rollback": False,
         "ambiguous_mutation_auto_replay": False,
     }
