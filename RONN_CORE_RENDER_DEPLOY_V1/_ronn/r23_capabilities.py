@@ -29,6 +29,63 @@ def _tokens(text: str):
     return re.findall(r"[A-Za-z0-9_+.#-]{2,48}", str(text or ""))
 
 
+def roblox_studio_intent(message: str, *, profile: str = "", has_project: bool = False) -> dict[str, Any]:
+    """Detect when the user wants RONN to operate on an actual Roblox Studio project.
+
+    Ordinary Roblox questions stay normal chat. The Studio executor is activated only
+    for an action/inspection request that refers to Roblox/Studio/Luau project work.
+    """
+    low = _norm(message)
+    p = str(profile or "").strip().lower()
+
+    context_terms = (
+        "roblox", "roblox studio", "studio", "luau", "datamodel",
+        "serverscriptservice", "replicatedstorage", "serverstorage",
+        "starterplayer", "starterplayerscripts", "startergui", "starterpack",
+        "remoteevent", "remotefunction", "module script", "modulescript",
+        "local script", "localscript", "rbxl", "rbxlx",
+    )
+    action_terms = (
+        "fix", "repair", "build", "make", "create", "add", "implement",
+        "edit", "change", "update", "replace", "remove", "delete",
+        "debug", "test", "playtest", "retest", "inspect", "check my",
+        "check the game", "open my", "work on", "continue", "set up",
+        "setup", "wire", "connect", "put in", "modify", "restore",
+    )
+    studio_explicit = any(term in low for term in context_terms)
+    action = any(term in low for term in action_terms)
+
+    # R23's Roblox profile can carry short follow-ups ("fix it", "continue") once
+    # the active project is known, but never turns a generic Roblox question into
+    # a mutating Studio job.
+    project_followup = bool(
+        has_project
+        and p == "roblox"
+        and re.match(
+            r"^(?:do that|continue|keep going|fix it|repair it|test it|retest|"
+            r"check it|go ahead|do it|add it|change it|update it)\b",
+            low,
+        )
+    )
+    requested = bool((studio_explicit and action) or project_followup)
+    mutate = bool(requested and any(term in low for term in (
+        "fix", "repair", "build", "make", "create", "add", "implement",
+        "edit", "change", "update", "replace", "remove", "delete",
+        "wire", "connect", "put in", "modify", "restore", "set up", "setup",
+    )))
+    verify = bool(requested and (mutate or any(term in low for term in (
+        "test", "playtest", "retest", "verify", "make sure", "check everything",
+        "no bugs", "works", "working",
+    ))))
+    return {
+        "requested": requested,
+        "mutate": mutate,
+        "verify": verify,
+        "explicit": studio_explicit,
+        "project_followup": project_followup,
+    }
+
+
 def unknown_candidates(message: str) -> list[str]:
     """Detect terms that are worth resolving through retrieval before answering.
 
@@ -175,7 +232,13 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
         has_files=bool(file_names),
     )
 
-    coding = str(base.get("profile") or "") == "coding"
+    profile = str(base.get("profile") or "").strip().lower()
+    coding = profile in {"coding", "roblox"}
+    studio = roblox_studio_intent(
+        message,
+        profile=profile,
+        has_project=bool(has_project),
+    )
     has_url = bool(re.search(r"https?://[^\s]+", str(message or ""), re.I))
     execution_words = any(x in low for x in (
         "run this","execute this","test this","test the code","debug this","fix this",
@@ -203,7 +266,10 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
 
     return {
         "strong_main_brain": True,
-        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or browser_interactive or computer_words or execution_words)),
+        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or browser_interactive or computer_words or execution_words or studio["requested"])),
+        "roblox_studio": bool(agent_mode and studio["requested"]),
+        "roblox_studio_mutate": bool(agent_mode and studio["mutate"]),
+        "roblox_studio_verify": bool(agent_mode and studio["verify"]),
         "browser_url": bool(has_url),
         "browser_interactive": browser_interactive,
         "code_fix_loop": bool(coding and file_names and execution_words),
@@ -238,4 +304,7 @@ def status() -> dict[str, Any]:
             "11_universal_retrieval": True,
         },
         "architecture": "one main brain + capability plane",
+        "bounded_executors": {
+            "roblox_studio_mcp": True,
+        },
     }

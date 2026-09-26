@@ -22,7 +22,7 @@ from r23_task_graph import (
     merge_tool_runs as _merge_tool_runs,
 )
 
-VERSION = "R23-WORKFLOW-RUNTIME-2"
+VERSION = "R23-WORKFLOW-RUNTIME-3"
 _LANGGRAPH_ENABLED = os.getenv("RONN_LANGGRAPH_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
@@ -56,6 +56,7 @@ def eligible(decision: dict[str, Any]) -> bool:
             "world_model",
             "autonomous_research",
             "computer_requested",
+            "roblox_studio",
         )
     )
     return bool(
@@ -76,15 +77,26 @@ def _invoke_executor(
     files,
     decision: dict[str, Any],
     repair_fn,
+    studio_fn=None,
+    studio_checkpoint_fn=None,
 ) -> dict[str, Any]:
+    kwargs={
+        "depth":str(decision.get("depth") or "smart"),
+        "repair_fn":repair_fn,
+    }
+    # Keep test/custom executors backward compatible: Studio-only kwargs are
+    # supplied only when the application actually configured the Studio agent.
+    if studio_fn is not None:
+        kwargs["studio_fn"]=studio_fn
+    if studio_checkpoint_fn is not None:
+        kwargs["studio_checkpoint_fn"]=studio_checkpoint_fn
     return executor(
         owner,
         request_id,
         message,
         files or [],
         decision,
-        depth=str(decision.get("depth") or "smart"),
-        repair_fn=repair_fn,
+        **kwargs,
     )
 
 
@@ -118,8 +130,13 @@ def _direct(
     repair_fn,
     executor: Callable,
     checkpoint_fn: Callable | None,
+    studio_fn=None,
+    studio_checkpoint_fn=None,
 ) -> dict[str, Any]:
-    tool_run = _invoke_executor(executor, owner, request_id, message, files, decision, repair_fn)
+    tool_run = _invoke_executor(
+        executor, owner, request_id, message, files, decision, repair_fn,
+        studio_fn, studio_checkpoint_fn,
+    )
     graph = _reconcile(decision.get("task_graph") or {}, tool_run, decision)
     recovery = _recovery_decision(graph, decision, has_files=bool(files))
 
@@ -132,7 +149,8 @@ def _direct(
                 pass
         try:
             recovery_run = _invoke_executor(
-                executor, owner, request_id + "_replan", message, files, recovery, repair_fn
+                executor, owner, request_id + "_replan", message, files, recovery, repair_fn,
+                studio_fn, studio_checkpoint_fn,
             )
             graph, tool_run = _merge_after_recovery(graph, tool_run, recovery_run, decision)
             if checkpoint_fn:
@@ -167,6 +185,8 @@ class _WorkflowState(TypedDict, total=False):
     repair_fn: Any
     executor: Any
     checkpoint_fn: Any
+    studio_fn: Any
+    studio_checkpoint_fn: Any
     tool_run: dict[str, Any]
     task_graph: dict[str, Any]
     recovery_decision: dict[str, Any] | None
@@ -183,6 +203,8 @@ def _langgraph_run(
     repair_fn,
     executor: Callable,
     checkpoint_fn: Callable | None,
+    studio_fn=None,
+    studio_checkpoint_fn=None,
 ) -> dict[str, Any]:
     progress = {
         "execution_started": False,
@@ -204,6 +226,8 @@ def _langgraph_run(
             state.get("files") or [],
             state["decision"],
             state.get("repair_fn"),
+            state.get("studio_fn"),
+            state.get("studio_checkpoint_fn"),
         )
         progress["tool_run"] = run
         return {"tool_run": run}
@@ -326,6 +350,8 @@ def _langgraph_run(
                 "repair_fn": repair_fn,
                 "executor": executor,
                 "checkpoint_fn": checkpoint_fn,
+                "studio_fn": studio_fn,
+                "studio_checkpoint_fn": studio_checkpoint_fn,
                 "errors": [],
             }
         )
@@ -354,6 +380,8 @@ def run(
     repair_fn=None,
     executor: Callable | None = None,
     checkpoint_fn: Callable | None = None,
+    studio_fn=None,
+    studio_checkpoint_fn=None,
 ) -> dict[str, Any]:
     """Execute exactly one workflow engine for this R23 decision."""
     executor = executor or _default_execute
@@ -361,13 +389,15 @@ def run(
     if eligible(decision):
         try:
             return _langgraph_run(
-                owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
+                owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn,
+                studio_fn, studio_checkpoint_fn,
             )
         except _LangGraphFailure as exc:
             # A direct fallback is safe only before any primary tool execution starts.
             if not exc.execution_started:
                 fallback = _direct(
-                    owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
+                    owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn,
+                    studio_fn, studio_checkpoint_fn,
                 )
                 fallback["fallback_from"] = "langgraph"
                 fallback["workflow_error"] = exc.error_name
@@ -414,7 +444,8 @@ def run(
             }
 
     return _direct(
-        owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn
+        owner, request_id, message, files, decision, repair_fn, executor, checkpoint_fn,
+        studio_fn, studio_checkpoint_fn,
     )
 
 
@@ -431,4 +462,5 @@ def status() -> dict[str, Any]:
         "owns_final_answer": False,
         "fallback": "direct R23 workflow only before tool execution starts",
         "no_duplicate_action_replay": True,
+        "roblox_studio_executor_passthrough": True,
     }

@@ -57,6 +57,7 @@ async function unlockWebAuth(){
     await refreshStatus();
     await refreshMemory();
     refreshOwnerAccess();
+    refreshRobloxStudio();
     setTimeout(maybeRunBrainArena,1200);
   }catch(e){if(msg)msg.textContent=e.message||"Could not unlock RONN."}
   finally{if(btn){btn.disabled=false;btn.textContent="Continue"}}
@@ -183,8 +184,8 @@ function pushMessage(role,content,requestId="",audit=null,meta=null){const c=cur
 function bindPromptButtons(){qsa("[data-prompt]").forEach(b=>b.onclick=()=>{input.value=b.dataset.prompt;autoSize();input.focus()})}
 function setStage(x){stageBadge.textContent=x;stageBadge.dataset.stage=String(x||"").toLowerCase();if(busy)updateActivity(x)}
 function setNeuralMeta(meta){const n=$("neuralBadge");if(!n||!meta)return;const d=meta.difficulty??0,t=String(meta.adaptive_tier||meta.controller?.depth||"smart");let label="R22 · "+({fast:"Fast",smart:"Smart",deep:"Deep",apex:"Apex"}[t]||"Smart");if(meta.verification_level==="high")label+=" · Verify";if(["live","research","max","tools"].includes(meta.route))label="R22 · Live";n.textContent=label;n.classList.toggle("hot",t==="deep"||t==="apex"||meta.verification_level==="high")}
-function routeLabel(x){return ({instant:"Instant",fast:"Fast",deep:"Deep brain",creator:"Code specialist",max:"Research",ultra:"Deep brain",apex:"Apex brain",knowledge:"Main brain",live:"Live web",research:"Research",vision:"Vision",review:"Verified",backup:"Fallback","nvidia-apex":"Apex brain","nvidia-apex-final":"Apex synthesis","apex-final":"Apex synthesis","nvidia-ultra-final":"Deep synthesis","ultra-final":"Deep synthesis","local-tool":"Local tool",memory:"Memory"})[x]||x||"Auto"}
-function profileLabel(x){return ({coding:"Software",creative:"Creative",research:"Research",analysis:"Analysis",knowledge:"Knowledge",mathscience:"Math & science",writing:"Writing",chat:"General",memory:"Memory"})[x]||x||"General"}
+function routeLabel(x){return ({instant:"Instant",fast:"Fast",deep:"Deep brain",creator:"Code specialist",roblox:"Roblox Studio",max:"Research",ultra:"Deep brain",apex:"Apex brain",knowledge:"Main brain",live:"Live web",research:"Research",vision:"Vision",review:"Verified",backup:"Fallback","nvidia-apex":"Apex brain","nvidia-apex-final":"Apex synthesis","apex-final":"Apex synthesis","nvidia-ultra-final":"Deep synthesis","ultra-final":"Deep synthesis","local-tool":"Local tool",memory:"Memory"})[x]||x||"Auto"}
+function profileLabel(x){return ({coding:"Software",roblox:"Roblox Studio",creative:"Creative",research:"Research",analysis:"Analysis",knowledge:"Knowledge",mathscience:"Math & science",writing:"Writing",chat:"General",memory:"Memory"})[x]||x||"General"}
 function autoSize(){input.style.height="auto";const cap=window.innerWidth<=780?144:180;input.style.height=Math.min(input.scrollHeight,cap)+"px";if(window.innerWidth<=780&&document.activeElement===input){syncMobileViewport();requestAnimationFrame(()=>scrollToLatest(true))}}
 
 async function currentScreenFrame(){
@@ -237,7 +238,7 @@ async function refreshActiveProjectBrain(){
 function updateProjectBadge(){const p=activeProject(),b=$("projectBadge");b.textContent=p?p.name:"No project";b.classList.toggle("active",!!p);$("activeProjectDot").classList.toggle("on",!!p)}
 
 function startActivity(){startedAt=Date.now();$("activityDock").classList.remove("hidden");$("activityTitle").textContent="RONN is working";$("activityDetail").textContent="Understanding the request and choosing a reliable route.";clearInterval(activityTimer);activityTimer=setInterval(()=>{$("activityTime").textContent=Math.floor((Date.now()-startedAt)/1000)+"s"},1000)}
-function updateActivity(stage){const map={Planning:"Understanding requirements",Researching:"Checking live information and evidence",Council:"Comparing independent solution paths","Deep reasoning":"Working through a harder reasoning route",Thinking:"Checking the answer","Analyzing":"Analyzing attached content",Building:"Constructing the response",Drafting:"Creating a first solution",Reviewing:"Critiquing and repairing the draft","Parallel hypotheses":"Exploring independent approaches","Adversarial synthesis":"Checking candidates for defects","Specialist draft":"Building a specialist solution","Final synthesis":"Repairing and consolidating the final answer","Inspect evidence":"Connecting screenshots, files, logs, and project context","Reproduce or isolate failure":"Isolating the failure before changing anything","Rank root causes":"Comparing likely causes against the evidence","Apply smallest safe repair":"Choosing a reversible root-cause repair","Verify":"Checking requirements, evidence, and regressions","Deliver":"Preparing the final verified result"};$("activityDetail").textContent=map[stage]||String(stage||"Working")}
+function updateActivity(stage){const map={Planning:"Understanding requirements",Researching:"Checking live information and evidence",Council:"Comparing independent solution paths","Deep reasoning":"Working through a harder reasoning route",Thinking:"Checking the answer","Analyzing":"Analyzing attached content",Building:"Constructing the response",Drafting:"Creating a first solution",Reviewing:"Critiquing and repairing the draft","Parallel hypotheses":"Exploring independent approaches","Adversarial synthesis":"Checking candidates for defects","Specialist draft":"Building a specialist solution","Final synthesis":"Repairing and consolidating the final answer","Inspect evidence":"Connecting screenshots, files, logs, and project context","Reproduce or isolate failure":"Isolating the failure before changing anything","Rank root causes":"Comparing likely causes against the evidence","Apply smallest safe repair":"Choosing a reversible root-cause repair","Verify":"Checking requirements, evidence, and regressions","Studio state":"Reading the selected Roblox Studio state","Studio inspect":"Inspecting the existing Roblox project before changing it","Studio edit":"Applying the smallest safe Studio change","Studio verify":"Play-testing the change and checking Output","Studio repair":"Repairing a failed Studio verification","Studio cleanup":"Returning Studio to a clean test state","Deliver":"Preparing the final verified result"};$("activityDetail").textContent=map[stage]||String(stage||"Working")}
 function stopActivity(){clearInterval(activityTimer);activityTimer=null;setTimeout(()=>$("activityDock").classList.add("hidden"),500)}
 
 let ronnLocationCache=null,ronnLocationAt=0;
@@ -431,6 +432,135 @@ $("deleteProjectBtn").onclick=()=>{if(!editingProjectId)return closeProjectEdito
 async function registerDesktopDevice(){
   try{await fetch(CORE_API+"/devices/register",{method:"POST",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({device_id:deviceId,name:"RONN Desktop",platform:navigator.platform||"desktop",app_version:"R19"})})}catch{}
 }
+let robloxPairExpiresAt=0;
+
+function robloxBridgeName(bridge){
+  return String(bridge?.name||bridge?.bridge_id||"RONN Roblox Bridge");
+}
+
+function renderRobloxStudioStatus(data){
+  const state=$("robloxStudioState"),list=$("robloxStudioList"),disconnect=$("robloxDisconnectBtn");
+  if(!state||!list)return;
+
+  const bridges=Array.isArray(data?.bridges)?data.bridges:[];
+  const online=bridges.filter(b=>b?.online&&b?.mcp_connected);
+  const selectedBridge=String(data?.selected_bridge_id||"");
+  const selectedStudio=String(data?.selected_studio_id||"");
+
+  state.textContent=data?.online?"Connected":bridges.length?"Bridge offline":"Not connected";
+  state.classList.toggle("active",!!data?.online);
+  disconnect?.classList.toggle("hidden",!bridges.length);
+
+  const rows=[];
+  for(const bridge of bridges){
+    const bridgeId=String(bridge?.bridge_id||"");
+    const isOnline=!!bridge?.online&&!!bridge?.mcp_connected;
+    rows.push(`<div class="ownerRow"><div><b>${escapeHTML(robloxBridgeName(bridge))}</b><small>${isOnline?"Studio MCP connected":bridge?.online?"Bridge online · waiting for Studio MCP":"Bridge offline"}${bridge?.last_error?` · ${escapeHTML(String(bridge.last_error).slice(0,110))}`:""}</small></div><i class="diagState ${isOnline?"good":"warn"}">${isOnline?"READY":"WAIT"}</i></div>`);
+    if(isOnline){
+      const studios=Array.isArray(bridge?.studios)?bridge.studios:[];
+      for(const studio of studios){
+        const sid=String(studio?.studio_id||studio?.id||"");
+        if(!sid)continue;
+        const chosen=bridgeId===selectedBridge&&sid===selectedStudio;
+        rows.push(`<div class="ownerRow"><div><b>${escapeHTML(String(studio?.name||"Roblox Studio"))}</b><small>${studio?.place_id?"Place "+escapeHTML(String(studio.place_id)):"Connected Studio"} · ${chosen?"Selected":"Available"}</small></div><button class="${chosen?"primarySmall":"ghost"}" data-roblox-bridge="${escapeHTML(bridgeId)}" data-roblox-studio="${escapeHTML(sid)}" ${chosen?"disabled":""}>${chosen?"Selected":"Use this Studio"}</button></div>`);
+      }
+      if(!studios.length)rows.push('<div class="ownerRow"><div><b>Waiting for a Studio window</b><small>Open Roblox Studio and enable Assistant → Manage MCP Servers → Enable Studio as MCP server.</small></div></div>');
+    }
+  }
+  list.innerHTML=rows.length?rows.join(""):'<div class="emptyState">Download the bridge, enable Studio MCP, then connect this PC.</div>';
+
+  if(data?.online){
+    $("robloxPairBox")?.classList.add("hidden");
+    robloxPairExpiresAt=0;
+  }
+}
+
+async function refreshRobloxStudio(){
+  if(!$("robloxStudioState"))return;
+  try{
+    const r=await fetch("/api/roblox/status",{headers:apiHeaders(),cache:"no-store"});
+    if(!r.ok)throw new Error("status unavailable");
+    renderRobloxStudioStatus(await r.json());
+  }catch{
+    const state=$("robloxStudioState");
+    if(state){state.textContent="Unavailable";state.classList.remove("active")}
+  }
+}
+
+async function startRobloxPairing(){
+  const btn=$("robloxPairBtn"),box=$("robloxPairBox"),code=$("robloxPairCode"),expiry=$("robloxPairExpiry");
+  if(btn){btn.disabled=true;btn.textContent="Creating code…"}
+  try{
+    const r=await fetch("/api/roblox/pair/start",{method:"POST",headers:apiHeaders()});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Could not create a pairing code.");
+    robloxPairExpiresAt=Number(d.expires_at||0)*1000;
+    if(code)code.textContent=String(d.pair_code||"");
+    if(expiry)expiry.textContent="Use this once in PAIR_AND_RUN_WINDOWS.bat. It expires in about 10 minutes.";
+    box?.classList.remove("hidden");
+    try{await navigator.clipboard.writeText(String(d.pair_code||""))}catch{}
+    showToast("Pairing code created and copied.");
+  }catch(e){
+    showToast(e.message||"Could not create pairing code.");
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Connect Roblox Studio"}
+  }
+}
+
+async function downloadRobloxBridge(){
+  const btn=$("robloxBridgeDownloadBtn");
+  if(btn){btn.disabled=true;btn.textContent="Preparing bridge…"}
+  try{
+    const r=await fetch("/api/roblox/bridge/windows.zip",{headers:apiHeaders(),cache:"no-store"});
+    if(!r.ok){
+      const d=await r.json().catch(()=>({}));
+      throw new Error(d.detail||"Bridge download failed.");
+    }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob),a=document.createElement("a");
+    a.href=url;a.download="RONN_Roblox_Bridge_Windows.zip";
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    showToast("RONN Roblox Bridge downloaded.");
+  }catch(e){
+    showToast(e.message||"Bridge download failed.");
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Download Windows bridge"}
+  }
+}
+
+async function selectRobloxStudio(bridgeId,studioId){
+  if(!bridgeId||!studioId)return;
+  try{
+    const r=await fetch("/api/roblox/select",{
+      method:"POST",
+      headers:apiHeaders({"Content-Type":"application/json"}),
+      body:JSON.stringify({bridge_id:bridgeId,studio_id:studioId})
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Could not select that Studio window.");
+    showToast("RONN will use this Roblox Studio window.");
+    refreshRobloxStudio();
+  }catch(e){showToast(e.message||"Studio selection failed.")}
+}
+
+async function disconnectRobloxBridge(){
+  try{
+    const status=await (await fetch("/api/roblox/status",{headers:apiHeaders(),cache:"no-store"})).json();
+    const id=String(status?.selected_bridge_id||(status?.bridges||[])[0]?.bridge_id||"");
+    if(!id)return showToast("No bridge is paired.");
+    const r=await fetch("/api/roblox/revoke",{
+      method:"POST",
+      headers:apiHeaders({"Content-Type":"application/json"}),
+      body:JSON.stringify({bridge_id:id})
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Disconnect failed.");
+    showToast("RONN Roblox Bridge disconnected.");
+    refreshRobloxStudio();
+  }catch(e){showToast(e.message||"Disconnect failed.")}
+}
+
 async function refreshR19Capabilities(){
   const box=$("r19CapabilityMatrix");if(!box)return;
   try{
@@ -531,8 +661,14 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-PLAN-GUARD2",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ROBLOX-MCP1",{updateViaCache:"none"}).catch(()=>{}))}
 
+if($("robloxPairBtn"))$("robloxPairBtn").onclick=startRobloxPairing;
+if($("robloxBridgeDownloadBtn"))$("robloxBridgeDownloadBtn").onclick=downloadRobloxBridge;
+if($("robloxRefreshBtn"))$("robloxRefreshBtn").onclick=refreshRobloxStudio;
+if($("robloxDisconnectBtn"))$("robloxDisconnectBtn").onclick=disconnectRobloxBridge;
+if($("robloxCopyPairBtn"))$("robloxCopyPairBtn").onclick=async()=>{const code=$("robloxPairCode")?.textContent||"";if(!code||code==="—")return;try{await navigator.clipboard.writeText(code);showToast("Pairing code copied.")}catch{showToast("Could not copy the code.")}};
+if($("robloxStudioList"))$("robloxStudioList").addEventListener("click",e=>{const b=e.target.closest("[data-roblox-studio]");if(b&&!b.disabled)selectRobloxStudio(b.dataset.robloxBridge,b.dataset.robloxStudio)});
 if($("ownerRefreshBtn"))$("ownerRefreshBtn").onclick=()=>{refreshOwnerAccess();refreshEcosystemStatus()};
 if($("refreshR19Btn"))$("refreshR19Btn").onclick=refreshR19Capabilities;
 if($("qualityScreenBtn"))$("qualityScreenBtn").onclick=()=>runQualityLab("screen");
@@ -544,11 +680,11 @@ if($("vaultSaveBtn"))$("vaultSaveBtn").onclick=saveVaultItem;
 if($("ownerDeviceList"))$("ownerDeviceList").addEventListener("click",async e=>{const id=e.target.dataset.revokeDevice;if(!id)return;const r=await fetch(CORE_API+`/devices/${encodeURIComponent(id)}`,{method:"DELETE",headers:apiHeaders()});if(r.ok){showToast("Device revoked.");refreshOwnerDevices();refreshOwnerStats()}});
 if($("vaultList"))$("vaultList").addEventListener("click",async e=>{const id=e.target.dataset.vaultDelete;if(!id)return;const r=await fetch(CORE_API+`/vault/${encodeURIComponent(id)}`,{method:"DELETE",headers:apiHeaders()});if(r.ok){showToast("Vault item deleted.");refreshVault()}});
 if($("featureFlagList"))$("featureFlagList").addEventListener("change",async e=>{const flag=e.target.dataset.flag;if(!flag)return;const r=await fetch(CORE_API+`/feature-flags/${encodeURIComponent(flag)}`,{method:"PATCH",headers:apiHeaders({"Content-Type":"application/json"}),body:JSON.stringify({enabled:!!e.target.checked})});if(!r.ok){e.target.checked=!e.target.checked;showToast("Feature flag change failed.")}else showToast("Feature flag updated.")});
-registerDesktopDevice();refreshEcosystemStatus();
+registerDesktopDevice();refreshEcosystemStatus();refreshRobloxStudio();
 ensureWebAuth();
 
 if(!chats.length)currentChat();else if(!chats.some(c=>c.id===currentChatId)){currentChatId=chats[0].id;safeSet(CURRENT_KEY,currentChatId)}
-renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);setTimeout(maybeRunBrainArena,8000);if(window.innerWidth>780)input.focus();
+renderChatList();renderMessages();bindPromptButtons();updateProjectBadge();refreshStatus();refreshMemory();setInterval(refreshStatus,12000);setInterval(refreshRobloxStudio,12000);setTimeout(maybeRunBrainArena,8000);if(window.innerWidth>780)input.focus();
 
 window.__RONN_UI_READY=true;
 

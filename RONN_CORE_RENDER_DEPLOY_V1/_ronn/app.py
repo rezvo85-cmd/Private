@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import io
+import zipfile
 import sqlite3
 import time
 import threading
@@ -135,6 +137,15 @@ from task_engine import start_task, checkpoint as task_checkpoint, finish_task, 
 from provider_engine import record as record_provider_event, recent_health, rank_models, summary as provider_health_summary
 from artifact_engine import write_artifact, list_artifacts, inspect_text
 from document_engine import extract_document, status as document_engine_status
+from roblox_bridge_store import default_store as roblox_bridge_store, status as roblox_bridge_store_status
+from roblox_studio_gateway import (
+    status as roblox_gateway_status,
+    studios as roblox_gateway_studios,
+    select_target as roblox_gateway_select_target,
+    manual_tool_call as roblox_gateway_tool_call,
+    capability_status as roblox_gateway_capability_status,
+)
+from roblox_studio_agent import run as roblox_studio_agent_run, status as roblox_studio_agent_status
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -186,6 +197,9 @@ def verify_package_integrity():
         "_ronn/r23_context.py",
         "_ronn/r23_research.py",
         "_ronn/r23_agent_runtime.py",
+        "_ronn/r23_task_graph.py",
+        "_ronn/r23_workflow_runtime.py",
+        "_ronn/r23_tool_arbiter.py",
         "_ronn/r23_eval_lab.py",
 
         # Legitimate post-R21 files still tracked by the original manifest.
@@ -300,7 +314,7 @@ For full games, think in systems: core loop, progression, content pipeline, data
 When a Studio snapshot is available, inspect existing names and scripts before planning. Preserve compatible systems instead of duplicating them.
 When the user asks for a new mechanic, create the minimum complete production-ready slice: config, shared modules, remotes, authoritative server logic, client input/visual hooks, and integration points.
 After coding, trace the event flow end-to-end and repair obvious missing references before returning the plan.
-When Studio automation is available, create a safe structured edit plan that can be approved and executed by the local Studio plugin.
+When Studio automation is available, inspect the real project first and use the official Roblox Studio MCP through RONN's paired local bridge. Keep every tool call bound to the exact Studio instance, make the smallest safe edit, Play-test runtime changes, inspect Output, and never claim verification without real MCP evidence.
 Do not fake asset IDs; clearly label placeholders when an animation, sound, mesh, image, or marketplace asset is required.
 """,
     "creative": """
@@ -345,7 +359,7 @@ STOPWORDS = {
     "can","could","would","should","what","how","why","when","where","who","be",
 }
 
-app = FastAPI(title="RONN Core + Cognitive OS", version="R19 AGENT OS / Core API v1.9")
+app = FastAPI(title="RONN Core + Cognitive OS", version="R23 / Core API v1.9 + Roblox Studio MCP")
 _CORS = [x.strip() for x in os.getenv("RONN_CORS_ORIGINS", "").split(",") if x.strip()]
 if _CORS:
     app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
@@ -353,11 +367,6 @@ _rate_lock = threading.Lock()
 _rate_hits = defaultdict(deque)
 _studio_plan_lock = threading.Lock()
 _studio_plans = {}
-STUDIO_BRIDGE_URL = os.getenv("RONN_STUDIO_BRIDGE_URL", "http://127.0.0.1:8766").rstrip("/")
-_studio_token_path = DATA / "RONN_STUDIO_TOKEN.txt"
-STUDIO_BRIDGE_TOKEN = os.getenv("RONN_STUDIO_BRIDGE_TOKEN", "").strip()
-if not STUDIO_BRIDGE_TOKEN and _studio_token_path.exists():
-    STUDIO_BRIDGE_TOKEN = _studio_token_path.read_text(encoding="utf-8").strip()
 
 # ---------------- public guard ----------------
 
@@ -529,6 +538,17 @@ def _legacy_owner_authorized(request: Request) -> bool:
 
 @app.middleware("http")
 async def public_guard(request: Request, call_next):
+    if request.url.path.startswith("/bridge/roblox/"):
+        # Bridge endpoints use their own bearer-token auth, but still get a
+        # strict body-size boundary before FastAPI parses attacker-controlled JSON.
+        cl=request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > min(MAX_BODY_BYTES,3*1024*1024):
+                    return JSONResponse({"detail":"Roblox bridge request too large."},status_code=413)
+            except ValueError:
+                pass
+
     if request.url.path.startswith("/api/"):
         private_api=(
             _legacy_private_route(request.url.path)
@@ -842,6 +862,43 @@ class StudioPlanBody(BaseModel):
 
 class StudioApproveBody(BaseModel):
     plan_id: str
+
+class RobloxBridgePairBody(BaseModel):
+    pair_code: str
+    bridge_id: str
+    name: str = "RONN Roblox Bridge"
+    metadata: dict = Field(default_factory=dict)
+
+class RobloxBridgeHeartbeatBody(BaseModel):
+    bridge_version: str = ""
+    platform: str = ""
+    python: str = ""
+    mcp_connected: bool = False
+    tools: list[dict] = Field(default_factory=list)
+    studios: list[dict] = Field(default_factory=list)
+    last_error: str = ""
+    name: str = ""
+
+class RobloxBridgePullBody(BaseModel):
+    limit: int = 1
+
+class RobloxBridgeResultBody(BaseModel):
+    result: dict = Field(default_factory=dict)
+    error: str = ""
+
+class RobloxStudioSelectBody(BaseModel):
+    bridge_id: str
+    studio_id: str
+
+class RobloxStudioToolBody(BaseModel):
+    name: str
+    arguments: dict = Field(default_factory=dict)
+    bridge_id: str | None = None
+    studio_id: str | None = None
+    timeout: float = 45.0
+
+class RobloxBridgeRevokeBody(BaseModel):
+    bridge_id: str | None = None
 
 class MemoryBody(BaseModel):
     text: str
@@ -1205,6 +1262,12 @@ def factual_question(message: str):
 def task_profile(message: str, files):
     low = message.lower()
     names = " ".join(f.name.lower() for f in files)
+    if any(x in low or x in names for x in (
+        "roblox","roblox studio","luau","rbxl","rbxlx","serverscriptservice",
+        "replicatedstorage","serverstorage","starterplayer","startergui",
+        "remoteevent","remotefunction","modulescript","localscript"
+    )):
+        return "roblox"
     if any(x in low or x in names for x in (
         "code","script","debug","api","python","javascript","typescript","html","css",".py",".js",".ts",".json",
         "database","backend","frontend","algorithm","class ","function ","github","server","client"
@@ -2595,6 +2658,15 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
             pass
     try:
         if _r20.get("r23"):
+            _studio_model_fn=None
+            _studio_checkpoint_fn=None
+            if ((_r20.get("capabilities") or {}).get("roblox_studio")):
+                def _studio_model_fn(messages,max_tokens=1600):
+                    text,_used=nonstream_with_fallback(model,route,messages,max_tokens)
+                    return text
+                def _studio_checkpoint_fn(stage,state,detail):
+                    return task_checkpoint(request_id,stage,state,detail)
+
             _workflow_run = r23_workflow_run(
                 owner,
                 request_id,
@@ -2603,6 +2675,8 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 _r20,
                 repair_fn=_r16_repair_model,
                 checkpoint_fn=task_checkpoint,
+                studio_fn=_studio_model_fn,
+                studio_checkpoint_fn=_studio_checkpoint_fn,
             )
             _tool_run = _workflow_run.get("tool_run") or {
                 "planned": [], "executed": [], "evidence": "", "presentation": None,
@@ -3065,276 +3139,126 @@ Do not mention drafts, critics, councils, hidden reasoning, or this instruction.
 
 # ---------------- Roblox Studio agent ----------------
 
-STUDIO_ALLOWED_ACTIONS = {
-    "ensure_container",
-    "upsert_script",
-    "create_instance",
-    "set_properties",
-    "open_script",
-}
-STUDIO_ALLOWED_SCRIPT_CLASSES = {"Script", "LocalScript", "ModuleScript"}
-STUDIO_ALLOWED_INSTANCE_CLASSES = {
-    "Folder","Model","Part","MeshPart","Attachment",
-    "RemoteEvent","RemoteFunction","BindableEvent","BindableFunction",
-    "Configuration","StringValue","BoolValue","NumberValue","IntValue",
-    "ObjectValue","Vector3Value","CFrameValue","Color3Value",
-    "Sound","Animation","ParticleEmitter","Trail","Beam",
-    "ScreenGui","Frame","TextLabel","TextButton","ImageLabel","ImageButton",
-    "BillboardGui","SurfaceGui","Highlight","PointLight","SpotLight","SurfaceLight",
-    "WeldConstraint","Motor6D"
-}
-STUDIO_ROOTS = {
-    "Workspace","ReplicatedStorage","ServerScriptService","ServerStorage",
-    "StarterPlayer","StarterGui","StarterPack","Lighting","SoundService",
-    "Teams","TextChatService"
-}
+def _model_body_dict(body):
+    if hasattr(body,"model_dump"):
+        return body.model_dump()
+    if hasattr(body,"dict"):
+        return body.dict()
+    return dict(body or {})
 
-def studio_bridge_headers():
-    headers = {"Content-Type": "application/json"}
-    if STUDIO_BRIDGE_TOKEN:
-        headers["X-RONN-Studio-Token"] = STUDIO_BRIDGE_TOKEN
-    return headers
 
-def studio_bridge_status():
-    try:
-        r = requests.get(f"{STUDIO_BRIDGE_URL}/health", headers=studio_bridge_headers(), timeout=1.4)
-        if not r.ok:
-            return {"online":False,"plugin_connected":False,"detail":f"bridge {r.status_code}"}
-        data = r.json()
-        return {
-            "online":True,
-            "plugin_connected":bool(data.get("plugin_connected")),
-            "last_snapshot_at":data.get("last_snapshot_at"),
-            "pending_jobs":data.get("pending_jobs",0),
-            "last_result":data.get("last_result"),
-        }
-    except Exception:
-        return {"online":False,"plugin_connected":False}
+def studio_bridge_status(owner: str = "legacy"):
+    """Compatibility view for the old /api/studio/status surface."""
+    data=roblox_gateway_status(owner)
+    return {
+        "online":bool(data.get("online")),
+        "plugin_connected":bool(data.get("online")),
+        "official_mcp":True,
+        "transport":"paired_local_stdio_mcp",
+        "online_bridge_count":int(data.get("online_bridge_count") or 0),
+        "selected_studio_id":data.get("selected_studio_id"),
+    }
 
-def studio_snapshot():
-    try:
-        r = requests.get(f"{STUDIO_BRIDGE_URL}/snapshot", headers=studio_bridge_headers(), timeout=2)
-        if r.ok:
-            return r.json().get("snapshot") or {}
-    except Exception:
-        pass
-    return {}
 
-def extract_json_object(text: str):
-    text = re.sub(r"(?is)<think>.*?</think>|</?think>", "", text or "").strip()
-    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.I)
-    if fence:
-        text = fence.group(1).strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        text = text[start:end+1]
-    return json.loads(text)
+def studio_snapshot(owner: str = "legacy"):
+    data=roblox_gateway_status(owner)
+    return {
+        "official_mcp":True,
+        "online":bool(data.get("online")),
+        "selected_bridge_id":data.get("selected_bridge_id"),
+        "selected_studio_id":data.get("selected_studio_id"),
+        "studios":roblox_gateway_studios(owner),
+    }
 
-def normalize_studio_path(path: str):
-    path = (path or "").strip().replace("\\\\","/").replace("\\","/")
-    path = re.sub(r"/+","/",path).strip("/")
-    if path.startswith("game/"):
-        path = path[5:]
-    root = path.split("/",1)[0] if path else ""
-    if root not in STUDIO_ROOTS:
-        raise ValueError(f"Unsupported Studio root: {root or 'empty'}")
-    return path
 
-def validate_studio_plan(raw: dict):
-    if not isinstance(raw, dict):
-        raise ValueError("Planner output was not an object.")
-    actions = raw.get("actions")
-    if not isinstance(actions, list) or not actions:
-        raise ValueError("Planner returned no actions.")
-    if len(actions) > 80:
-        raise ValueError("Plan is too large. Break the task into smaller stages.")
+def _studio_model_fn_for(task: str, mode: str = "apex"):
+    decision=r20_plan(
+        task,
+        history=[],
+        file_names=[],
+        has_images=False,
+        has_project=True,
+        agent_mode=True,
+        explicit_mode=mode,
+    )
+    model,route=r20_resolve_route(
+        decision,
+        providers={
+            "groq":groq_key_loaded(),
+            "nvidia":nvidia_key_loaded(),
+            "openrouter":openrouter_key_loaded(),
+        },
+        models={
+            "fast":FAST_MODEL,"smart":SMART_MODEL,"creator":CREATOR_MODEL,"vision":VISION_MODEL,
+            "live":LIVE_MODEL,"research":RESEARCH_MODEL,"nvidia":NVIDIA_MODEL,
+            "or_nemotron":OR_NEMOTRON_MODEL,"or_deepseek":OR_DEEPSEEK_MODEL,"or_qwen":OR_QWEN_MODEL,
+        },
+    )
+    def planner(messages,max_tokens=1600):
+        text,_used=nonstream_with_fallback(model,route,messages,max_tokens)
+        return text
+    return planner
 
-    clean = []
-    for i, a in enumerate(actions):
-        if not isinstance(a, dict):
-            raise ValueError(f"Action {i+1} is invalid.")
-        kind = a.get("type")
-        if kind not in STUDIO_ALLOWED_ACTIONS:
-            raise ValueError(f"Unsupported Studio action: {kind}")
-        item = {"type":kind}
-
-        if kind == "ensure_container":
-            item["path"] = normalize_studio_path(a.get("path",""))
-            cls = a.get("className","Folder")
-            if cls not in {"Folder","Model","Configuration"}:
-                raise ValueError("Container class is not allowed.")
-            item["className"] = cls
-
-        elif kind == "upsert_script":
-            item["path"] = normalize_studio_path(a.get("path",""))
-            cls = a.get("className","ModuleScript")
-            if cls not in STUDIO_ALLOWED_SCRIPT_CLASSES:
-                raise ValueError("Script class is not allowed.")
-            src = a.get("source","")
-            if not isinstance(src,str) or not src.strip():
-                raise ValueError("Script source cannot be empty.")
-            if len(src) > 65000:
-                raise ValueError("One script is too large.")
-            item["className"] = cls
-            item["source"] = src
-
-        elif kind == "create_instance":
-            item["path"] = normalize_studio_path(a.get("path",""))
-            cls = a.get("className","")
-            if cls not in STUDIO_ALLOWED_INSTANCE_CLASSES:
-                raise ValueError(f"Instance class is not allowed: {cls}")
-            item["className"] = cls
-            props = a.get("properties") or {}
-            if not isinstance(props,dict):
-                props = {}
-            item["properties"] = props
-
-        elif kind == "set_properties":
-            item["path"] = normalize_studio_path(a.get("path",""))
-            props = a.get("properties") or {}
-            if not isinstance(props,dict) or not props:
-                raise ValueError("set_properties needs properties.")
-            # Block dangerous/structural properties from AI plans.
-            blocked_props = {"Parent","Archivable","RobloxLocked","Source","ScriptGuid","UniqueId"}
-            item["properties"] = {k:v for k,v in props.items() if k not in blocked_props}
-
-        elif kind == "open_script":
-            item["path"] = normalize_studio_path(a.get("path",""))
-
-        clean.append(item)
-
-    title = re.sub(r"\s+"," ",str(raw.get("title") or "RONN Studio build")).strip()[:120]
-    summary = re.sub(r"\s+"," ",str(raw.get("summary") or "")).strip()[:1000]
-    notes = raw.get("notes") if isinstance(raw.get("notes"),list) else []
-    notes = [re.sub(r"\s+"," ",str(x)).strip()[:300] for x in notes[:12] if str(x).strip()]
-    return {"title":title,"summary":summary,"actions":clean,"notes":notes}
 
 def make_studio_plan(owner: str, body: StudioPlanBody):
-    if not key_loaded():
-        raise RuntimeError("RONN could not load the Groq API key.")
-
-    snapshot = studio_snapshot()
-    snapshot_text = json.dumps(snapshot, ensure_ascii=False)[:42000] if snapshot else "{}"
-
-    planner_system = """You are RONN MAX ULTRA APEX's Roblox Studio build planner.
-Your job is to turn the user's Roblox request into a SAFE, COMPLETE, STRUCTURED Studio edit plan.
-
-You may ONLY output a single JSON object. No markdown and no commentary.
-
-Allowed action forms:
-{"type":"ensure_container","path":"ReplicatedStorage/StandSystem","className":"Folder"}
-{"type":"upsert_script","path":"ReplicatedStorage/StandSystem/StandConfig","className":"ModuleScript","source":"-- Luau source"}
-{"type":"create_instance","path":"ReplicatedStorage/Remotes/SummonStand","className":"RemoteEvent","properties":{}}
-{"type":"set_properties","path":"Workspace/SomePart","properties":{"Anchored":true,"CanCollide":false}}
-{"type":"open_script","path":"ReplicatedStorage/StandSystem/StandConfig"}
-
-Rules:
-- Never delete existing instances.
-- Never rename or overwrite unrelated systems.
-- Prefer creating a namespaced folder for a new system.
-- If updating an existing script, use its exact current path from the snapshot.
-- Keep client/server boundaries correct.
-- Server must validate remote requests.
-- For abilities, include cooldown/state authority and cleanup.
-- Do not invent animation/sound asset IDs. Use clearly named config placeholders.
-- Keep all script/module/remote names internally consistent.
-- If the request is large, create a coherent first production-ready stage rather than hundreds of low-quality actions.
-- Build actual Luau code, not pseudocode.
-- Use typed Luau where it improves clarity, but do not make code unnecessarily complicated.
-- For a "stand", normally create configuration, remotes, server service/controller, client controller, and a model/container hook.
-- Do not create destructive or OS-level actions. Studio actions only.
-
-Return exactly:
-{
-  "title":"...",
-  "summary":"...",
-  "notes":["..."],
-  "actions":[ ... ]
-}
-"""
-
-    context = (body.project_context or "").strip()
-    user = f"""USER REQUEST:
-{body.task}
-
-ACTIVE PROJECT CONTEXT:
-{context[:12000] or "(none)"}
-
-CURRENT ROBLOX STUDIO SNAPSHOT:
-{snapshot_text}
-"""
-    studio_skill_context, studio_skill_names = build_skill_context(body.task, "roblox")
-    planner_system += "\n\n" + intelligence_directive(body.task, 6, "roblox")
-    if studio_skill_context:
-        planner_system += "\n\nACTIVE ROBLOX BUILD SKILLS:\n" + studio_skill_context
-    messages = [{"role":"system","content":planner_system},{"role":"user","content":user}]
-    # Creator produces the plan with automatic fallback. Reviewer improves it when quota allows.
-    draft = nonstream_answer(NVIDIA_MODEL if nvidia_key_loaded() else CREATOR_MODEL, "nvidia-creator" if nvidia_key_loaded() else "creator", messages, 1800)
-    reviewer = """You are RONN's Roblox build-plan verifier.
-Return ONLY corrected JSON in the exact same schema. Check:
-- every module/event/function reference resolves,
-- client/server placement makes sense,
-- Luau is syntactically plausible,
-- paths are consistent,
-- remotes are server-validated,
-- cooldown/state/cleanup are present where needed,
-- no destructive actions exist,
-- the requested feature is actually implemented.
-Preserve good work and fix mistakes. Do not output markdown."""
-    checked = ""
-    try:
-        checked = nonstream_answer(
-            SMART_MODEL, "deep",
-            [{"role":"system","content":reviewer},
-             {"role":"user","content":"REQUEST:\n"+body.task[:10000]+"\n\nPLAN:\n"+draft[:50000]}],
-            1200
-        )
-    except Exception:
-        checked = ""
-    raw = extract_json_object(checked or draft)
-    plan = validate_studio_plan(raw)
-    plan_id = uuid.uuid4().hex
+    """Legacy two-step preview. Actual execution uses the same bounded MCP agent."""
+    task=(body.task or "").strip()
+    if not task:
+        raise ValueError("Tell RONN what you want it to do in Studio.")
+    status=roblox_gateway_status(owner)
+    if not status.get("online"):
+        raise RuntimeError("RONN Roblox Bridge is offline. Pair the local bridge and open Roblox Studio first.")
+    snapshot=studio_snapshot(owner)
+    plan_id=uuid.uuid4().hex
+    plan={
+        "title":"RONN Studio MCP task",
+        "summary":"R23 will inspect the selected Studio through the official MCP, make only schema-validated edits, then Play-test and inspect Output when runtime verification is required.",
+        "task":task[:10000],
+        "target_studio_id":snapshot.get("selected_studio_id"),
+        "official_mcp":True,
+    }
     with _studio_plan_lock:
-        _studio_plans[plan_id] = {
+        _studio_plans[plan_id]={
             "owner":owner,
             "plan":plan,
             "created_at":int(time.time()),
-            "task":body.task[:10000],
+            "task":task[:10000],
+            "mode":body.mode or "apex",
         }
         _prune_studio_plans_locked()
-    return {"plan_id":plan_id,"plan":plan,"snapshot_available":bool(snapshot)}
+    return {"plan_id":plan_id,"plan":plan,"snapshot":snapshot}
+
 
 def approve_studio_plan(owner: str, plan_id: str):
     with _studio_plan_lock:
         _prune_studio_plans_locked()
-        saved = _studio_plans.get(plan_id)
+        saved=_studio_plans.get(plan_id)
     if not saved or saved.get("owner") != owner:
         raise ValueError("Studio plan was not found or expired.")
-    status = studio_bridge_status()
-    if not status.get("online"):
-        raise RuntimeError("RONN Studio Bridge is offline.")
-    if not status.get("plugin_connected"):
-        raise RuntimeError("Roblox Studio plugin is not connected to RONN Studio Bridge.")
-
-    payload = {
-        "job_id":uuid.uuid4().hex,
-        "title":saved["plan"]["title"],
-        "task":saved["task"],
-        "actions":saved["plan"]["actions"],
-        "created_at":int(time.time()),
-    }
-    r = requests.post(
-        f"{STUDIO_BRIDGE_URL}/enqueue",
-        headers=studio_bridge_headers(),
-        json=payload,
-        timeout=4
+    planner=_studio_model_fn_for(saved["task"],saved.get("mode") or "apex")
+    result=roblox_studio_agent_run(
+        owner,
+        saved["task"],
+        model_fn=planner,
+        depth=saved.get("mode") or "apex",
     )
-    if not r.ok:
-        raise RuntimeError(f"Studio Bridge rejected the job ({r.status_code}).")
+    if not result.get("available"):
+        raise RuntimeError("Roblox Studio MCP is not available: "+str(result.get("reason") or "offline"))
     with _studio_plan_lock:
         _studio_plans.pop(plan_id,None)
-    return r.json()
+    return result
+
+
+def _bridge_auth(request: Request):
+    auth=(request.headers.get("authorization") or "").strip()
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(401,"Missing RONN Roblox bridge token.")
+    token=auth[7:].strip()
+    info=roblox_bridge_store().authenticate(token)
+    if not info:
+        raise HTTPException(401,"RONN Roblox bridge token is invalid or revoked.")
+    return token,info
+
 
 # ---------------- API ----------------
 
@@ -3357,25 +3281,30 @@ def index_head():
 
 @app.get("/api/studio/status")
 def studio_status(request: Request):
-    return studio_bridge_status()
+    # This legacy route is public for old clients, so keep it intentionally redacted.
+    data=studio_bridge_status(owner_id(request))
+    return {
+        "online":data.get("online",False),
+        "plugin_connected":data.get("plugin_connected",False),
+        "official_mcp":True,
+        "transport":data.get("transport"),
+    }
+
 
 @app.get("/api/studio/snapshot")
 def studio_snapshot_api(request: Request):
-    return {"snapshot":studio_snapshot()}
+    return {"snapshot":studio_snapshot(owner_id(request))}
+
 
 @app.post("/api/studio/plan")
 def studio_plan_api(body: StudioPlanBody, request: Request):
-    task = (body.task or "").strip()
-    if not task:
-        raise HTTPException(400,"Tell RONN what you want it to build in Studio.")
     try:
         return make_studio_plan(owner_id(request), body)
     except ValueError as e:
         raise HTTPException(400,str(e))
     except RuntimeError as e:
         raise HTTPException(503,str(e))
-    except Exception as e:
-        raise HTTPException(500,f"Studio planning failed: {e}")
+
 
 @app.post("/api/studio/approve")
 def studio_approve_api(body: StudioApproveBody, request: Request):
@@ -3385,6 +3314,159 @@ def studio_approve_api(body: StudioApproveBody, request: Request):
         raise HTTPException(400,str(e))
     except RuntimeError as e:
         raise HTTPException(503,str(e))
+
+
+# Owner-side Roblox bridge management. These stay under /api so the existing
+# RONN owner/session middleware protects them.
+@app.post("/api/roblox/pair/start")
+def roblox_pair_start(request: Request):
+    return roblox_bridge_store().start_pairing(owner_id(request))
+
+
+@app.get("/api/roblox/bridge/windows.zip")
+def roblox_bridge_windows_zip(request: Request):
+    # Owner-authenticated convenience package. The ZIP contains no provider keys,
+    # owner tokens, pairing codes, project data, or generated configuration.
+    bridge_dir=BASE.parent / "roblox_bridge"
+    allowed=(
+        "bridge.py",
+        "requirements.txt",
+        "install_windows.bat",
+        "PAIR_AND_RUN_WINDOWS.bat",
+        "RUN_WINDOWS.bat",
+        "README.md",
+    )
+    missing=[name for name in allowed if not (bridge_dir/name).is_file()]
+    if missing:
+        raise HTTPException(503,"RONN Roblox Bridge package is incomplete: "+", ".join(missing))
+    buf=io.BytesIO()
+    with zipfile.ZipFile(buf,"w",compression=zipfile.ZIP_DEFLATED,compresslevel=9) as zf:
+        for name in allowed:
+            zf.writestr(
+                "RONN_Roblox_Bridge/"+name,
+                (bridge_dir/name).read_bytes(),
+            )
+    data=buf.getvalue()
+    if not data or len(data)>2*1024*1024:
+        raise HTTPException(500,"RONN Roblox Bridge package could not be built safely.")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition":'attachment; filename="RONN_Roblox_Bridge_Windows.zip"',
+            "Cache-Control":"no-store",
+            "X-RONN-Bridge-Version":"1.0.0",
+        },
+    )
+
+
+@app.get("/api/roblox/status")
+def roblox_status_api(request: Request):
+    return roblox_gateway_status(owner_id(request))
+
+
+@app.get("/api/roblox/studios")
+def roblox_studios_api(request: Request):
+    return {"studios":roblox_gateway_studios(owner_id(request))}
+
+
+@app.post("/api/roblox/select")
+def roblox_select_api(body: RobloxStudioSelectBody, request: Request):
+    try:
+        return roblox_gateway_select_target(
+            owner_id(request),
+            body.bridge_id,
+            body.studio_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
+
+
+@app.post("/api/roblox/tool")
+def roblox_tool_api(body: RobloxStudioToolBody, request: Request):
+    # Diagnostic/manual owner tool call. Normal chat goes through the bounded
+    # R23 Studio agent instead of this endpoint.
+    try:
+        return roblox_gateway_tool_call(
+            owner_id(request),
+            body.name,
+            body.arguments,
+            bridge_id=body.bridge_id,
+            studio_id=body.studio_id,
+            timeout=max(5.0,min(float(body.timeout or 45.0),120.0)),
+        )
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
+
+
+@app.get("/api/roblox/jobs/{job_id}")
+def roblox_job_api(job_id: str, request: Request):
+    row=roblox_bridge_store().get_job(owner_id(request),job_id)
+    if not row:
+        raise HTTPException(404,"Roblox bridge job not found.")
+    return row
+
+
+@app.post("/api/roblox/revoke")
+def roblox_revoke_api(body: RobloxBridgeRevokeBody, request: Request):
+    return {
+        "revoked":roblox_bridge_store().revoke(
+            owner_id(request),
+            body.bridge_id,
+        )
+    }
+
+
+# Local bridge endpoints intentionally live OUTSIDE /api. They authenticate with
+# the high-entropy bridge token rather than the browser owner session.
+@app.post("/bridge/roblox/pair")
+def roblox_bridge_pair_api(body: RobloxBridgePairBody, request: Request):
+    if not _consume_rate_limit("roblox-pair:"+client_key(request),12):
+        raise HTTPException(429,"Too many Roblox bridge pairing attempts. Wait about a minute.")
+    try:
+        return roblox_bridge_store().pair_bridge(
+            body.pair_code,
+            body.bridge_id,
+            body.name,
+            body.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
+
+
+@app.post("/bridge/roblox/heartbeat")
+def roblox_bridge_heartbeat_api(body: RobloxBridgeHeartbeatBody, request: Request):
+    token,_info=_bridge_auth(request)
+    try:
+        return roblox_bridge_store().heartbeat(token,_model_body_dict(body))
+    except PermissionError as exc:
+        raise HTTPException(401,str(exc))
+
+
+@app.post("/bridge/roblox/jobs/pull")
+def roblox_bridge_pull_api(body: RobloxBridgePullBody, request: Request):
+    token,_info=_bridge_auth(request)
+    try:
+        jobs=roblox_bridge_store().pull(token,limit=max(1,min(int(body.limit or 1),4)))
+        return {"jobs":jobs}
+    except PermissionError as exc:
+        raise HTTPException(401,str(exc))
+
+
+@app.post("/bridge/roblox/jobs/{job_id}/result")
+def roblox_bridge_result_api(job_id: str, body: RobloxBridgeResultBody, request: Request):
+    token,_info=_bridge_auth(request)
+    try:
+        return roblox_bridge_store().complete(
+            token,
+            job_id,
+            result=body.result,
+            error=body.error,
+        )
+    except PermissionError as exc:
+        raise HTTPException(401,str(exc))
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
 
 
 @app.get("/api/capabilities")
@@ -3438,6 +3520,8 @@ def capabilities():
         "r23_unified_brain": r20_status(),
         "r23_all_11": r23_capability_status(),
         "r23_agent_runtime": r23_agent_status(),
+        "r23_roblox_studio": roblox_studio_agent_status(),
+        "roblox_studio_gateway": roblox_gateway_capability_status(),
         "r23_long_context": r23_context_status(),
         "r23_quality_lab": r23_quality_status(_quality_lab_candidates("main")),
         "r23_release_ready": r23_eval_run().get("all_11_ready",False),
@@ -3756,6 +3840,8 @@ def r23_capabilities_api():
         "document_engine":document_engine_status(),
         "workflow_runtime":r23_workflow_status(),
         "deepeval":r23_deepeval_status(),
+        "roblox_studio":roblox_studio_agent_status(),
+        "roblox_studio_gateway":roblox_gateway_capability_status(),
     }
 
 _R23_ARENA_CATALOG_CACHE={"at":0.0,"ok":False,"openrouter_ids":set()}
@@ -4198,6 +4284,7 @@ def status(request: Request):
         "r23_all_11_ready":r23_eval_run().get("all_11_ready",False),
         "r23_brain":r20_status(),
         "r23_agent_runtime":r23_agent_status(),
+        "r23_roblox_studio":roblox_gateway_capability_status(owner),
         "r23_context":r23_context_status(),
         "r23_brain_arena":r23_arena_status(_brain_arena_candidates(),_brain_arena_challengers(_brain_arena_candidates())),
         "r23_quality_lab":r23_quality_status(_quality_lab_candidates("main")),

@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
+      - "RONN_CORE_RENDER_DEPLOY_V1/roblox_bridge/**"
       - ".github/workflows/ronn-r14-ci.yml"
       - "render.yaml"
   pull_request:
     branches: [main]
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
+      - "RONN_CORE_RENDER_DEPLOY_V1/roblox_bridge/**"
       - ".github/workflows/ronn-r14-ci.yml"
       - "render.yaml"
 
@@ -47,6 +49,15 @@ jobs:
       - name: Compile Python
         run: |
           python -m py_compile *.py
+
+      - name: Roblox Studio MCP cloud integration selftest
+        run: |
+          python roblox_bridge_selftest.py
+          if grep -Eq '^mcp([<>=~! ]|$)' requirements.txt; then
+            echo "The MCP SDK must stay local-only and must not enter Core production requirements."
+            exit 1
+          fi
+          echo "Roblox Studio MCP cloud integration: ok"
 
       - name: Run intelligence benchmarks
         run: |
@@ -2097,7 +2108,7 @@ jobs:
           brain=Path("r23_brain.py").read_text(encoding="utf-8").lower()
           assert "browser_use" not in brain
           runtime=agent_status()
-          assert runtime["version"] == "R23-AGENT-3"
+          assert runtime["version"] == "R23-AGENT-4"
           assert runtime["browser_use"]["scope"] == "bounded_browser_executor"
           print("Browser Use R23 ownership/lazy-load/safety boundary: ok")
           PY
@@ -2276,12 +2287,17 @@ jobs:
 
           const index=fs.readFileSync("static/index.html","utf8");
           const sw=fs.readFileSync("static/service-worker.js","utf8");
-          const version="RONN-R23-PLAN-GUARD2";
+          const version="RONN-R23-ROBLOX-MCP1";
           if(!index.includes("/static/app.js?v="+version))throw new Error("index app.js cache-bust version mismatch");
           if(!index.includes("/static/style.css?v="+version))throw new Error("index style cache-bust version mismatch");
           if(!sw.includes("/static/app.js?v="+version))throw new Error("service worker asset version mismatch");
-          if(!sw.includes("ronn-assets-r23-plan-guard2"))throw new Error("service worker cache name mismatch");
+          if(!sw.includes("ronn-assets-r23-roblox-mcp1"))throw new Error("service worker cache name mismatch");
           if(!src.includes("/service-worker.js?v="+version))throw new Error("service worker registration version mismatch");
+          if(!index.includes('id="robloxStudioCard"'))throw new Error("Roblox Studio settings panel missing");
+          if(!src.includes("/api/roblox/pair/start"))throw new Error("Roblox pairing UI not wired");
+          if(!src.includes("/api/roblox/bridge/windows.zip"))throw new Error("Roblox bridge download UI not wired");
+          if(!src.includes("/api/roblox/select"))throw new Error("Roblox Studio target selector not wired");
+          console.log("Roblox Studio setup UI wiring: ok");
           console.log("web asset version/cache bust consistency: ok");
           JS
 
@@ -2306,6 +2322,56 @@ jobs:
             exit 1
           fi
           echo "secret-pattern scan: ok"
+
+  external_roblox_bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install local bridge dependencies
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/roblox_bridge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile and import local Studio bridge
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/roblox_bridge
+        run: |
+          python -m py_compile bridge.py
+          python - <<'PY'
+          import importlib.metadata
+          import bridge
+
+          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.0.0"
+          assert "list_roblox_studios" in bridge.ALLOWED_TOOLS
+          assert "multi_edit" in bridge.ALLOWED_TOOLS
+          assert "execute_luau" in bridge.ALLOWED_TOOLS
+          assert "shell_exec" not in bridge.ALLOWED_TOOLS
+          assert importlib.metadata.version("mcp") == "2.2.0"
+
+          rows=bridge._walk_for_studios([
+              {"studio_id":"ci-studio","name":"CI Place","place_id":"1"}
+          ])
+          assert rows == [{
+              "studio_id":"ci-studio",
+              "name":"CI Place",
+              "place_id":"1",
+          }], rows
+
+          # Never require a provider/API key in the local Studio bridge.
+          source=open("bridge.py",encoding="utf-8").read()
+          for forbidden in ("GROQ_API_KEY","OPENROUTER_API_KEY","NVIDIA_API_KEY","CLOUD_API_KEY"):
+              assert forbidden not in source
+          print("local Roblox Studio MCP bridge dependency/API smoke: ok")
+          PY
 
   external_browser:
     runs-on: ubuntu-latest
