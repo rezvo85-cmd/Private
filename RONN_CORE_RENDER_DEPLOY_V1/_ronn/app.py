@@ -883,6 +883,7 @@ class RobloxBridgePullBody(BaseModel):
     limit: int = 1
 
 class RobloxBridgeResultBody(BaseModel):
+    claim_token: str
     result: dict = Field(default_factory=dict)
     error: str = ""
 
@@ -3460,6 +3461,7 @@ def roblox_bridge_result_api(job_id: str, body: RobloxBridgeResultBody, request:
         return roblox_bridge_store().complete(
             token,
             job_id,
+            claim_token=body.claim_token,
             result=body.result,
             error=body.error,
         )
