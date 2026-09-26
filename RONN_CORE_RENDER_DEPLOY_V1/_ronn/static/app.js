@@ -447,7 +447,7 @@ function renderRobloxStudioStatus(data){
   const selectedBridge=String(data?.selected_bridge_id||"");
   const selectedStudio=String(data?.selected_studio_id||"");
 
-  state.textContent=data?.online?"Connected":bridges.length?"Bridge offline":"Not connected";
+  state.textContent=data?.online?"Connected":data?.upgrade_required?"Update bridge":bridges.length?"Bridge offline":"Not connected";
   state.classList.toggle("active",!!data?.online);
   disconnect?.classList.toggle("hidden",!bridges.length);
 
