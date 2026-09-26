@@ -443,7 +443,7 @@ function renderRobloxStudioStatus(data){
   if(!state||!list)return;
 
   const bridges=Array.isArray(data?.bridges)?data.bridges:[];
-  const online=bridges.filter(b=>b?.online&&b?.mcp_connected);
+  const online=bridges.filter(b=>b?.online&&b?.mcp_connected&&b?.compatible!==false);
   const selectedBridge=String(data?.selected_bridge_id||"");
   const selectedStudio=String(data?.selected_studio_id||"");
 
@@ -454,8 +454,12 @@ function renderRobloxStudioStatus(data){
   const rows=[];
   for(const bridge of bridges){
     const bridgeId=String(bridge?.bridge_id||"");
-    const isOnline=!!bridge?.online&&!!bridge?.mcp_connected;
-    rows.push(`<div class="ownerRow"><div><b>${escapeHTML(robloxBridgeName(bridge))}</b><small>${isOnline?"Studio MCP connected":bridge?.online?"Bridge online · waiting for Studio MCP":"Bridge offline"}${bridge?.last_error?` · ${escapeHTML(String(bridge.last_error).slice(0,110))}`:""}</small></div><i class="diagState ${isOnline?"good":"warn"}">${isOnline?"READY":"WAIT"}</i></div>`);
+    const compatible=bridge?.compatible!==false;
+    const isOnline=!!bridge?.online&&!!bridge?.mcp_connected&&compatible;
+    const bridgeDetail=bridge?.upgrade_required
+      ?`Update RONN Roblox Bridge to v${escapeHTML(String(data?.minimum_bridge_version||"1.1.0"))}+ before Studio jobs can run`
+      :(isOnline?"Studio MCP connected":bridge?.online?"Bridge online · waiting for Studio MCP":"Bridge offline");
+    rows.push(`<div class="ownerRow"><div><b>${escapeHTML(robloxBridgeName(bridge))}</b><small>${bridgeDetail}${bridge?.last_error?` · ${escapeHTML(String(bridge.last_error).slice(0,110))}`:""}</small></div><i class="diagState ${isOnline?"good":"warn"}">${isOnline?"READY":bridge?.upgrade_required?"UPDATE":"WAIT"}</i></div>`);
     if(isOnline){
       const studios=Array.isArray(bridge?.studios)?bridge.studios:[];
       for(const studio of studios){
@@ -661,7 +665,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ROBLOX-MCP1",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ROBLOX-MCP2",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("robloxPairBtn"))$("robloxPairBtn").onclick=startRobloxPairing;
 if($("robloxBridgeDownloadBtn"))$("robloxBridgeDownloadBtn").onclick=downloadRobloxBridge;
