@@ -310,13 +310,27 @@ def call_tool(
             studio_id = target["target"]["studio_id"]
         args["studio_id"] = str(studio_id)
 
+    wait_timeout = max(8.0, min(float(timeout or 45.0), 150.0))
+    # The local MCP call must finish or fail before the cloud-side wait expires,
+    # otherwise RONN could report a timeout while a mutating Studio action keeps
+    # running in the background. Keep a small response-delivery margin.
+    tool_timeout = max(5.0, wait_timeout - 6.0)
+
     queued = default_store().enqueue(
         owner,
         "mcp_tool",
-        {"name": name, "arguments": args},
+        {
+            "name": name,
+            "arguments": args,
+            "tool_timeout_seconds": tool_timeout,
+        },
         bridge_id=str(bridge.get("bridge_id")),
     )
-    row = default_store().wait(owner, queued["job_id"], timeout=timeout)
+    row = default_store().wait(
+        owner,
+        queued["job_id"],
+        timeout=wait_timeout,
+    )
     if row.get("status") != "completed":
         return {
             "ok": False,
@@ -389,6 +403,8 @@ def capability_status(owner: str | None = None) -> dict[str, Any]:
         "mutating_tools": sorted(MUTATING_TOOLS),
         "owns_model_routing": False,
         "owns_final_answer": False,
+        "per_tool_timeout": True,
+        "late_mutation_timeout_guard": True,
     }
     if owner is not None:
         data["runtime"] = status(owner)
