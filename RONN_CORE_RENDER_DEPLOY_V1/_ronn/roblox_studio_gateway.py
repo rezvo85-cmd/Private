@@ -339,7 +339,12 @@ def call_tool(
     )
     row = default_store().wait(owner, queued["job_id"], timeout=timeout)
     if row.get("status") != "completed":
-        if row.get("status") == "uncertain":
+        retry_safe=bool(name in READ_ONLY_TOOLS)
+        ambiguous_mutation=bool(
+            not retry_safe
+            and (row.get("status") == "uncertain" or row.get("timed_out"))
+        )
+        if ambiguous_mutation:
             reason="mutation_delivery_uncertain"
         elif row.get("timed_out"):
             reason="bridge_job_timeout"
@@ -348,8 +353,8 @@ def call_tool(
         return {
             "ok": False,
             "reason": reason,
-            "uncertain": bool(row.get("status") == "uncertain"),
-            "retry_safe": bool(name in READ_ONLY_TOOLS),
+            "uncertain": ambiguous_mutation,
+            "retry_safe": retry_safe,
             "tool": name,
             "job_id": row.get("job_id"),
             "error": row.get("error") or "",
