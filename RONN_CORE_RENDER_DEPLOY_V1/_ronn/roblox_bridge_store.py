@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-VERSION = "RONN-ROBLOX-BRIDGE-STORE-1"
+VERSION = "RONN-ROBLOX-BRIDGE-STORE-2"
 PAIR_TTL_SECONDS = 600
 BRIDGE_ONLINE_SECONDS = 25
 DEFAULT_LEASE_SECONDS = 75
@@ -141,7 +141,9 @@ class RobloxBridgeStore:
                         lease_until INTEGER,
                         completed_at INTEGER,
                         result_json TEXT,
-                        error TEXT
+                        error TEXT,
+                        retry_safe INTEGER NOT NULL DEFAULT 1,
+                        claim_token TEXT
                     );
                     CREATE INDEX IF NOT EXISTS idx_jobs_pull
                         ON jobs(owner, status, available_at, created_at);
@@ -149,6 +151,12 @@ class RobloxBridgeStore:
                         ON jobs(owner, created_at);
                     """
                 )
+                # Existing local/test databases may predate lease-generation fields.
+                cols={row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+                if "retry_safe" not in cols:
+                    conn.execute("ALTER TABLE jobs ADD COLUMN retry_safe INTEGER NOT NULL DEFAULT 1")
+                if "claim_token" not in cols:
+                    conn.execute("ALTER TABLE jobs ADD COLUMN claim_token TEXT")
             self._initialized = True
 
     def start_pairing(self, owner: str) -> dict[str, Any]:
@@ -321,7 +329,15 @@ class RobloxBridgeStore:
             )
         return {"bridge_id": bridge_id, "studio_id": studio_id, "selected": True}
 
-    def enqueue(self, owner: str, kind: str, payload: dict[str, Any], *, bridge_id: str | None = None) -> dict[str, Any]:
+    def enqueue(
+        self,
+        owner: str,
+        kind: str,
+        payload: dict[str, Any],
+        *,
+        bridge_id: str | None = None,
+        retry_safe: bool = True,
+    ) -> dict[str, Any]:
         owner = str(owner or "").strip()
         kind = re.sub(r"[^a-z0-9_.-]", "", str(kind or "").lower())[:64]
         if not owner or not kind:
@@ -335,30 +351,47 @@ class RobloxBridgeStore:
             conn.execute(
                 """INSERT INTO jobs(
                     job_id,owner,bridge_id,kind,payload_json,status,attempts,
-                    created_at,available_at
-                ) VALUES(?,?,?,?,?,'queued',0,?,?)""",
-                (job_id, owner, bridge_id, kind, raw, now, now),
+                    created_at,available_at,retry_safe,claim_token
+                ) VALUES(?,?,?,?,?,'queued',0,?,?,?,NULL)""",
+                (job_id, owner, bridge_id, kind, raw, now, now, 1 if retry_safe else 0),
             )
         return {"job_id": job_id, "status": "queued", "created_at": now}
 
     def _requeue_expired(self, conn, now: int):
         rows = conn.execute(
-            """SELECT job_id,attempts FROM jobs
+            """SELECT job_id,attempts,retry_safe,claim_token FROM jobs
                WHERE status='claimed' AND lease_until IS NOT NULL AND lease_until<?""",
             (now,),
         ).fetchall()
         for row in rows:
-            if int(row["attempts"]) >= MAX_JOB_ATTEMPTS:
+            # Read-only/idempotent jobs can safely be retried with a fresh claim
+            # generation. Mutating Studio calls never auto-replay after an
+            # ambiguous disconnect because the first execution may already have
+            # changed the place even if its result never reached Core.
+            if not bool(row["retry_safe"]):
+                conn.execute(
+                    """UPDATE jobs SET status='uncertain',completed_at=?,error=?,
+                       lease_until=NULL
+                       WHERE job_id=? AND status='claimed' AND claim_token=?""",
+                    (
+                        now,
+                        "Mutation delivery became uncertain after the bridge lease expired; inspect Studio state before any further edit.",
+                        row["job_id"],
+                        row["claim_token"],
+                    ),
+                )
+            elif int(row["attempts"]) >= MAX_JOB_ATTEMPTS:
                 conn.execute(
                     """UPDATE jobs SET status='failed',completed_at=?,error=?,
-                       claimed_bridge_id=NULL,lease_until=NULL
+                       claimed_bridge_id=NULL,lease_until=NULL,claim_token=NULL
                        WHERE job_id=?""",
                     (now, "Bridge lease expired too many times.", row["job_id"]),
                 )
             else:
                 conn.execute(
                     """UPDATE jobs SET status='queued',available_at=?,
-                       claimed_at=NULL,claimed_bridge_id=NULL,lease_until=NULL
+                       claimed_at=NULL,claimed_bridge_id=NULL,lease_until=NULL,
+                       claim_token=NULL
                        WHERE job_id=?""",
                     (now + 1, row["job_id"]),
                 )
@@ -385,11 +418,12 @@ class RobloxBridgeStore:
             out = []
             for row in rows:
                 lease_until = now + lease_seconds
+                claim_token = secrets.token_urlsafe(24)
                 conn.execute(
                     """UPDATE jobs SET status='claimed',claimed_at=?,claimed_bridge_id=?,
-                       lease_until=?,attempts=attempts+1
+                       lease_until=?,attempts=attempts+1,claim_token=?
                        WHERE job_id=? AND status='queued'""",
-                    (now, auth["bridge_id"], lease_until, row["job_id"]),
+                    (now, auth["bridge_id"], lease_until, claim_token, row["job_id"]),
                 )
                 out.append({
                     "job_id": row["job_id"],
@@ -398,11 +432,20 @@ class RobloxBridgeStore:
                     "attempt": int(row["attempts"]) + 1,
                     "created_at": int(row["created_at"]),
                     "lease_until": lease_until,
+                    "claim_token": claim_token,
                 })
             conn.commit()
         return out
 
-    def complete(self, token: str, job_id: str, *, result=None, error: str = "") -> dict[str, Any]:
+    def complete(
+        self,
+        token: str,
+        job_id: str,
+        *,
+        claim_token: str,
+        result=None,
+        error: str = "",
+    ) -> dict[str, Any]:
         auth = self.authenticate(token)
         if not auth:
             raise PermissionError("Bridge token is invalid or revoked.")
@@ -413,7 +456,8 @@ class RobloxBridgeStore:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                """SELECT owner,status,claimed_bridge_id FROM jobs WHERE job_id=?""",
+                """SELECT owner,status,claimed_bridge_id,claim_token,retry_safe
+                   FROM jobs WHERE job_id=?""",
                 (job_id,),
             ).fetchone()
             if not row or row["owner"] != auth["owner"]:
@@ -422,14 +466,28 @@ class RobloxBridgeStore:
             if row["status"] in {"completed", "failed"}:
                 conn.rollback()
                 return self.get_job(auth["owner"], job_id) or {"job_id": job_id, "status": row["status"]}
-            if row["status"] != "claimed" or row["claimed_bridge_id"] != auth["bridge_id"]:
+            supplied_claim=str(claim_token or "").strip()
+            current_claim=str(row["claim_token"] or "")
+            if (
+                not supplied_claim
+                or not current_claim
+                or not secrets.compare_digest(supplied_claim,current_claim)
+                or row["claimed_bridge_id"] != auth["bridge_id"]
+            ):
                 conn.rollback()
-                raise PermissionError("This bridge does not own the job lease.")
+                raise PermissionError("This bridge completion is stale or does not own the current job claim.")
+            if row["status"] not in {"claimed","uncertain"}:
+                conn.rollback()
+                raise PermissionError("This job is no longer accepting results for that claim.")
+            # A late result for an unsafe mutation is allowed only while its exact
+            # claim token is still current. Unsafe jobs are never handed to a
+            # second executor, so this turns known evidence into a terminal result
+            # without risking duplicate execution.
             status = "failed" if error else "completed"
             conn.execute(
                 """UPDATE jobs SET status=?,completed_at=?,result_json=?,error=?,
-                   lease_until=NULL WHERE job_id=?""",
-                (status, now, result_json, error, job_id),
+                   lease_until=NULL WHERE job_id=? AND claim_token=?""",
+                (status, now, result_json, error, job_id, current_claim),
             )
             conn.commit()
         return self.get_job(auth["owner"], job_id) or {"job_id": job_id, "status": status}
@@ -438,7 +496,8 @@ class RobloxBridgeStore:
         with self._connect() as conn:
             row = conn.execute(
                 """SELECT job_id,bridge_id,kind,status,attempts,created_at,claimed_at,
-                          claimed_bridge_id,lease_until,completed_at,result_json,error
+                          claimed_bridge_id,lease_until,completed_at,result_json,error,
+                          retry_safe,claim_token
                    FROM jobs WHERE owner=? AND job_id=?""",
                 (str(owner or ""), str(job_id or "")),
             ).fetchone()
@@ -457,6 +516,8 @@ class RobloxBridgeStore:
             "completed_at": int(row["completed_at"]) if row["completed_at"] else None,
             "result": _json_load(row["result_json"], {}),
             "error": row["error"] or "",
+            "retry_safe": bool(row["retry_safe"]),
+            "claim_active": bool(row["claim_token"]),
         }
 
     def wait(self, owner: str, job_id: str, *, timeout: float = 45.0, poll: float = 0.15) -> dict[str, Any]:
@@ -465,7 +526,7 @@ class RobloxBridgeStore:
             row = self.get_job(owner, job_id)
             if not row:
                 raise ValueError("Job was not found.")
-            if row["status"] in {"completed", "failed"}:
+            if row["status"] in {"completed", "failed", "uncertain"}:
                 return row
             time.sleep(max(0.05, min(float(poll), 1.0)))
         row = self.get_job(owner, job_id)
@@ -531,4 +592,7 @@ def status() -> dict[str, Any]:
         "bridge_online_seconds": BRIDGE_ONLINE_SECONDS,
         "max_job_attempts": MAX_JOB_ATTEMPTS,
         "token_hashing": "sha256",
+        "claim_generation_tokens": True,
+        "unsafe_mutation_replay": False,
+        "uncertain_mutation_state": True,
     }
