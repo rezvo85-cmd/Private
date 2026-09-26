@@ -12,7 +12,7 @@ from typing import Any
 
 from roblox_bridge_store import default_store, status as store_status
 
-VERSION = "RONN-ROBLOX-STUDIO-GATEWAY-1"
+VERSION = "RONN-ROBLOX-STUDIO-GATEWAY-2"
 
 # Official Roblox Studio MCP tools documented by Roblox. The bridge also reports
 # the live tool catalog/schema, but this allowlist prevents a compromised planner
@@ -315,12 +315,21 @@ def call_tool(
         "mcp_tool",
         {"name": name, "arguments": args},
         bridge_id=str(bridge.get("bridge_id")),
+        retry_safe=bool(name in READ_ONLY_TOOLS),
     )
     row = default_store().wait(owner, queued["job_id"], timeout=timeout)
     if row.get("status") != "completed":
+        if row.get("status") == "uncertain":
+            reason="mutation_delivery_uncertain"
+        elif row.get("timed_out"):
+            reason="bridge_job_timeout"
+        else:
+            reason="bridge_job_failed"
         return {
             "ok": False,
-            "reason": "bridge_job_failed" if not row.get("timed_out") else "bridge_job_timeout",
+            "reason": reason,
+            "uncertain": bool(row.get("status") == "uncertain"),
+            "retry_safe": bool(name in READ_ONLY_TOOLS),
             "tool": name,
             "job_id": row.get("job_id"),
             "error": row.get("error") or "",
@@ -387,6 +396,9 @@ def capability_status(owner: str | None = None) -> dict[str, Any]:
         "tool_allowlist_count": len(OFFICIAL_TOOL_ALLOWLIST),
         "read_only_tools": sorted(READ_ONLY_TOOLS),
         "mutating_tools": sorted(MUTATING_TOOLS),
+        "mutation_jobs_auto_retry": False,
+        "read_only_jobs_auto_retry": True,
+        "stale_completion_protection": True,
         "owns_model_routing": False,
         "owns_final_answer": False,
     }
