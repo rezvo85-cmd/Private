@@ -23,7 +23,7 @@ from typing import Any
 VERSION = "RONN-ROBLOX-BRIDGE-STORE-1"
 PAIR_TTL_SECONDS = 600
 BRIDGE_ONLINE_SECONDS = 25
-DEFAULT_LEASE_SECONDS = 75
+DEFAULT_LEASE_SECONDS = 180
 MAX_JOB_ATTEMPTS = 3
 MAX_JSON_BYTES = 2 * 1024 * 1024
 _PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -302,7 +302,15 @@ class RobloxBridgeStore:
         if not studio_id or len(studio_id) > 240:
             raise ValueError("Invalid Studio id.")
         status = self.status(owner)
-        bridge = next((x for x in status["bridges"] if x["bridge_id"] == bridge_id and x["online"]), None)
+        bridge = next(
+            (
+                x for x in status["bridges"]
+                if x["bridge_id"] == bridge_id
+                and x["online"]
+                and x["mcp_connected"]
+            ),
+            None,
+        )
         if not bridge:
             raise ValueError("That RONN Roblox bridge is not online.")
         ids = {str(x.get("studio_id") or x.get("id") or "") for x in bridge.get("studios") or [] if isinstance(x, dict)}
