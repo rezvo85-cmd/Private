@@ -137,14 +137,24 @@ def _online_bridge(owner: str, bridge_id: str | None = None) -> dict[str, Any] |
 
 def status(owner: str) -> dict[str, Any]:
     data = default_store().status(owner)
+    bridges=[]
+    for raw in data.get("bridges") or []:
+        row=dict(raw)
+        row["compatible"]=bridge_compatible(row.get("bridge_version"))
+        row["upgrade_required"]=bool(
+            row.get("online")
+            and row.get("mcp_connected")
+            and not row["compatible"]
+        )
+        bridges.append(row)
     online = [
-        x for x in data.get("bridges") or []
-        if x.get("online") and x.get("mcp_connected")
+        x for x in bridges
+        if x.get("online") and x.get("mcp_connected") and x.get("compatible")
     ]
     return {
         "version": VERSION,
         "online": bool(online),
-        "bridge_count": len(data.get("bridges") or []),
+        "bridge_count": len(bridges),
         "online_bridge_count": len(online),
         "selected_bridge_id": data.get("selected_bridge_id"),
         "selected_studio_id": data.get("selected_studio_id"),
@@ -154,7 +164,6 @@ def status(owner: str) -> dict[str, Any]:
         "upgrade_required": any(x.get("upgrade_required") for x in bridges),
         "store": store_status(),
     }
-
 
 def tool_catalog(owner: str, bridge_id: str | None = None) -> list[dict[str, Any]]:
     bridge = _online_bridge(owner, bridge_id)
