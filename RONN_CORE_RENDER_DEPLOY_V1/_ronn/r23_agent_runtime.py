@@ -22,6 +22,7 @@ from r20_tool_hub import weather as weather_tool
 from r23_research import research as autonomous_research
 from r23_browser_use_adapter import execute as browser_use_execute, status as browser_use_status
 from roblox_studio_agent import run as roblox_studio_run, status as roblox_studio_agent_status
+from anime_studio import run as anime_studio_run, status as anime_studio_status
 from experience_engine import learn_lesson
 
 
@@ -102,6 +103,13 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
         )
     )
 
+    anime_run=out.get("anime_studio") or {}
+    anime_plan=anime_run.get("plan") or {}
+    anime_gate=anime_run.get("quality_gate") or {}
+    anime_planned=bool(anime_run.get("planned") and anime_plan.get("shots"))
+    anime_submitted=bool(anime_run.get("submitted") and anime_gate.get("all_submitted"))
+    anime_completed=bool(anime_run.get("completed") and anime_gate.get("all_completed"))
+
     return {
         "version":"R23-EVIDENCE-CONTRACT-1",
         "retrieval":{
@@ -132,6 +140,16 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
             "target":studio_run.get("target") or {},
             "reason":str(studio_run.get("reason") or "")[:180],
         },
+        "anime_studio":{
+            "available":bool(anime_run.get("available")),
+            "planned":anime_planned,
+            "submitted":anime_submitted,
+            "completed":anime_completed,
+            "shot_count":int(anime_plan.get("shot_count") or 0),
+            "output_shots":int(anime_gate.get("output_shots") or 0),
+            "verified_visual_quality":bool(anime_gate.get("verified_visual_quality")),
+            "reason":str(anime_run.get("reason") or "")[:180],
+        },
         "errors":[str(x)[:180] for x in (out.get("errors") or [])[:8]],
         "rules":[
             "SEARCH SNIPPET ONLY is discovery evidence, not proof of page contents.",
@@ -141,6 +159,7 @@ def evidence_contract(out: dict[str,Any]) -> dict[str,Any]:
             "Use the word verified for execution success only when runtime_execution.verified_success is true or another explicit verified tool result proves the claim.",
             "If evidence is incomplete or conflicting, state the limitation instead of filling the gap from confidence.",
             "Roblox Studio changes are runtime-verified only when playtest_verified is true; planning, edits, or a clean static inspection alone are not runtime proof.",
+            "Anime Studio planning is not proof that a video rendered; only submitted/completed renderer job evidence supports those claims.",
         ],
     }
 
@@ -240,6 +259,26 @@ def evidence_sufficiency(out: dict[str,Any], decision: dict | None=None,
                 "Studio Play test and console evidence verified the requested behavior" if studio_contract.get("playtest_verified") else "runtime Play-test evidence did not prove the requested change",
             )
 
+    if caps.get("anime_studio"):
+        anime_contract=contract.get("anime_studio") or {}
+        require(
+            "anime_studio_plan",
+            bool(anime_contract.get("planned")),
+            "bounded Anime Studio shot plan created" if anime_contract.get("planned") else "Anime Studio did not create a usable shot plan",
+        )
+        if caps.get("anime_studio_render"):
+            require(
+                "anime_studio_submission",
+                bool(anime_contract.get("submitted")),
+                "all planned shots were submitted to the configured renderer" if anime_contract.get("submitted") else "the requested anime render was not submitted completely",
+            )
+        if caps.get("anime_studio_verify"):
+            require(
+                "anime_studio_completion",
+                bool(anime_contract.get("completed")),
+                "renderer output evidence exists for every planned shot" if anime_contract.get("completed") else "renderer completion/output evidence is incomplete",
+            )
+
     gaps=[x["name"] for x in requirements if not x["met"]]
     return {
         "version":"R23-EVIDENCE-SUFFICIENCY-1",
@@ -273,11 +312,44 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
         "learning":{},
         "computer":{},
         "roblox_studio":{},
+        "anime_studio":{},
         "recovery":{},
         "evidence_contract":{},
         "evidence_sufficiency":{},
     }
     evidence=[]
+
+    # Anime Studio is a bounded production executor under R23. It creates the
+    # deterministic shot/continuity plan locally, then submits only to an
+    # explicitly configured HTTPS renderer. No large video model is installed in Core.
+    if caps.get("anime_studio"):
+        out["planned"].append("anime_studio")
+        try:
+            anime_run=anime_studio_run(
+                owner,
+                request_id,
+                message,
+                files or [],
+                depth=depth,
+                checkpoint_fn=studio_checkpoint_fn,
+            )
+            out["anime_studio"]=anime_run
+            if anime_run.get("planned"):
+                out["executed"].append("anime_studio_plan")
+            if anime_run.get("submitted"):
+                out["executed"].append("anime_studio_render_submitted")
+            if anime_run.get("completed"):
+                out["executed"].append("anime_studio_render_completed")
+            if not anime_run.get("ok"):
+                out["errors"].append(
+                    "anime_studio:"+str(anime_run.get("reason") or "not_completed")
+                )
+            evidence.append(
+                "RONN ANIME STUDIO EVIDENCE (bounded production capability; R23 remains the only final-answer owner):\n"
+                + json.dumps(anime_run,ensure_ascii=False)[:70000]
+            )
+        except Exception as exc:
+            out["errors"].append("anime_studio:"+exc.__class__.__name__)
 
     # Roblox Studio is a bounded local executor under R23. The local bridge uses
     # the official Studio MCP; the already-selected main brain supplies only
@@ -566,6 +638,7 @@ def status():
         "computer_adapter":True,
         "computer_verified":bool(cs.get("verified")),
         "roblox_studio_mcp":roblox_studio_agent_status(),
+        "anime_studio":anime_studio_status(),
         "evidence_contract":True,
         "evidence_sufficiency_gate":True,
         "bounded_research_recovery":True,
