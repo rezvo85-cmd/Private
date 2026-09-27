@@ -164,6 +164,14 @@ jobs:
               getattr(route, "path", "") == "/" and "HEAD" in (getattr(route, "methods", set()) or set())
               for route in crawl_service.app.routes
           )
+          assert any(
+              getattr(route, "path", "") == "/api/anime/output/{filename}"
+              for route in app.app.routes
+          )
+          anime=app.anime_studio_status()
+          assert anime["render_backend_configured"] is True, anime
+          assert anime["backend"] == "huggingface_zero", anime
+          assert anime["large_local_model_required"] is False, anime
           assert app.BUILD_ID == "RONN-COGNITIVE-OS-2026-R23-ALL-11"
           r23 = app.r23_eval_run()
           print("r23:", r23)
@@ -2355,6 +2363,10 @@ jobs:
           if(!src.includes("/api/roblox/pair/start"))throw new Error("Roblox pairing UI not wired");
           if(!src.includes("/api/roblox/bridge/windows.zip"))throw new Error("Roblox bridge download UI not wired");
           if(!src.includes("/api/roblox/select"))throw new Error("Roblox Studio target selector not wired");
+          if(!src.includes("animeVideoJob"))throw new Error("Anime Studio render card wiring missing");
+          if(!src.includes("/api/r17/jobs/"))throw new Error("Anime Studio render polling missing");
+          if(!src.includes("animeOutputHTML"))throw new Error("Anime Studio output player wiring missing");
+          console.log("Anime Studio render UI wiring: ok");
           console.log("Roblox Studio setup UI wiring: ok");
           console.log("web asset version/cache bust consistency: ok");
           JS
