@@ -192,7 +192,7 @@ def anime_studio_intent(
     )
     requested=bool((explicit and action) or followup)
     render=bool(requested and (any(term in low for term in render_terms) or followup))
-    verify=bool(requested and (render or any(term in low for term in verify_terms)))
+    verify=bool(requested and any(term in low for term in verify_terms))
     return {
         "requested":requested,
         "render":render,
