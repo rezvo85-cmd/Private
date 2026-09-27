@@ -10,6 +10,7 @@ import anime_hf_renderer as renderer
 
 def run():
     old_root=renderer.OUTPUT_ROOT
+    old_reference=renderer.REFERENCE_ROOT
     old_temp=renderer.TEMP_ROOT
     old_image=os.environ.get("RONN_ANIME_HF_IMAGE_SPACE")
     old_video=os.environ.get("RONN_ANIME_HF_VIDEO_SPACE")
@@ -17,12 +18,21 @@ def run():
         with tempfile.TemporaryDirectory(prefix="ronn-anime-ci-") as td:
             root=Path(td)
             renderer.OUTPUT_ROOT=root/"outputs"
+            renderer.REFERENCE_ROOT=root/"refs"
             renderer.TEMP_ROOT=root/"tmp"
             renderer.OUTPUT_ROOT.mkdir(parents=True,exist_ok=True)
+            renderer.REFERENCE_ROOT.mkdir(parents=True,exist_ok=True)
             renderer.TEMP_ROOT.mkdir(parents=True,exist_ok=True)
 
             owner_a="ci-owner-a"
             owner_b="ci-owner-b"
+
+            # User reference images are accepted only as bounded image data URLs
+            # and are owner-scoped working inputs.
+            tiny_png="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            refs=renderer.store_reference_images(owner_a,"ci-request",[tiny_png])
+            assert len(refs)==1 and Path(refs[0]).is_file(), refs
+            assert renderer._safe_owner(owner_a) in refs[0], refs
             source=root/"source.mp4"
             source.write_bytes(b"RONN_FAKE_MP4_FOR_PATH_TEST")
 
@@ -55,6 +65,7 @@ def run():
             }
     finally:
         renderer.OUTPUT_ROOT=old_root
+        renderer.REFERENCE_ROOT=old_reference
         renderer.TEMP_ROOT=old_temp
         if old_image is None:
             os.environ.pop("RONN_ANIME_HF_IMAGE_SPACE",None)
