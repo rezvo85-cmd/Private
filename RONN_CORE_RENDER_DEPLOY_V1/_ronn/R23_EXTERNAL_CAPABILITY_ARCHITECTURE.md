@@ -17,6 +17,7 @@ External libraries are implementation helpers beneath existing R23-owned interfa
 | Memory | RONN_MEMORY Postgres / project brain | none | No second database or vector store is introduced by this integration. |
 | Search / research | `r23_research.py` + existing SearXNG/Reader | none in this change | Do not create a second research pipeline. |
 | Interactive browser execution | `r23_agent_runtime.py` | Browser Use | Browser Use may sequence page-level UI actions only after R23 approves an interactive browser task. It cannot select RONN models, rewrite R23 plans, access RONN memory, change confidence, or own final synthesis. |
+| Anime production | `r23_agent_runtime.py` + `anime_studio.py` | Configured remote renderer | Anime Studio builds bounded shot, character, style, and continuity plans and may submit them to a configured HTTPS renderer. R23 remains the only brain and final-answer owner. |
 
 ## Runtime rules
 
@@ -29,6 +30,9 @@ External libraries are implementation helpers beneath existing R23-owned interfa
 7. External-version upgrades are pinned and must pass R23 CI before production.
 8. Browser Use is a task-local executor exception to the no-secondary-planner rule: its internal step selection is confined to one R23-approved browser task, is hard-capped, and returns evidence only. R23 remains the plan of record and final-answer owner.
 9. Browser Use stays lazy and optional in Core until the Chromium runtime is independently proven on the deployment host; normal chat must not require it.
+10. Anime Studio remains optional and provider-agnostic; no large video model is required in Core.
+11. Anime render jobs are not automatically replayed after an uncertain result.
+12. RONN distinguishes a plan, a submitted job, a completed output, and a visually reviewed output.
 
 ## Why these integrations exist
 
