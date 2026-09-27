@@ -75,7 +75,10 @@ def store_reference_images(owner: str, request_id: str, images: list[str]) -> li
 
 
 def resolve_output_path(owner: str, filename: str) -> Path | None:
-    name = Path(str(filename or "")).name
+    raw=str(filename or "")
+    name=Path(raw).name
+    if raw != name or "/" in raw or "\\" in raw:
+        return None
     if not name or not re.fullmatch(r"[A-Za-z0-9_.-]{8,180}\.mp4", name):
         return None
     root = owner_output_dir(owner).resolve()
