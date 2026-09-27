@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from anime_hf_renderer import render_project as _hf_render_project, status as _hf_status, store_reference_images as _hf_store_references
-from r17_jobs import create as _job_create, get as _job_get, recover_kind as _job_recover_kind
+from r17_jobs import create as _job_create, get as _job_get, fail_kind_after_restart_no_replay as _job_fail_no_replay
 
 VERSION = "RONN-ANIME-STUDIO-2"
 MAX_SHOTS = 18
@@ -242,11 +242,12 @@ def _hf_job_runner(payload: dict[str, Any], progress_cb=None) -> dict[str, Any]:
 
 
 def recover_jobs() -> list[str]:
-    """Recover interrupted Anime Studio background jobs after a Core restart."""
-    if not _hf_enabled():
-        return []
+    """Close interrupted render jobs without replaying non-idempotent GPU work."""
     try:
-        return _job_recover_kind("anime_render", _hf_job_runner)
+        return _job_fail_no_replay(
+            "anime_render",
+            "Anime render was interrupted by a RONN service restart. It was not automatically replayed to avoid duplicate generation.",
+        )
     except Exception:
         return []
 
