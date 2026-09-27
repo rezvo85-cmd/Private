@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-from anime_hf_renderer import render_project as _hf_render_project, status as _hf_status
+from anime_hf_renderer import render_project as _hf_render_project, status as _hf_status, store_reference_images as _hf_store_references
 from r17_jobs import create as _job_create, get as _job_get, recover_kind as _job_recover_kind
 
 VERSION = "RONN-ANIME-STUDIO-2"
@@ -407,11 +407,22 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
             result["renderer"] = hf
             return result
 
+        image_data=[]
+        for item in list(files or [])[:24]:
+            content=(
+                str(item.get("content") or "")
+                if isinstance(item,dict)
+                else str(getattr(item,"content","") or "")
+            )
+            if content.startswith("data:image/"):
+                image_data.append(content)
+        reference_paths=_hf_store_references(owner,rid,image_data) if image_data else []
         payload = {
             "owner": str(owner or "")[:120],
             "request_id": rid,
             "depth": str(depth or "smart"),
             "plan": plan,
+            "reference_paths": reference_paths,
         }
         try:
             job = _job_create(owner, "anime_render", payload, _hf_job_runner)
@@ -453,6 +464,7 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
                 "status_url": "/api/r17/jobs/" + jid if jid else "",
                 "provider": "Hugging Face ZeroGPU",
                 "expected_shots": int(plan.get("shot_count") or 0),
+                "reference_images": len(reference_paths),
                 "message": "Rendering in the cloud. RONN will show the video here when the job finishes.",
             },
         })
