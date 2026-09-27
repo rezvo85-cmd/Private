@@ -169,6 +169,25 @@ def build_task_graph(message: str, decision: dict, *, file_names=None, has_proje
         ))
         evidence_nodes.append("operate_roblox_studio")
 
+    if caps.get("anime_studio"):
+        proof=(
+            "renderer output evidence exists for every planned anime shot"
+            if caps.get("anime_studio_verify")
+            else (
+                "all planned anime shots were submitted to the configured renderer"
+                if caps.get("anime_studio_render")
+                else "bounded Anime Studio shot/continuity plan was created"
+            )
+        )
+        nodes.append(_node(
+            "operate_anime_studio",
+            "Plan, render, and evidence the requested Anime Studio production",
+            "anime",
+            [anchor],
+            proof=proof,
+        ))
+        evidence_nodes.append("operate_anime_studio")
+
     reason_deps=_unique(([anchor] if anchor else [])+evidence_nodes)
     nodes.append(_node(
         "solve","Produce the solution from the gathered context/evidence","reason",
@@ -257,7 +276,7 @@ def _refresh_states(graph):
         x["id"] for x in graph.get("nodes") or []
         if x.get("state")=="ready" and x.get("kind") not in {"understand","requirements","inspect"}
     ][:4]
-    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","browser","computer","roblox","verify","synthesize"}]
+    required=[x for x in graph.get("nodes") or [] if x.get("kind") in {"research","world_model","runtime","browser","computer","roblox","anime","verify","synthesize"}]
     graph["completion_proof"]={
         "required":[{"id":x.get("id"),"proof":x.get("proof"),"state":x.get("state")} for x in required],
         "proved":all(x.get("state")=="complete" for x in required if x.get("kind")!="synthesize") if required else True,
@@ -360,6 +379,27 @@ def reconcile_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[st
         elif "roblox_studio_mcp" in (tool_run.get("planned") or []) or any(x.startswith("roblox_studio_") for x in gaps):
             _mark(graph,"operate_roblox_studio","failed","Studio MCP evidence did not satisfy the requested change/verification boundary",True)
 
+    if "operate_anime_studio" in _index(graph):
+        anime_contract=contract.get("anime_studio") or {}
+        planned=bool(anime_contract.get("planned"))
+        submitted=bool(anime_contract.get("submitted"))
+        completed=bool(anime_contract.get("completed"))
+        caps=(decision.get("capabilities") or {})
+        success=planned
+        if caps.get("anime_studio_render"):
+            success=success and submitted
+        if caps.get("anime_studio_verify"):
+            success=success and completed
+        if success:
+            detail=(
+                "renderer output evidence exists for every planned anime shot"
+                if completed else
+                ("all planned anime shots were submitted" if submitted else "Anime Studio shot plan created")
+            )
+            _mark(graph,"operate_anime_studio","complete",detail,True)
+        elif "anime_studio" in (tool_run.get("planned") or []) or any(x.startswith("anime_studio_") for x in gaps):
+            _mark(graph,"operate_anime_studio","failed","Anime Studio evidence did not satisfy the requested plan/render/completion boundary",True)
+
     # If this is the bounded recovery pass, close the recovery node according
     # to whether its original failed branch was actually repaired.
     if graph.get("recovery_attempted") and graph.get("recovery_kind"):
@@ -420,6 +460,15 @@ def replan_task_graph(graph: dict, tool_run: dict, decision: dict) -> dict[str,A
     title=""
     proof=""
     deps=[]
+
+    # Anime rendering may create paid/queued external jobs. Never blindly replay it
+    # through generic recovery because that can duplicate renders or spend.
+    if any(x.startswith("anime_studio_") for x in gaps) or (rows.get("operate_anime_studio") or {}).get("state")=="failed":
+        graph["dead_end"]=True
+        graph["dead_end_reason"]="Anime Studio render/verification remained incomplete; do not blindly replay external render submissions"
+        graph["replanned"]=True
+        graph["replan_reason"]="unrecoverable_anime_render_after_bounded_submission"
+        return _refresh_states(graph)
 
     # Roblox Studio edits are stateful and the dedicated Studio agent already owns
     # a bounded inspect/edit/playtest/repair loop. Never replay the whole branch
