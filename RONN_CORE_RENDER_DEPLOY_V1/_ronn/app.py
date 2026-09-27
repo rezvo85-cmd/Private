@@ -2671,11 +2671,19 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
                 def _studio_checkpoint_fn(stage,state,detail):
                     return task_checkpoint(request_id,stage,state,detail)
 
+            _runtime_files=list(body.files or [])
+            if ((_r20.get("capabilities") or {}).get("anime_studio")) and body.images:
+                for _image_index,_image_data in enumerate(list(body.images)[:4],start=1):
+                    _runtime_files.append({
+                        "name":f"anime_reference_{_image_index}.png",
+                        "content":str(_image_data or ""),
+                    })
+
             _workflow_run = r23_workflow_run(
                 owner,
                 request_id,
                 _tool_message,
-                body.files or [],
+                _runtime_files,
                 _r20,
                 repair_fn=_r16_repair_model,
                 checkpoint_fn=task_checkpoint,
