@@ -14,3 +14,6 @@ openai-agents
 # External capability helpers; R23 remains the single brain.
 docling-slim[convert-core,format-pdf,format-office,format-web]==2.130.0
 langgraph==1.2.12
+
+# Free cloud Anime Studio adapter; no local video model weights.
+gradio-client==2.7.1
