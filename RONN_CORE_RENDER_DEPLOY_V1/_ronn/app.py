@@ -147,7 +147,8 @@ from roblox_studio_gateway import (
     bridge_compatible as roblox_bridge_compatible,
 )
 from roblox_studio_agent import run as roblox_studio_agent_run, status as roblox_studio_agent_status
-from anime_studio import status as anime_studio_status
+from anime_studio import status as anime_studio_status, recover_jobs as anime_studio_recover_jobs
+from anime_hf_renderer import resolve_output_path as anime_output_path
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -4558,6 +4559,19 @@ def r17_job_api(job_id: str, request: Request):
     if not job or job.get("owner")!=owner:raise HTTPException(404,"Job not found.")
     return job
 
+@app.get("/api/anime/output/{filename}")
+def anime_output_api(filename: str, request: Request):
+    owner=_r14_require_owner(request)
+    path=anime_output_path(owner,filename)
+    if not path:
+        raise HTTPException(404,"Anime output not found.")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=path.name,
+        headers={"Cache-Control":"private, max-age=3600"},
+    )
+
 @app.post("/api/r17/jobs/{job_id}/resume")
 def r17_job_resume_api(job_id: str, request: Request):
     owner=_r14_require_owner(request)
@@ -4800,6 +4814,10 @@ try:
     R17_RESUMED_JOBS = r17_job_recover_kind("multi_agent",_r17_multi_agent_runner)
 except Exception:
     R17_RESUMED_JOBS = []
+try:
+    R17_RESUMED_ANIME_JOBS = anime_studio_recover_jobs()
+except Exception:
+    R17_RESUMED_ANIME_JOBS = []
 try:
     R18_MONITOR_START_STATUS = r18_monitor_start()
     _render_url=(os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
