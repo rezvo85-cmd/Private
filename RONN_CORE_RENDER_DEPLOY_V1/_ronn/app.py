@@ -147,6 +147,7 @@ from roblox_studio_gateway import (
     bridge_compatible as roblox_bridge_compatible,
 )
 from roblox_studio_agent import run as roblox_studio_agent_run, status as roblox_studio_agent_status
+from anime_studio import status as anime_studio_status
 from tool_system import TOOL_CATALOG, safe_calculate, validate_json, code_sanity
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
@@ -3533,6 +3534,7 @@ def capabilities():
         "r23_all_11": r23_capability_status(),
         "r23_agent_runtime": r23_agent_status(),
         "r23_roblox_studio": roblox_studio_agent_status(),
+        "r23_anime_studio": anime_studio_status(),
         "roblox_studio_gateway": roblox_gateway_capability_status(),
         "r23_long_context": r23_context_status(),
         "r23_quality_lab": r23_quality_status(_quality_lab_candidates("main")),
@@ -3853,6 +3855,7 @@ def r23_capabilities_api():
         "workflow_runtime":r23_workflow_status(),
         "deepeval":r23_deepeval_status(),
         "roblox_studio":roblox_studio_agent_status(),
+        "anime_studio":anime_studio_status(),
         "roblox_studio_gateway":roblox_gateway_capability_status(),
     }
 

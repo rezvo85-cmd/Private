@@ -139,6 +139,10 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         out["needs_tools"]=True
         out["tool_mode"]="roblox"
         out["verify"]=bool(out.get("verify") or caps.get("roblox_studio_verify"))
+    if caps.get("anime_studio"):
+        out["needs_tools"]=True
+        out["tool_mode"]="anime"
+        out["verify"]=bool(out.get("verify") or caps.get("anime_studio_verify"))
     if caps.get("universal_retrieval"):
         out["needs_live"]=True
         out["needs_tools"]=True
@@ -167,7 +171,7 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
         policy["include_failure_lessons"]=True
     if caps.get("agent_runtime"):
         policy["include_agent_directive"]=True
-    if caps.get("universal_retrieval") or caps.get("roblox_studio"):
+    if caps.get("universal_retrieval") or caps.get("roblox_studio") or caps.get("anime_studio"):
         policy["include_evidence_plan"]=True
     out["task_graph"]=build_task_graph(
         message,

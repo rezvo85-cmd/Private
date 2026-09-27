@@ -57,6 +57,7 @@ def eligible(decision: dict[str, Any]) -> bool:
             "autonomous_research",
             "computer_requested",
             "roblox_studio",
+            "anime_studio",
         )
     )
     return bool(

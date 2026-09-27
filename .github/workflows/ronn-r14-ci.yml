@@ -50,6 +50,44 @@ jobs:
         run: |
           python -m py_compile *.py
 
+      - name: Anime Studio capability selftest
+        run: |
+          python anime_studio_selftest.py
+          python - <<'PY'
+          from r23_capabilities import capability_plan
+          from r23_brain import plan
+
+          msg="Create a 5 second anime fight: Emraan vs Jason, no music."
+          caps=capability_plan(
+              {"difficulty":4,"profile":"creative","followup":False},
+              msg,
+              history=[],file_names=[],has_images=False,has_project=False,agent_mode=True,
+          )
+          assert caps["anime_studio"] is True, caps
+          assert caps["anime_studio_render"] is True, caps
+          assert caps["agent_runtime"] is True, caps
+          assert caps["roblox_studio"] is False, caps
+
+          decision=plan(
+              msg,
+              history=[],file_names=[],has_images=False,has_project=False,
+              agent_mode=True,explicit_mode="auto",
+          )
+          assert decision["r23"] is True, decision
+          assert decision["tool_mode"] == "anime", decision
+          assert decision["capabilities"]["anime_studio"] is True, decision
+          assert any(x.get("id")=="operate_anime_studio" for x in decision["task_graph"]["nodes"]), decision["task_graph"]
+
+          q=plan(
+              "Who is the main character in this anime?",
+              history=[],file_names=[],has_images=False,has_project=False,
+              agent_mode=True,explicit_mode="auto",
+          )
+          assert q["capabilities"]["anime_studio"] is False, q
+
+          print("Anime Studio routing/R23 ownership: ok")
+          PY
+
       - name: Roblox Studio MCP cloud integration selftest
         run: |
           python roblox_bridge_selftest.py

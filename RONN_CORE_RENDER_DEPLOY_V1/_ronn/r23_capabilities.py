@@ -44,6 +44,22 @@ def _recent_roblox_context(history) -> bool:
     return False
 
 
+
+def _recent_anime_context(history) -> bool:
+    terms=(
+        "anime studio","anime opening","anime fight","anime scene","manga to anime",
+        "animate this","animation","storyboard","keyframe","character lock",
+        "style lock","fight choreography","lip sync","video generation",
+    )
+    for item in list(history or [])[-8:]:
+        if not isinstance(item,dict):
+            continue
+        text=_norm(item.get("content") or item.get("text") or "")
+        if text and any(term in text for term in terms):
+            return True
+    return False
+
+
 def roblox_studio_intent(
     message: str,
     *,
@@ -137,6 +153,54 @@ def roblox_studio_intent(
         "recent_roblox_context": recent_roblox,
     }
 
+
+
+def anime_studio_intent(
+    message: str,
+    *,
+    profile: str = "",
+    has_project: bool = False,
+    history=None,
+) -> dict[str, Any]:
+    """Detect explicit anime/video creation work without hijacking anime Q&A."""
+    low=_norm(message)
+    anime_terms=(
+        "anime studio","anime opening","anime fight","anime scene","anime video",
+        "manga to anime","animate this","animate it","animation","storyboard",
+        "keyframe","fight choreography","character reference","style lock",
+        "character lock","lip sync","video clip","video generation",
+    )
+    action_terms=(
+        "make","create","generate","animate","render","build","produce","turn this into",
+        "turn it into","make me","do it","continue","keep going","fix","improve",
+    )
+    render_terms=(
+        "make","create","generate","animate","render","produce","turn this into",
+        "turn it into","video","clip","opening","fight",
+    )
+    verify_terms=(
+        "check","fix","quality","consistent","consistency","same character",
+        "character lock","style lock","no errors","make sure","review",
+    )
+
+    explicit=any(term in low for term in anime_terms)
+    action=any(term in low for term in action_terms)
+    recent=_recent_anime_context(history)
+    followup=bool(
+        recent
+        and re.match(r"^(?:do that|do it|continue|keep going|make it|generate it|render it|fix it|improve it)\b",low)
+    )
+    requested=bool((explicit and action) or followup)
+    render=bool(requested and (any(term in low for term in render_terms) or followup))
+    verify=bool(requested and any(term in low for term in verify_terms))
+    return {
+        "requested":requested,
+        "render":render,
+        "verify":verify,
+        "explicit":explicit,
+        "project_followup":followup,
+        "recent_anime_context":recent,
+    }
 
 def unknown_candidates(message: str) -> list[str]:
     """Detect terms that are worth resolving through retrieval before answering.
@@ -292,6 +356,12 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
         has_project=bool(has_project),
         history=history,
     )
+    anime = anime_studio_intent(
+        message,
+        profile=profile,
+        has_project=bool(has_project),
+        history=history,
+    )
     has_url = bool(re.search(r"https?://[^\s]+", str(message or ""), re.I))
     execution_words = any(x in low for x in (
         "run this","execute this","test this","test the code","debug this","fix this",
@@ -319,17 +389,20 @@ def capability_plan(base: dict, message: str, *, history=None, file_names=None,
 
     return {
         "strong_main_brain": True,
-        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or browser_interactive or computer_words or execution_words or studio["requested"])),
+        "agent_runtime": bool(agent_mode and (retrieval["required"] or file_names or has_url or browser_interactive or computer_words or execution_words or studio["requested"] or anime["requested"])),
         "roblox_studio": bool(agent_mode and studio["requested"]),
         "roblox_studio_mutate": bool(agent_mode and studio["mutate"]),
         "roblox_studio_verify": bool(agent_mode and studio["verify"]),
+        "anime_studio": bool(agent_mode and anime["requested"]),
+        "anime_studio_render": bool(agent_mode and anime["render"]),
+        "anime_studio_verify": bool(agent_mode and anime["verify"]),
         "browser_url": bool(has_url),
         "browser_interactive": browser_interactive,
         "code_fix_loop": bool(coding and file_names and execution_words),
         "project_brain": bool(has_project or file_names or base.get("followup") or len(history) >= 6),
         "long_context": bool(len(history) >= 12 or base.get("followup") or has_project),
         "evaluation_lab": True,
-        "model_competition": bool(difficulty >= 6 and not retrieval["required"] and not has_images),
+        "model_competition": bool(difficulty >= 6 and not retrieval["required"] and not has_images and not anime["requested"]),
         "world_model": bool((len(file_names) >= 2 and (coding or world_words)) or (has_project and world_words)),
         "failure_learning": True,
         "autonomous_research": bool(retrieval["required"] and (research_words or difficulty >= 4 or retrieval["unknown_terms"])),
@@ -359,5 +432,6 @@ def status() -> dict[str, Any]:
         "architecture": "one main brain + capability plane",
         "bounded_executors": {
             "roblox_studio_mcp": True,
+            "anime_studio": True,
         },
     }
