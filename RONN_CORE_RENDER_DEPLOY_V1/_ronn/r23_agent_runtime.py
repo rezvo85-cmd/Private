@@ -334,6 +334,8 @@ def execute(owner: str, request_id: str, message: str, files, decision: dict,
                 checkpoint_fn=studio_checkpoint_fn,
             )
             out["anime_studio"]=anime_run
+            if anime_run.get("presentation"):
+                out["presentation"]=anime_run.get("presentation")
             if anime_run.get("planned"):
                 out["executed"].append("anime_studio_plan")
             if anime_run.get("submitted"):
