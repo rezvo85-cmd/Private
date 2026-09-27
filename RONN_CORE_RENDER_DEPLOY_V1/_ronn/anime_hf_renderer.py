@@ -7,6 +7,7 @@ installed in RONN Core.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import re
@@ -22,8 +23,10 @@ DEFAULT_VIDEO_SPACE = "zerogpu-aoti/wan2-2-fp8da-aoti-faster"
 
 BASE = Path(__file__).resolve().parent
 OUTPUT_ROOT = BASE / "data" / "anime_outputs"
+REFERENCE_ROOT = BASE / "data" / "anime_refs"
 TEMP_ROOT = BASE / "data" / "anime_tmp"
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+REFERENCE_ROOT.mkdir(parents=True, exist_ok=True)
 TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 
 MAX_OUTPUTS_PER_OWNER = max(4, min(60, int(os.getenv("RONN_ANIME_MAX_OUTPUTS_PER_OWNER", "16") or "16")))
@@ -40,6 +43,35 @@ def owner_output_dir(owner: str) -> Path:
     path = OUTPUT_ROOT / _safe_owner(owner)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def store_reference_images(owner: str, request_id: str, images: list[str]) -> list[str]:
+    """Persist a few user-provided data-URL images for the background render job."""
+    root=REFERENCE_ROOT/_safe_owner(owner)
+    root.mkdir(parents=True,exist_ok=True)
+    request=re.sub(r"[^A-Za-z0-9_-]","",str(request_id or ""))[-32:] or "request"
+    saved=[]
+    for idx,raw in enumerate(list(images or [])[:4],start=1):
+        text=str(raw or "")
+        m=re.match(r"^data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\r\n]+)$",text,re.I)
+        if not m:
+            continue
+        ext="jpg" if m.group(1).lower() in {"jpeg","jpg"} else m.group(1).lower()
+        try:
+            data=base64.b64decode(m.group(2),validate=True)
+        except Exception:
+            continue
+        if not data or len(data)>20*1024*1024:
+            continue
+        path=root/f"{request}_{idx}.{ext}"
+        path.write_bytes(data)
+        saved.append(str(path))
+    # Bound retained references; they are only working inputs for generation.
+    rows=sorted([p for p in root.iterdir() if p.is_file()],key=lambda p:p.stat().st_mtime,reverse=True)
+    for p in rows[20:]:
+        try:p.unlink()
+        except Exception:pass
+    return saved
 
 
 def resolve_output_path(owner: str, filename: str) -> Path | None:
@@ -260,7 +292,18 @@ def render_project(payload: dict[str, Any], progress_cb=None) -> dict[str, Any]:
     for idx, shot in enumerate(shots, start=1):
         if progress_cb:
             progress_cb(5 + int((idx - 1) / max(total, 1) * 80))
-        keyframe = generate_keyframe(shot)
+        reference_paths=[str(x) for x in (payload.get("reference_paths") or []) if str(x)]
+        reference=next((x for x in reference_paths if Path(x).is_file()),"")
+        if reference:
+            keyframe={
+                "ok":True,
+                "provider":"user_reference",
+                "space":"",
+                "path":reference,
+                "seed":int(shot.get("seed") or 42),
+            }
+        else:
+            keyframe = generate_keyframe(shot)
         if progress_cb:
             progress_cb(20 + int((idx - 1) / max(total, 1) * 70))
         video = generate_video(keyframe["path"], shot)
@@ -268,7 +311,8 @@ def render_project(payload: dict[str, Any], progress_cb=None) -> dict[str, Any]:
         outputs.append({
             "shot_index": int(shot.get("index") or idx),
             "provider": "huggingface_zero",
-            "image_space": keyframe["space"],
+            "image_space": keyframe.get("space") or "",
+            "reference_used": bool(reference),
             "video_space": video["space"],
             "duration_seconds": video["duration_seconds"],
             "seed": video["seed"],
@@ -308,6 +352,7 @@ def status() -> dict[str, Any]:
         "large_local_model_required": False,
         "automatic_paid_spend": False,
         "shared_free_gpu": True,
+        "reference_image_to_video": True,
         "max_render_shots_per_job": MAX_RENDER_SHOTS,
         "output_retention_per_owner": MAX_OUTPUTS_PER_OWNER,
     }
