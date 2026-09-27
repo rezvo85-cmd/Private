@@ -1,5 +1,5 @@
-const CACHE="ronn-assets-r23-roblox-mcp2";
-const ASSETS=["/static/ronn_home_icon_v2.png","/static/ronn_logo.svg?v=RONN-R19-LOGO2","/static/style.css?v=RONN-R23-ROBLOX-MCP2","/static/mobile_fit.css?v=RONN-R23-ROBLOX-MCP2","/static/app.js?v=RONN-R23-ROBLOX-MCP2","/manifest.webmanifest?v=RONN-R23-ROBLOX-MCP2"];
+const CACHE="ronn-assets-r23-anime-hf1";
+const ASSETS=["/static/ronn_home_icon_v2.png","/static/ronn_logo.svg?v=RONN-R19-LOGO2","/static/style.css?v=RONN-R23-ANIME-HF1","/static/mobile_fit.css?v=RONN-R23-ANIME-HF1","/static/app.js?v=RONN-R23-ANIME-HF1","/manifest.webmanifest?v=RONN-R23-ANIME-HF1"];
 self.addEventListener("install",event=>{
   event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).catch(()=>{}));
   self.skipWaiting();

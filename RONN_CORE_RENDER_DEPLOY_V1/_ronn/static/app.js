@@ -159,12 +159,57 @@ function renderMetaCards(meta){
     const wind=p.wind_mph==null?"—":Math.round(Number(p.wind_mph));
     html+=`<div class="richCard weatherCard"><div><small>WEATHER</small><b>${escapeHTML(p.location||"Current weather")}</b></div><strong>${escapeHTML(String(temp))}°F</strong><p>${escapeHTML(p.condition||"Current conditions")} · Feels like ${escapeHTML(String(feels))}° · Wind ${escapeHTML(String(wind))} mph</p></div>`;
   }
+  if(p?.type==="anime_video_job"&&p.job_id){
+    html+=`<div class="richCard animeVideoCard animeVideoJob" data-anime-job="${escapeHTML(String(p.job_id))}"><div class="animeCardHead"><div><small>ANIME STUDIO</small><b>${escapeHTML(p.title||"RONN Anime Studio")}</b></div><span class="animeJobState">Queued</span></div><p>${escapeHTML(p.message||"Rendering in the cloud…")}</p><div class="animeProgress"><i></i></div><small class="animeProvider">${escapeHTML(p.provider||"Cloud renderer")}</small></div>`;
+  }
+  if(p?.type==="anime_video"&&p.output_url){
+    html+=`<div class="richCard animeVideoCard"><div class="animeCardHead"><div><small>ANIME STUDIO</small><b>${escapeHTML(p.title||"Finished clip")}</b></div><span>Done</span></div><video controls playsinline preload="metadata" src="${escapeHTML(p.output_url)}"></video><small class="animeProvider">${escapeHTML(p.provider||"Cloud renderer")}</small></div>`;
+  }
   if(sources.length){
     const unique=[];const seen=new Set();
     for(const s of sources){const u=String(s?.url||"");if(!u||seen.has(u))continue;seen.add(u);unique.push(s);if(unique.length>=5)break}
     if(unique.length)html+=`<div class="sourceCards"><span>Sources</span>${unique.map(s=>`<a href="${escapeHTML(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(s.title||new URL(s.url).hostname)}</a>`).join("")}</div>`;
   }
   return html?'<div class="richCards">'+html+'</div>':"";
+}
+const animeJobPollers=new Map();
+function animeOutputHTML(job){
+  const result=job?.result||{},outs=Array.isArray(result.outputs)?result.outputs:[];
+  if(!outs.length)return "";
+  return outs.map((o,i)=>`<div class="animeOutput"><video controls playsinline preload="metadata" src="${escapeHTML(o.output_url||"")}"></video><small>Shot ${Number(o.shot_index||i+1)} · ${escapeHTML(o.provider||result.provider||"cloud")}</small></div>`).join("");
+}
+async function pollAnimeJobCard(card){
+  if(!card||!card.isConnected)return;
+  const id=String(card.dataset.animeJob||"");if(!id||animeJobPollers.has(id))return;
+  let stopped=false,tries=0;
+  animeJobPollers.set(id,()=>{stopped=true});
+  const state=card.querySelector(".animeJobState"),bar=card.querySelector(".animeProgress i");
+  try{
+    while(!stopped&&card.isConnected&&tries<240){
+      tries++;
+      const r=await fetch("/api/r17/jobs/"+encodeURIComponent(id),{headers:apiHeaders(),cache:"no-store"});
+      if(!r.ok)throw new Error("Render job status unavailable");
+      const job=await r.json(),progress=Math.max(0,Math.min(100,Number(job.progress||0)));
+      if(bar)bar.style.width=progress+"%";
+      if(state)state.textContent=job.status==="completed"?"Done":job.status==="failed"?"Failed":(progress?progress+"%":"Queued");
+      if(job.status==="completed"){
+        const videos=animeOutputHTML(job);
+        card.innerHTML=`<div class="animeCardHead"><div><small>ANIME STUDIO</small><b>RONN Anime Studio</b></div><span>Done</span></div>${videos||"<p>Render completed but no output file was returned.</p>"}`;
+        break;
+      }
+      if(job.status==="failed"){
+        card.innerHTML=`<div class="animeCardHead"><div><small>ANIME STUDIO</small><b>Render failed</b></div><span>Failed</span></div><p>${escapeHTML(job.error||"The free cloud renderer did not finish this job.")}</p>`;
+        break;
+      }
+      await new Promise(r=>setTimeout(r,3000));
+    }
+  }catch(e){
+    if(card.isConnected){const p=card.querySelector("p");if(p)p.textContent="Render status: "+String(e.message||"unavailable");}
+  }finally{animeJobPollers.delete(id)}
+}
+function bindAnimeJobCards(root=document){
+  const cards=root.querySelectorAll?root.querySelectorAll(".animeVideoJob[data-anime-job]"):[];
+  cards.forEach(card=>pollAnimeJobCard(card));
 }
 function applyMetaCards(wrap,meta){
   if(!wrap||!meta)return;
@@ -173,8 +218,9 @@ function applyMetaCards(wrap,meta){
   const html=renderMetaCards(meta); if(!html)return;
   const tools=bubble.querySelector(".msgTools");
   if(tools)tools.insertAdjacentHTML("beforebegin",html);
+  bindAnimeJobCards(bubble);
 }
-function addMessageNode(role,text,requestId="",audit=null,meta=null){const wrap=document.createElement("div");wrap.className="message "+role;if(role==="assistant"){wrap.dataset.requestId=requestId||"";wrap.dataset.model=meta?.model||"";wrap.dataset.profile=meta?.profile||"";wrap.innerHTML=`<div class="aiMark"><img src="/static/ronn_logo.svg" alt="RONN"></div><div class="bubble aiBubble"><div class="answer">${renderMarkdown(text)}</div>${renderMetaCards(meta)}<div class="msgTools"><button class="copyMsg">Copy</button><button class="verifyMsg">Verify</button><button class="retryMsg">Retry</button>${meta?.decision_summary?'<button class="whyMsg">Why</button>':""}${requestId?'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>':""}</div></div>`;if(meta?.decision_summary)wrap.dataset.decision=meta.decision_summary.summary||"";if(audit)applyAudit(wrap,audit)}else wrap.innerHTML=`<div class="bubble userBubble">${escapeHTML(text)}</div>`;messages.appendChild(wrap);return wrap}
+function addMessageNode(role,text,requestId="",audit=null,meta=null){const wrap=document.createElement("div");wrap.className="message "+role;if(role==="assistant"){wrap.dataset.requestId=requestId||"";wrap.dataset.model=meta?.model||"";wrap.dataset.profile=meta?.profile||"";wrap.innerHTML=`<div class="aiMark"><img src="/static/ronn_logo.svg" alt="RONN"></div><div class="bubble aiBubble"><div class="answer">${renderMarkdown(text)}</div>${renderMetaCards(meta)}<div class="msgTools"><button class="copyMsg">Copy</button><button class="verifyMsg">Verify</button><button class="retryMsg">Retry</button>${meta?.decision_summary?'<button class="whyMsg">Why</button>':""}${requestId?'<button class="rateMsg" data-rating="1">Good</button><button class="rateMsg" data-rating="-1">Improve</button>':""}</div></div>`;if(meta?.decision_summary)wrap.dataset.decision=meta.decision_summary.summary||"";if(audit)applyAudit(wrap,audit)}else wrap.innerHTML=`<div class="bubble userBubble">${escapeHTML(text)}</div>`;messages.appendChild(wrap);if(role==="assistant")bindAnimeJobCards(wrap);return wrap}
 function welcome(){messages.innerHTML=`<div class="welcome"><div class="welcomeOrb"><span>R</span></div><h1>How can I help?</h1><p>Ask RONN anything, attach a project, or start with one of these.</p><div class="capGrid"><button data-prompt="Create this for me from start to finish. Keep it clean, functional, and verify what you can."><b>Create</b><span>Build something</span></button><button data-prompt="Research this using current reliable information and clearly separate verified facts from uncertainty."><b>Research</b><span>Use current evidence</span></button><button data-prompt="Solve this coding problem. Find the root cause, implement the fix, and run available checks before saying it works."><b>Code</b><span>Build + test</span></button><button data-prompt="Analyze this deeply, compare the important possibilities, and give me the clearest useful result."><b>Analyze</b><span>Think it through</span></button></div></div>`;bindPromptButtons()}
 function nearBottom(){return messages.scrollHeight-messages.scrollTop-messages.clientHeight<120}
 function updateJumpLatest(){if(!jumpLatest)return;const show=messages.scrollHeight>messages.clientHeight+40&&!nearBottom();jumpLatest.classList.toggle("hidden",!show)}
@@ -665,7 +711,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ROBLOX-MCP2",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ANIME-HF1",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("robloxPairBtn"))$("robloxPairBtn").onclick=startRobloxPairing;
 if($("robloxBridgeDownloadBtn"))$("robloxBridgeDownloadBtn").onclick=downloadRobloxBridge;

@@ -20,8 +20,10 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from anime_hf_renderer import render_project as _hf_render_project, status as _hf_status, store_reference_images as _hf_store_references
+from r17_jobs import create as _job_create, get as _job_get, fail_kind_after_restart_no_replay as _job_fail_no_replay
 
-VERSION = "RONN-ANIME-STUDIO-1"
+VERSION = "RONN-ANIME-STUDIO-2"
 MAX_SHOTS = 18
 MAX_SHOT_SECONDS = 5.0
 DEFAULT_SECONDS = 5.0
@@ -229,6 +231,36 @@ def _configured_endpoint() -> str:
     return (os.getenv("RONN_ANIME_RENDER_URL") or "").strip()
 
 
+def _hf_enabled() -> bool:
+    return (os.getenv("RONN_ANIME_HF_ENABLED") or "true").strip().lower() not in {
+        "0", "false", "no", "off"
+    }
+
+
+def _hf_job_runner(payload: dict[str, Any], progress_cb=None) -> dict[str, Any]:
+    return _hf_render_project(payload or {}, progress_cb)
+
+
+def recover_jobs() -> list[str]:
+    """Close interrupted render jobs without replaying non-idempotent GPU work."""
+    try:
+        return _job_fail_no_replay(
+            "anime_render",
+            "Anime render was interrupted by a RONN service restart. It was not automatically replayed to avoid duplicate generation.",
+        )
+    except Exception:
+        return []
+
+
+def render_job(owner: str, job_id: str) -> dict[str, Any] | None:
+    row=_job_get(job_id)
+    if not row or str(row.get("owner") or "") != str(owner or ""):
+        return None
+    if str(row.get("kind") or "") != "anime_render":
+        return None
+    return row
+
+
 def _endpoint_allowed(url: str) -> tuple[bool, str]:
     try:
         parsed = urlparse(url)
@@ -342,6 +374,7 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
         checkpoint_fn=None) -> dict[str, Any]:
     safe = safety_check(message)
     plan = build_plan(message, files)
+    rid = str(request_id or uuid.uuid4().hex)
     result: dict[str, Any] = {
         "version": VERSION,
         "ok": False,
@@ -349,11 +382,12 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
         "planned": True,
         "submitted": False,
         "completed": False,
-        "request_id": str(request_id or uuid.uuid4().hex),
+        "request_id": rid,
         "owner_scoped": bool(owner),
         "plan": plan,
         "jobs": [],
         "quality_gate": {},
+        "presentation": None,
         "reason": "",
     }
 
@@ -362,7 +396,86 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
         result["safety"] = safe
         return result
 
+    # Explicit custom render endpoints remain supported. When none is configured,
+    # the default backend is a free Hugging Face ZeroGPU pipeline running in a
+    # durable RONN background job so chat requests do not need to stay open for
+    # the full render.
     endpoint = _configured_endpoint()
+    if not endpoint and _hf_enabled():
+        hf = _hf_status()
+        if not hf.get("installed"):
+            result["reason"] = "hf_renderer_dependency_unavailable"
+            result["renderer"] = hf
+            return result
+
+        image_data=[]
+        for item in list(files or [])[:24]:
+            content=(
+                str(item.get("content") or "")
+                if isinstance(item,dict)
+                else str(getattr(item,"content","") or "")
+            )
+            if content.startswith("data:image/"):
+                image_data.append(content)
+        reference_paths=_hf_store_references(owner,rid,image_data) if image_data else []
+        payload = {
+            "owner": str(owner or "")[:120],
+            "request_id": rid,
+            "depth": str(depth or "smart"),
+            "plan": plan,
+            "reference_paths": reference_paths,
+        }
+        try:
+            job = _job_create(owner, "anime_render", payload, _hf_job_runner)
+        except Exception as exc:
+            result["reason"] = "anime_render_job_create_failed"
+            result["error"] = exc.__class__.__name__
+            result["renderer"] = hf
+            return result
+
+        jid = str(job.get("id") or "")
+        result.update({
+            "ok": bool(jid),
+            "available": True,
+            "submitted": bool(jid),
+            "completed": False,
+            "reason": "render_job_queued" if jid else "render_job_missing_id",
+            "renderer": hf,
+            "jobs": [{
+                "job_id": jid,
+                "status": str(job.get("status") or "queued"),
+                "submitted": bool(jid),
+                "completed": False,
+                "provider": "huggingface_zero",
+            }],
+            "quality_gate": {
+                "planned_shots": int(plan.get("shot_count") or 0),
+                "submitted_shots": int(plan.get("shot_count") or 0) if jid else 0,
+                "completed_shots": 0,
+                "output_shots": 0,
+                "all_submitted": bool(jid),
+                "all_completed": False,
+                "verified_visual_quality": False,
+                "note": "The render runs as a background job; completion is verified only when output files exist.",
+            },
+            "presentation": {
+                "type": "anime_video_job",
+                "title": "RONN Anime Studio",
+                "job_id": jid,
+                "status_url": "/api/r17/jobs/" + jid if jid else "",
+                "provider": "Hugging Face ZeroGPU",
+                "expected_shots": int(plan.get("shot_count") or 0),
+                "reference_images": len(reference_paths),
+                "message": "Rendering in the cloud. RONN will show the video here when the job finishes.",
+            },
+        })
+        if checkpoint_fn:
+            try:
+                checkpoint_fn("Anime Studio", "complete", "Cloud render job queued: " + jid)
+            except Exception:
+                pass
+        return result
+
     if not endpoint:
         result["reason"] = "render_backend_not_configured"
         result["ready_for_backend"] = True
@@ -387,7 +500,7 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
     jobs = []
     for shot in plan["shots"][:max_render]:
         payload = {
-            "request_id": result["request_id"],
+            "request_id": rid,
             "owner": str(owner or "")[:160],
             "mode": "anime_video",
             "depth": str(depth or "smart"),
@@ -423,22 +536,36 @@ def run(owner: str, request_id: str, message: str, files=None, *, depth: str = "
     result["submitted"] = bool(gate["all_submitted"])
     result["completed"] = bool(gate["all_completed"])
     result["ok"] = bool(result["submitted"])
+    if gate.get("all_completed") and jobs:
+        first=next((x for x in jobs if x.get("output_url")),None)
+        if first:
+            result["presentation"]={
+                "type":"anime_video",
+                "title":"RONN Anime Studio",
+                "output_url":first.get("output_url"),
+                "provider":first.get("provider") or "configured_remote",
+            }
     if not result["reason"] and not result["ok"]:
         result["reason"] = "render_submission_incomplete"
     return result
 
-
 def status() -> dict[str, Any]:
     endpoint = _configured_endpoint()
-    allowed, reason = _endpoint_allowed(endpoint) if endpoint else (False, "not_configured")
+    allowed, reason = _endpoint_allowed(endpoint) if endpoint else (False, "")
+    hf = _hf_status()
+    hf_ready = bool(_hf_enabled() and hf.get("installed"))
+    backend = "custom_https" if endpoint and allowed else ("huggingface_zero" if hf_ready else "none")
     return {
         "version": VERSION,
         "enabled": True,
         "architecture": "R23-owned capability plane",
         "large_local_model_required": False,
         "provider_agnostic": True,
-        "render_backend_configured": bool(endpoint and allowed),
-        "render_backend_reason": "" if endpoint and allowed else reason,
+        "backend": backend,
+        "render_backend_configured": bool((endpoint and allowed) or hf_ready),
+        "render_backend_reason": "" if ((endpoint and allowed) or hf_ready) else (reason or "no_renderer_available"),
+        "huggingface_zero": hf,
+        "background_jobs": True,
         "max_shots": MAX_SHOTS,
         "max_shot_seconds": MAX_SHOT_SECONDS,
         "character_lock": True,
