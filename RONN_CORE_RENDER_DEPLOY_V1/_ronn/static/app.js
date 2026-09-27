@@ -711,7 +711,7 @@ if($("screenBtn"))$("screenBtn").onclick=toggleScreenContext;
 
 if($("webAuthUnlock"))$("webAuthUnlock").onclick=unlockWebAuth;
 if($("webAuthSecret"))$("webAuthSecret").addEventListener("keydown",e=>{if(e.key==="Enter")unlockWebAuth()});
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ROBLOX-MCP2",{updateViaCache:"none"}).catch(()=>{}))}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/service-worker.js?v=RONN-R23-ANIME-HF1",{updateViaCache:"none"}).catch(()=>{}))}
 
 if($("robloxPairBtn"))$("robloxPairBtn").onclick=startRobloxPairing;
 if($("robloxBridgeDownloadBtn"))$("robloxBridgeDownloadBtn").onclick=downloadRobloxBridge;
