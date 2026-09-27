@@ -202,3 +202,22 @@ def mark_unknown_running_interrupted():
         cur=c.execute("UPDATE jobs SET status='interrupted',updated_at=? WHERE status='running'",(int(time.time()),))
         c.commit()
     return cur.rowcount
+
+def fail_kind_after_restart_no_replay(kind,reason="Job interrupted by service restart; automatic replay is disabled."):
+    """Fail unfinished jobs of a non-idempotent kind instead of replaying them."""
+    now=int(time.time())
+    with _db() as c:
+        rows=c.execute(
+            "SELECT id,owner FROM jobs WHERE kind=? AND status IN ('queued','running','interrupted')",
+            (str(kind),),
+        ).fetchall()
+        for row in rows:
+            c.execute(
+                "UPDATE jobs SET status='failed',progress=100,error=?,updated_at=? WHERE id=?",
+                (str(reason)[:1200],now,row["id"]),
+            )
+        owners={str(row["owner"]) for row in rows}
+        for owner in owners:
+            _prune_owner(c,owner)
+        c.commit()
+    return [str(row["id"]) for row in rows]
