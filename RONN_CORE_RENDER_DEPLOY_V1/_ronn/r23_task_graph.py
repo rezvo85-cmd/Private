@@ -32,7 +32,7 @@ def should_activate(decision: dict, *, file_names=None, has_project=False) -> bo
     req=decision.get("requirement_contract") or {}
     if difficulty>=4:
         return True
-    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("model_competition") or caps.get("browser_interactive") or caps.get("roblox_studio"):
+    if caps.get("code_fix_loop") or caps.get("world_model") or caps.get("model_competition") or caps.get("browser_interactive") or caps.get("roblox_studio") or caps.get("anime_studio"):
         return True
     if caps.get("autonomous_research") and difficulty>=3:
         return True
