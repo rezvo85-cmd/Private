@@ -42,3 +42,14 @@ External libraries are implementation helpers beneath existing R23-owned interfa
 - Browser Use: provide bounded interactive page control for approved browser tasks without becoming a second RONN brain.
 
 This file is the architectural guardrail for future work. If a proposed change violates these ownership boundaries, it should be rejected or redesigned before implementation.
+
+
+## Anime Studio renderer
+
+The default Anime Studio execution backend is a bounded Hugging Face ZeroGPU adapter:
+RONN creates the shot/continuity plan, optionally persists user-provided reference images,
+then submits the approved image-to-video work as an R17 background job. The renderer is
+execution-only. It cannot select RONN models, modify project memory, rewrite the R23 plan,
+or own final synthesis. No video-model weights are installed in RONN Core, and no paid
+render spend is initiated automatically. A custom HTTPS renderer can still override the
+default backend through deployment configuration.
