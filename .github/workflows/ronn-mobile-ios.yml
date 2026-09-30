@@ -40,6 +40,8 @@ jobs:
         with:
           node-version: "22"
       - run: npm install
+      - name: Prepare offline wake-word engine
+        run: npm run wakeword:prepare
       - name: Generate native iOS project
         run: npx expo prebuild --platform ios --clean --no-install
       - name: Install CocoaPods
