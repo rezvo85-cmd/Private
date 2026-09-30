@@ -45,5 +45,8 @@ expect(voice.includes('[RONN_VOICE_LATENCY]'),"voice latency telemetry missing")
 expect(voice.includes('FIRST_STREAM_FLUSH_CHARS'),"early speech streaming flush missing");
 expect(appJs.includes('AbortController'),"voice stream cancellation is not wired");
 expect(appJs.includes('cancelVoiceQuery'),"voice cancellation callback missing");
+expect(appJs.includes('warmRonn'),"wake-time server warmup missing");
+expect(appJs.includes('voice_session'),"mobile voice-session hint missing");
+expect(voice.includes('warmRonnRef'),"wake path is not wired to server warmup");
 
 console.log("RONN_VOICE static checks passed.");

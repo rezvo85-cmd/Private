@@ -43,7 +43,7 @@ function extractWakeQuery(text=""){
   return {query};
 }
 
-export function useRonnVoice({askRonn,cancelRonn}){
+export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
   const [enabled,setEnabledState]=useState(false);
   const [state,setState]=useState("off");
   const [heard,setHeard]=useState("");
@@ -60,6 +60,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   const lastFinalAtRef=useRef(0);
   const askRonnRef=useRef(askRonn);
   const cancelRonnRef=useRef(cancelRonn);
+  const warmRonnRef=useRef(warmRonn);
   const voiceIdRef=useRef(null);
   const onDeviceRef=useRef(null);
   const speakingRef=useRef(false);
@@ -78,6 +79,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
   useEffect(()=>{askRonnRef.current=askRonn},[askRonn]);
   useEffect(()=>{cancelRonnRef.current=cancelRonn},[cancelRonn]);
+  useEffect(()=>{warmRonnRef.current=warmRonn},[warmRonn]);
 
   function clearRestart(){
     if(restartTimerRef.current){
@@ -202,6 +204,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   async function handleNativeWake(){
     if(!enabledRef.current||busyRef.current||conversationRef.current)return;
     latencyRef.current={wakeAt:Date.now(),finalAt:0,queryAt:0,firstTokenAt:0,firstSpeechAt:0};
+    try{warmRonnRef.current?.()}catch{}
     await stopNativeWake();
     conversationRef.current=true;
     armConversationTimeout();
@@ -524,6 +527,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
     const wake=extractWakeQuery(raw);
     if(!wake)return;
+    try{warmRonnRef.current?.()}catch{}
     if(!wake.query){
       await acknowledgeWake();
       return;

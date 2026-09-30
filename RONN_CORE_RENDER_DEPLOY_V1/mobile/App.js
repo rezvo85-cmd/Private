@@ -51,7 +51,7 @@ export default function App(){
   const busyRef=useRef(false);
   const voiceAbortRef=useRef(null);
   const voiceRequestIdRef=useRef(0);
-  const voice=useRonnVoice({askRonn:submitVoiceQuery,cancelRonn:cancelVoiceQuery});
+  const voice=useRonnVoice({askRonn:submitVoiceQuery,cancelRonn:cancelVoiceQuery,warmRonn});
 
   useEffect(()=>{messagesRef.current=messages},[messages]);
   useEffect(()=>{conversationIdRef.current=conversationId},[conversationId]);
@@ -137,7 +137,7 @@ export default function App(){
     setOpBusy(false);
   }
 
-  function chatPayload(q,history,activeConversationId){
+  function chatPayload(q,history,activeConversationId,voiceSession=false){
     return {
       message:q,
       conversation_id:activeConversationId,
@@ -146,12 +146,27 @@ export default function App(){
       images:[],
       files:[],
       mode:"auto",
-      style:"auto",
+      style:voiceSession?"concise":"auto",
+      voice_session:!!voiceSession,
       project_context:"",
       review:false,
       agent_mode:true,
       skill_profile:"auto"
     };
+  }
+
+  async function warmRonn(){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),2500);
+    try{
+      await expoFetch("https://ronn-core.onrender.com/health",{
+        method:"GET",
+        headers:{"Accept":"application/json","X-RONN-Voice-Warmup":"1"},
+        signal:controller.signal
+      });
+    }catch{}finally{
+      clearTimeout(timer);
+    }
   }
 
   function parseSseBlock(block){
@@ -169,7 +184,7 @@ export default function App(){
     const r=await expoFetch(API+"/chat/sse",{
       method:"POST",
       headers:await headers(activeSession,{"Accept":"text/event-stream"},!!activeSession),
-      body:JSON.stringify(chatPayload(q,history,activeConversationId)),
+      body:JSON.stringify(chatPayload(q,history,activeConversationId,true)),
       signal
     });
     if(!r.ok)return {ok:false,status:r.status,response:r};
