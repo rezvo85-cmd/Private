@@ -6,6 +6,11 @@ on:
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/mobile/**"
       - ".github/workflows/ronn-mobile-ios.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "RONN_CORE_RENDER_DEPLOY_V1/mobile/**"
+      - ".github/workflows/ronn-mobile-ios.yml"
   workflow_dispatch:
 
 jobs:
@@ -20,6 +25,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm install
+      - run: npm run voice:check
       - run: npx expo-doctor
       - run: npx expo export --platform ios --output-dir dist
 
