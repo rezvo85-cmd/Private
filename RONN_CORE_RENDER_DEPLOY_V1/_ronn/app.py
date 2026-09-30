@@ -849,6 +849,7 @@ class ChatBody(BaseModel):
     files: list[TextFile] = Field(default_factory=list)
     mode: str = "auto"
     style: str = "balanced"
+    voice_session: bool = False
     project_context: str = ""
     review: bool = False
     agent_mode: bool = True
@@ -1407,6 +1408,13 @@ def build_messages(owner: str, body: ChatBody, profile: str, controller: dict | 
     memories = relevant_memories(owner, body.message)
     system = BASE_SYSTEM + PROFILE_PROMPTS.get(profile, PROFILE_PROMPTS["chat"])
     system += STYLE_PROMPTS.get(body.style, STYLE_PROMPTS["balanced"])
+
+    if body.voice_session:
+        system += (
+            "\nVOICE CONVERSATION MODE: Answer for immediate speech. Lead with the useful answer, "
+            "use short natural sentences, avoid long preambles, and keep ordinary spoken replies concise. "
+            "Do not sacrifice correctness or skip needed tools/research just to be faster."
+        )
 
     difficulty = int((controller or {}).get("difficulty") or task_difficulty(body.message))
     inferred_intent = infer_intent(body.message)
@@ -2835,6 +2843,7 @@ def ai_stream(owner: str, body: ChatBody) -> Generator[bytes, None, None]:
         "model":model,
         "profile":profile,
         "review":bool(body.review),
+        "voice_session":bool(body.voice_session),
         "skills":skill_names,
         "difficulty":int(_r20.get("difficulty") or _difficulty),
         "controller":_r20,
