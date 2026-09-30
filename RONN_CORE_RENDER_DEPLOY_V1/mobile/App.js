@@ -1,9 +1,10 @@
 import React, {useEffect, useRef, useState} from "react";
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, SafeAreaView,
-  StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View
+  StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View
 } from "react-native";
 import * as SecureStore from "expo-secure-store";
+import {useRonnVoice} from "./voice_mode";
 
 const API="https://ronn-core.onrender.com/api/v1";
 const OWNER_ACCOUNT="ronn_primary";
@@ -43,6 +44,16 @@ export default function App(){
   const [error,setError]=useState("");
   const [opBusy,setOpBusy]=useState(false);
   const listRef=useRef(null);
+  const messagesRef=useRef([]);
+  const conversationIdRef=useRef(null);
+  const sessionRef=useRef("");
+  const busyRef=useRef(false);
+  const voice=useRonnVoice({askRonn:submitQuery});
+
+  useEffect(()=>{messagesRef.current=messages},[messages]);
+  useEffect(()=>{conversationIdRef.current=conversationId},[conversationId]);
+  useEffect(()=>{sessionRef.current=session},[session]);
+  useEffect(()=>{busyRef.current=busy},[busy]);
 
   useEffect(()=>{(async()=>{
     const saved=await SecureStore.getItemAsync(SESSION_KEY);
@@ -62,6 +73,8 @@ export default function App(){
   },[messages,busy,screen]);
 
   function resetChat(){
+    messagesRef.current=[];
+    conversationIdRef.current=null;
     setMessages([]);
     setConversationId(null);
     setError("");
@@ -90,6 +103,7 @@ export default function App(){
       const token=d.session_token||"";
       if(!token)throw new Error("RONN did not return an OP session.");
       await SecureStore.setItemAsync(SESSION_KEY,token);
+      sessionRef.current=token;
       setSession(token);
       setUnlock("");
       resetChat();
@@ -113,20 +127,20 @@ export default function App(){
       }
     }catch{}
     await SecureStore.deleteItemAsync(SESSION_KEY);
+    sessionRef.current="";
     setSession("");
     setUnlock("");
     resetChat();
     setOpBusy(false);
   }
 
-  async function performChat(q,activeSession){
-    const history=messages.slice(-24).map(m=>({role:m.role,content:m.content}));
+  async function performChat(q,activeSession,history,activeConversationId){
     return fetch(API+"/chat/complete",{
       method:"POST",
       headers:await headers(activeSession,{},!!activeSession),
       body:JSON.stringify({
         message:q,
-        conversation_id:conversationId,
+        conversation_id:activeConversationId,
         project_id:"default",
         history,
         images:[],
@@ -141,34 +155,64 @@ export default function App(){
     });
   }
 
-  async function send(){
-    const q=text.trim();
-    if(!q||busy)return;
-    setText("");setError("");setBusy(true);
-    setMessages(m=>[...m,{id:"u"+Date.now(),role:"user",content:q}]);
+  async function submitQuery(raw){
+    const q=String(raw||"").trim();
+    if(!q||busyRef.current)return "";
+    setError("");
+    busyRef.current=true;
+    setBusy(true);
+
+    const priorHistory=messagesRef.current.slice(-24).map(m=>({role:m.role,content:m.content}));
+    const userMessage={id:"u"+Date.now(),role:"user",content:q};
+    messagesRef.current=[...messagesRef.current,userMessage];
+    setMessages(messagesRef.current);
 
     try{
-      let r=await performChat(q,session);
-      if((r.status===401||r.status===403)&&session){
+      let activeSession=sessionRef.current;
+      let activeConversationId=conversationIdRef.current;
+      let r=await performChat(q,activeSession,priorHistory,activeConversationId);
+
+      if((r.status===401||r.status===403)&&activeSession){
         await SecureStore.deleteItemAsync(SESSION_KEY);
+        activeSession="";
+        sessionRef.current="";
+        conversationIdRef.current=null;
         setSession("");
         setConversationId(null);
-        r=await performChat(q,"");
+        r=await performChat(q,"",priorHistory,null);
       }
+
       const d=await r.json();
       if(!r.ok)throw new Error(d.detail||"RONN request failed.");
-      if(d.conversation_id)setConversationId(d.conversation_id);
-      setMessages(m=>[...m,{
+      if(d.conversation_id){
+        conversationIdRef.current=d.conversation_id;
+        setConversationId(d.conversation_id);
+      }
+
+      const answer=d.answer||"No answer returned.";
+      const assistantMessage={
         id:"a"+Date.now(),
         role:"assistant",
-        content:d.answer||"No answer returned.",
+        content:answer,
         meta:d.meta||{}
-      }]);
+      };
+      messagesRef.current=[...messagesRef.current,assistantMessage];
+      setMessages(messagesRef.current);
+      return answer;
     }catch(e){
       setError(e.message||"RONN could not answer.");
+      throw e;
     }finally{
+      busyRef.current=false;
       setBusy(false);
     }
+  }
+
+  async function send(){
+    const q=text.trim();
+    if(!q||busyRef.current)return;
+    setText("");
+    try{await submitQuery(q)}catch{}
   }
 
   const renderItem=({item})=>{
@@ -210,6 +254,33 @@ export default function App(){
       </View>
 
       <View style={styles.settings}>
+        <Text style={styles.settingsSection}>VOICE</Text>
+        <View style={styles.settingsCard}>
+          <View style={styles.settingsRow}>
+            <View style={styles.settingsTextWrap}>
+              <Text style={styles.settingsTitle}>Always Ready</Text>
+              <Text style={styles.settingsSub}>
+                Say “RONN, who is Iron Man?” and RONN will answer out loud.
+              </Text>
+            </View>
+            <Switch
+              value={voice.enabled}
+              onValueChange={voice.setEnabled}
+              trackColor={{false:"#414141",true:"#6f2222"}}
+              thumbColor={voice.enabled?"#ff6b6b":"#cfcfcf"}
+            />
+          </View>
+          {!!voice.enabled&&<View style={styles.voiceStatus}>
+            <View style={[styles.voicePulse,voice.state==="speaking"&&styles.voicePulseSpeaking]}/>
+            <Text style={styles.voiceStatusText}>{voice.label}</Text>
+          </View>}
+          {!!voice.enabled&&!!voice.heard&&<Text style={styles.voiceHeard} numberOfLines={2}>Heard: {voice.heard}</Text>}
+          {!!voice.error&&<Text style={styles.settingsError}>{voice.error}</Text>}
+        </View>
+        <Text style={styles.settingsNote}>
+          Turn this on once. RONN keeps listening for its name, stays conversational after waking, and returns to wake-word mode after about a minute of silence. Force-closing the app stops listening.
+        </Text>
+
         <Text style={styles.settingsSection}>ACCESS</Text>
         <View style={styles.settingsCard}>
           <View style={styles.settingsRow}>
@@ -263,6 +334,7 @@ export default function App(){
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>RONN</Text>
+          {!!voice.enabled&&<View style={[styles.voiceDot,voice.state==="speaking"&&styles.voiceDotSpeaking]}/>}
           {!!session&&<View style={styles.opDot}/>}
         </View>
         <TouchableOpacity style={styles.headerBtn} onPress={resetChat}>
@@ -279,7 +351,9 @@ export default function App(){
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={<View style={styles.empty}>
           <Text style={styles.emptyTitle}>How can I help?</Text>
-          <Text style={styles.emptySub}>{session?"OP Access enabled":"RONN is ready"}</Text>
+          <Text style={styles.emptySub}>
+            {voice.enabled?'Say “RONN…”':session?"OP Access enabled":"RONN is ready"}
+          </Text>
         </View>}
       />
 
@@ -322,6 +396,8 @@ const styles=StyleSheet.create({
   headerCenter:{flexDirection:"row",alignItems:"center",gap:6},
   headerTitle:{color:"#f4f4f4",fontSize:15,fontWeight:"600"},
   opDot:{width:6,height:6,borderRadius:3,backgroundColor:"#ff4b4b"},
+  voiceDot:{width:7,height:7,borderRadius:4,backgroundColor:"#9f3b3b"},
+  voiceDotSpeaking:{backgroundColor:"#ff6b6b"},
   list:{paddingHorizontal:14,paddingTop:18,paddingBottom:18,flexGrow:1},
   empty:{flex:1,alignItems:"center",justifyContent:"center",minHeight:460},
   emptyTitle:{color:"#f2f2f2",fontSize:28,fontWeight:"600"},
@@ -351,6 +427,11 @@ const styles=StyleSheet.create({
   settingsSection:{color:"#888",fontSize:11,fontWeight:"700",letterSpacing:1.1,marginTop:8,marginLeft:4},
   settingsCard:{backgroundColor:"#292929",borderRadius:20,borderWidth:1,borderColor:"#393939",padding:15},
   settingsRow:{flexDirection:"row",alignItems:"center",gap:12},
+  voiceStatus:{flexDirection:"row",alignItems:"center",gap:8,marginTop:14,paddingTop:12,borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:"#3a3a3a"},
+  voicePulse:{width:8,height:8,borderRadius:4,backgroundColor:"#8f3b3b"},
+  voicePulseSpeaking:{backgroundColor:"#ff6b6b"},
+  voiceStatusText:{color:"#d8d8d8",fontSize:12,fontWeight:"600"},
+  voiceHeard:{color:"#8f8f8f",fontSize:11,lineHeight:16,marginTop:8},
   settingsTextWrap:{flex:1},
   settingsTitle:{color:"#f4f4f4",fontSize:16,fontWeight:"600"},
   settingsSub:{color:"#9f9f9f",fontSize:12,lineHeight:17,marginTop:3},
