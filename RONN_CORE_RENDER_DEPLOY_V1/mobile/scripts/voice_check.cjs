@@ -31,5 +31,10 @@ expect(voice.includes('speechReadyText'),"spoken-answer cleanup missing");
 expect(voice.includes('getAvailableVoicesAsync'),"enhanced voice selection missing");
 expect(voice.includes('splitStreamSentences'),"streaming sentence splitter missing");
 expect(voice.includes('handleToken'),"voice token streaming handler missing");
+expect(voice.includes('supportsOnDeviceRecognition'),"on-device recognition capability check missing");
+expect(voice.includes('interruptWithTranscript'),"barge-in interruption handler missing");
+expect(voice.includes('cancelRonnRef'),"voice cancellation hook missing");
+expect(appJs.includes('AbortController'),"voice stream cancellation is not wired");
+expect(appJs.includes('cancelVoiceQuery'),"voice cancellation callback missing");
 
 console.log("RONN_VOICE static checks passed.");

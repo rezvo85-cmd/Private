@@ -27,7 +27,7 @@ function extractWakeQuery(text=""){
   return {query};
 }
 
-export function useRonnVoice({askRonn}){
+export function useRonnVoice({askRonn,cancelRonn}){
   const [enabled,setEnabledState]=useState(false);
   const [state,setState]=useState("off");
   const [heard,setHeard]=useState("");
@@ -42,9 +42,18 @@ export function useRonnVoice({askRonn}){
   const lastFinalRef=useRef("");
   const lastFinalAtRef=useRef(0);
   const askRonnRef=useRef(askRonn);
+  const cancelRonnRef=useRef(cancelRonn);
   const voiceIdRef=useRef(null);
+  const onDeviceRef=useRef(null);
+  const speakingRef=useRef(false);
+  const interruptingRef=useRef(false);
+  const bargePendingRef=useRef(false);
+  const turnSerialRef=useRef(0);
+  const currentSpeechRef=useRef("");
+  const recentSpeechRef=useRef("");
 
   useEffect(()=>{askRonnRef.current=askRonn},[askRonn]);
+  useEffect(()=>{cancelRonnRef.current=cancelRonn},[cancelRonn]);
 
   function clearRestart(){
     if(restartTimerRef.current){
@@ -150,8 +159,18 @@ export function useRonnVoice({askRonn}){
     }catch{}
   }
 
-  async function startRecognition(){
-    if(!enabledRef.current||busyRef.current||listeningRef.current)return;
+  function canUseOnDeviceRecognition(){
+    if(onDeviceRef.current!==null)return onDeviceRef.current;
+    try{
+      onDeviceRef.current=ExpoSpeechRecognitionModule.supportsOnDeviceRecognition?.()===true;
+    }catch{
+      onDeviceRef.current=false;
+    }
+    return onDeviceRef.current;
+  }
+
+  async function startRecognition({allowWhileBusy=false}={}){
+    if(!enabledRef.current||(!allowWhileBusy&&busyRef.current)||listeningRef.current)return;
     clearRestart();
     try{
       const permission=await ExpoSpeechRecognitionModule.getPermissionsAsync();
@@ -162,14 +181,14 @@ export function useRonnVoice({askRonn}){
       }
       await configureAudio();
       setVoiceError("");
-      setState(conversationRef.current?"awake":"starting");
+      if(!speakingRef.current)setState(conversationRef.current?"awake":"starting");
       ExpoSpeechRecognitionModule.start({
         lang:"en-US",
         interimResults:true,
         continuous:true,
         maxAlternatives:1,
         contextualStrings:["RONN","Ronn","Ron"],
-        requiresOnDeviceRecognition:false,
+        requiresOnDeviceRecognition:canUseOnDeviceRecognition(),
         addsPunctuation:true,
         iosTaskHint:"search",
         iosCategory:{
@@ -182,14 +201,14 @@ export function useRonnVoice({askRonn}){
     }catch(e){
       setState("error");
       setVoiceError(e?.message||"RONN could not start listening.");
-      scheduleRestart(1200);
+      scheduleRestart(1200,allowWhileBusy);
     }
   }
 
-  function scheduleRestart(delay=300){
-    if(!enabledRef.current||busyRef.current)return;
+  function scheduleRestart(delay=300,allowWhileBusy=false){
+    if(!enabledRef.current||(!allowWhileBusy&&busyRef.current))return;
     clearRestart();
-    restartTimerRef.current=setTimeout(()=>{startRecognition()},delay);
+    restartTimerRef.current=setTimeout(()=>{startRecognition({allowWhileBusy})},delay);
   }
 
   async function stopRecognition(){
@@ -208,17 +227,19 @@ export function useRonnVoice({askRonn}){
     scheduleRestart(250);
   }
 
-  async function speak(text){
+  async function speak(text,turnId=turnSerialRef.current){
     const chunks=speechChunks(text);
-    if(!chunks.length){
-      finishSpeaking();
-      return;
-    }
+    if(!chunks.length)return;
     await configureAudio();
+    if(turnId!==turnSerialRef.current)return;
+    speakingRef.current=true;
     setState("speaking");
-    try{Speech.stop()}catch{}
     const voice=await bestVoiceId();
     for(const words of chunks){
+      if(turnId!==turnSerialRef.current||interruptingRef.current||bargePendingRef.current||!enabledRef.current)break;
+      currentSpeechRef.current=words;
+      recentSpeechRef.current=(recentSpeechRef.current+" "+words).slice(-900);
+      scheduleRestart(80,true);
       await new Promise(resolve=>{
         let settled=false;
         const done=()=>{
@@ -242,7 +263,11 @@ export function useRonnVoice({askRonn}){
         }
         setTimeout(done,Math.min(90000,Math.max(7000,words.length*90)));
       });
-      if(!enabledRef.current)break;
+      if(!enabledRef.current||turnId!==turnSerialRef.current||interruptingRef.current||bargePendingRef.current)break;
+    }
+    currentSpeechRef.current="";
+    if(turnId===turnSerialRef.current) {
+      speakingRef.current=false;
     }
   }
 
@@ -269,7 +294,12 @@ export function useRonnVoice({askRonn}){
   async function runQuery(query){
     const q=String(query||"").trim();
     if(!q||busyRef.current)return;
+    const turnId=++turnSerialRef.current;
     busyRef.current=true;
+    speakingRef.current=false;
+    interruptingRef.current=false;
+    bargePendingRef.current=false;
+    recentSpeechRef.current="";
     await stopRecognition();
     conversationRef.current=true;
     armConversationTimeout();
@@ -282,12 +312,16 @@ export function useRonnVoice({askRonn}){
 
     const queueSpeech=(text)=>{
       const words=String(text||"").trim();
-      if(!words)return;
+      if(!words||turnId!==turnSerialRef.current)return;
       spokeAny=true;
-      speechChain=speechChain.then(()=>speak(words));
+      speechChain=speechChain.then(()=>{
+        if(turnId!==turnSerialRef.current)return;
+        return speak(words,turnId);
+      });
     };
 
     const handleToken=(token)=>{
+      if(turnId!==turnSerialRef.current)return;
       pendingSpeech+=String(token||"");
       const split=splitStreamSentences(pendingSpeech);
       pendingSpeech=split.rest;
@@ -296,29 +330,81 @@ export function useRonnVoice({askRonn}){
 
     try{
       const answer=await askRonnRef.current?.(q,handleToken);
+      if(turnId!==turnSerialRef.current)return;
       const tail=speechReadyText(pendingSpeech);
       if(tail)queueSpeech(tail);
       await speechChain;
+      if(turnId!==turnSerialRef.current)return;
 
       if(!spokeAny){
         if(answer){
-          await speak(answer);
+          await speak(answer,turnId);
         }else{
-          await speak("I couldn't get an answer right now.");
+          await speak("I couldn't get an answer right now.",turnId);
         }
       }
     }catch(e){
+      if(turnId!==turnSerialRef.current)return;
       setVoiceError(e?.message||"RONN could not answer.");
       try{await speechChain}catch{}
-      if(!spokeAny)await speak("I couldn't reach RONN right now.");
+      if(!spokeAny)await speak("I couldn't reach RONN right now.",turnId);
     }finally{
-      finishSpeaking();
+      if(turnId===turnSerialRef.current){
+        speakingRef.current=false;
+        finishSpeaking();
+      }
     }
+  }
+
+  function looksLikeSpeechEcho(transcript){
+    const heardWords=normalize(transcript).split(" ").filter(Boolean);
+    if(!heardWords.length)return true;
+    const speech=normalize(currentSpeechRef.current+" "+recentSpeechRef.current.slice(-260));
+    const heard=heardWords.join(" ");
+    if(!speech)return false;
+    if(speech.includes(heard))return true;
+    const unique=[...new Set(heardWords.filter(w=>w.length>2))];
+    if(unique.length<2)return false;
+    const overlap=unique.filter(w=>speech.includes(w)).length/unique.length;
+    return overlap>=0.8;
+  }
+
+  async function interruptWithTranscript(transcript){
+    const raw=String(transcript||"").trim();
+    if(!raw||interruptingRef.current)return;
+    if(looksLikeSpeechEcho(raw)){
+      bargePendingRef.current=false;
+      return;
+    }
+    interruptingRef.current=true;
+    bargePendingRef.current=false;
+    turnSerialRef.current+=1;
+    try{Speech.stop()}catch{}
+    try{cancelRonnRef.current?.()}catch{}
+    busyRef.current=false;
+    speakingRef.current=false;
+    currentSpeechRef.current="";
+    await stopRecognition();
+    setHeard(raw);
+
+    if(SLEEP_RE.test(raw)){
+      interruptingRef.current=false;
+      await goToSleep();
+      return;
+    }
+
+    interruptingRef.current=false;
+    await runQuery(raw);
   }
 
   async function handleFinalTranscript(transcript){
     const raw=String(transcript||"").trim();
-    if(!raw||busyRef.current)return;
+    if(!raw)return;
+    if(speakingRef.current||interruptingRef.current){
+      await interruptWithTranscript(raw);
+      return;
+    }
+    if(busyRef.current)return;
     const normalized=normalize(raw);
     const now=Date.now();
     if(normalized===lastFinalRef.current&&now-lastFinalAtRef.current<2200)return;
@@ -349,13 +435,18 @@ export function useRonnVoice({askRonn}){
 
   useSpeechRecognitionEvent("start",()=>{
     listeningRef.current=true;
-    setState(conversationRef.current?"awake":"listening");
+    if(!speakingRef.current)setState(conversationRef.current?"awake":"listening");
     setVoiceError("");
   });
 
   useSpeechRecognitionEvent("end",()=>{
     listeningRef.current=false;
-    if(enabledRef.current&&!busyRef.current){
+    if(!enabledRef.current)return;
+    if(speakingRef.current&&busyRef.current){
+      scheduleRestart(180,true);
+      return;
+    }
+    if(!busyRef.current){
       setState(conversationRef.current?"awake":"starting");
       scheduleRestart(250);
     }
@@ -364,6 +455,17 @@ export function useRonnVoice({askRonn}){
   useSpeechRecognitionEvent("result",(event)=>{
     const transcript=event?.results?.[0]?.transcript||"";
     if(transcript)setHeard(transcript);
+
+    if(speakingRef.current&&transcript&&!event?.isFinal){
+      const clean=String(transcript).trim();
+      const enoughSpeech=clean.length>=6&&clean.split(/\s+/).length>=2;
+      if(enoughSpeech&&!looksLikeSpeechEcho(clean)){
+        bargePendingRef.current=true;
+        try{Speech.stop()}catch{}
+        currentSpeechRef.current="";
+      }
+    }
+
     if(event?.isFinal&&transcript){
       handleFinalTranscript(transcript);
     }
@@ -375,7 +477,18 @@ export function useRonnVoice({askRonn}){
     if(!["aborted","no-speech","interrupted"].includes(code)){
       setVoiceError(event?.message||code||"Speech recognition stopped.");
     }
-    if(!enabledRef.current||busyRef.current)return;
+    if(onDeviceRef.current===true&&["language-not-supported","service-not-allowed"].includes(code)){
+      onDeviceRef.current=false;
+      setVoiceError("");
+      scheduleRestart(250,speakingRef.current&&busyRef.current);
+      return;
+    }
+    if(!enabledRef.current)return;
+    if(speakingRef.current&&busyRef.current){
+      if(!["aborted","no-speech"].includes(code))scheduleRestart(350,true);
+      return;
+    }
+    if(busyRef.current)return;
     if(code==="not-allowed"){
       scheduleRestart(1800);
       return;
@@ -421,6 +534,11 @@ export function useRonnVoice({askRonn}){
     enabledRef.current=false;
     conversationRef.current=false;
     busyRef.current=false;
+    speakingRef.current=false;
+    interruptingRef.current=false;
+    bargePendingRef.current=false;
+    turnSerialRef.current+=1;
+    try{cancelRonnRef.current?.()}catch{}
     clearRestart();
     clearConversationTimer();
     try{Speech.stop()}catch{}
