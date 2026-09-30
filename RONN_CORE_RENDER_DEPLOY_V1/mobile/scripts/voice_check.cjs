@@ -37,6 +37,12 @@ expect(voice.includes('cancelRonnRef'),"voice cancellation hook missing");
 expect(voice.includes('startWakeWord("RONN"'),"native RONN wake-word start path missing");
 expect(voice.includes('stopWakeWord'),"native RONN wake-word stop path missing");
 expect(voice.includes('startNativeWake'),"native wake-word state-machine integration missing");
+expect(voice.includes('CONVERSATION_TIMEOUT_MS=18000'),"follow-up window was not shortened");
+expect(voice.includes('END_OF_TURN_MS=480'),"fast end-of-turn target missing");
+expect(voice.includes('looksSemanticallyComplete'),"semantic turn detector missing");
+expect(voice.includes('scheduleSemanticCommit'),"early semantic commit path missing");
+expect(voice.includes('[RONN_VOICE_LATENCY]'),"voice latency telemetry missing");
+expect(voice.includes('FIRST_STREAM_FLUSH_CHARS'),"early speech streaming flush missing");
 expect(appJs.includes('AbortController'),"voice stream cancellation is not wired");
 expect(appJs.includes('cancelVoiceQuery'),"voice cancellation callback missing");
 
