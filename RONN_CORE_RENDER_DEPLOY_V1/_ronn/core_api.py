@@ -111,6 +111,7 @@ class CoreChatBody(BaseModel):
     files: list[CoreFile] = Field(default_factory=list)
     mode: str = "auto"
     style: str = "auto"
+    voice_session: bool = False
     project_context: str = ""
     review: bool = False
     agent_mode: bool = True
