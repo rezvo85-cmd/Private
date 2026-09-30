@@ -8,10 +8,32 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.ronn.ai"
+      "bundleIdentifier": "com.ronn.ai",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
     },
     "android": {
       "package": "com.ronn.ai"
-    }
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow RONN to hear you when Always Ready is enabled.",
+          "speechRecognitionPermission": "Allow RONN to understand what you say."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow RONN to hear you when Always Ready is enabled.",
+          "enableBackgroundRecording": true,
+          "enableBackgroundPlayback": true
+        }
+      ]
+    ]
   }
 }
