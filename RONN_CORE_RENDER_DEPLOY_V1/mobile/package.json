@@ -7,13 +7,18 @@
     "start": "expo start",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "ios:dev": "expo run:ios",
+    "prebuild": "expo prebuild"
   },
   "dependencies": {
     "expo": "~55.0.0",
     "expo-secure-store": "~55.0.18",
     "react": "19.2.0",
-    "react-native": "0.83.10"
+    "react-native": "0.83.10",
+    "expo-audio": "~55.0.18",
+    "expo-speech": "~55.0.18",
+    "expo-speech-recognition": "3.1.3"
   },
   "devDependencies": {
     "babel-preset-expo": "55.0.25"
