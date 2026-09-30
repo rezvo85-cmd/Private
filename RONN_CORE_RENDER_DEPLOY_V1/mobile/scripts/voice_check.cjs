@@ -7,7 +7,7 @@ const fail=(m)=>{throw new Error("[RONN_VOICE] "+m)};
 const expect=(ok,m)=>{if(!ok)fail(m)};
 
 const pkg=JSON.parse(read("package.json"));
-for(const dep of ["expo-audio","expo-speech","expo-speech-recognition","expo-secure-store"]){
+for(const dep of ["expo-audio","expo-speech","expo-speech-recognition","expo-secure-store","ronn-wake-word"]){
   expect(pkg.dependencies&&pkg.dependencies[dep],`missing dependency: ${dep}`);
 }
 
@@ -34,6 +34,9 @@ expect(voice.includes('handleToken'),"voice token streaming handler missing");
 expect(voice.includes('supportsOnDeviceRecognition'),"on-device recognition capability check missing");
 expect(voice.includes('interruptWithTranscript'),"barge-in interruption handler missing");
 expect(voice.includes('cancelRonnRef'),"voice cancellation hook missing");
+expect(voice.includes('startWakeWord("RONN"'),"native RONN wake-word start path missing");
+expect(voice.includes('stopWakeWord'),"native RONN wake-word stop path missing");
+expect(voice.includes('startNativeWake'),"native wake-word state-machine integration missing");
 expect(appJs.includes('AbortController'),"voice stream cancellation is not wired");
 expect(appJs.includes('cancelVoiceQuery'),"voice cancellation callback missing");
 
