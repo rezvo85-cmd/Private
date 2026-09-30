@@ -47,6 +47,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   const onDeviceRef=useRef(null);
   const speakingRef=useRef(false);
   const interruptingRef=useRef(false);
+  const bargePendingRef=useRef(false);
   const turnSerialRef=useRef(0);
   const currentSpeechRef=useRef("");
   const recentSpeechRef=useRef("");
@@ -200,7 +201,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     }catch(e){
       setState("error");
       setVoiceError(e?.message||"RONN could not start listening.");
-      scheduleRestart(1200);
+      scheduleRestart(1200,allowWhileBusy);
     }
   }
 
@@ -235,7 +236,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     setState("speaking");
     const voice=await bestVoiceId();
     for(const words of chunks){
-      if(turnId!==turnSerialRef.current||interruptingRef.current||!enabledRef.current)break;
+      if(turnId!==turnSerialRef.current||interruptingRef.current||bargePendingRef.current||!enabledRef.current)break;
       currentSpeechRef.current=words;
       recentSpeechRef.current=(recentSpeechRef.current+" "+words).slice(-900);
       scheduleRestart(80,true);
@@ -262,7 +263,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
         }
         setTimeout(done,Math.min(90000,Math.max(7000,words.length*90)));
       });
-      if(!enabledRef.current||turnId!==turnSerialRef.current||interruptingRef.current)break;
+      if(!enabledRef.current||turnId!==turnSerialRef.current||interruptingRef.current||bargePendingRef.current)break;
     }
     currentSpeechRef.current="";
     if(turnId===turnSerialRef.current) {
@@ -297,6 +298,8 @@ export function useRonnVoice({askRonn,cancelRonn}){
     busyRef.current=true;
     speakingRef.current=false;
     interruptingRef.current=false;
+    bargePendingRef.current=false;
+    recentSpeechRef.current="";
     await stopRecognition();
     conversationRef.current=true;
     armConversationTimeout();
@@ -356,7 +359,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   function looksLikeSpeechEcho(transcript){
     const heardWords=normalize(transcript).split(" ").filter(Boolean);
     if(!heardWords.length)return true;
-    const speech=normalize(currentSpeechRef.current+" "+recentSpeechRef.current);
+    const speech=normalize(currentSpeechRef.current+" "+recentSpeechRef.current.slice(-260));
     const heard=heardWords.join(" ");
     if(!speech)return false;
     if(speech.includes(heard))return true;
@@ -368,8 +371,13 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
   async function interruptWithTranscript(transcript){
     const raw=String(transcript||"").trim();
-    if(!raw||interruptingRef.current||looksLikeSpeechEcho(raw))return;
+    if(!raw||interruptingRef.current)return;
+    if(looksLikeSpeechEcho(raw)){
+      bargePendingRef.current=false;
+      return;
+    }
     interruptingRef.current=true;
+    bargePendingRef.current=false;
     turnSerialRef.current+=1;
     try{Speech.stop()}catch{}
     try{cancelRonnRef.current?.()}catch{}
@@ -452,6 +460,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
       const clean=String(transcript).trim();
       const enoughSpeech=clean.length>=6&&clean.split(/\s+/).length>=2;
       if(enoughSpeech&&!looksLikeSpeechEcho(clean)){
+        bargePendingRef.current=true;
         try{Speech.stop()}catch{}
         currentSpeechRef.current="";
       }
@@ -527,6 +536,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     busyRef.current=false;
     speakingRef.current=false;
     interruptingRef.current=false;
+    bargePendingRef.current=false;
     turnSerialRef.current+=1;
     try{cancelRonnRef.current?.()}catch{}
     clearRestart();
