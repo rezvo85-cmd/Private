@@ -115,6 +115,28 @@ export function useRonnVoice({askRonn}){
     return chunks;
   }
 
+  function splitStreamSentences(text=""){
+    let rest=String(text||"");
+    const sentences=[];
+    while(rest){
+      const match=rest.match(/^([\s\S]*?[.!?])(?=\s|$)/);
+      if(!match)break;
+      const sentence=match[1].trim();
+      if(sentence)sentences.push(sentence);
+      rest=rest.slice(match[0].length).replace(/^\s+/,"");
+    }
+    if(rest.length>360){
+      const window=rest.slice(0,340);
+      const cut=Math.max(window.lastIndexOf(";"),window.lastIndexOf(","),window.lastIndexOf(" "));
+      if(cut>140){
+        const sentence=rest.slice(0,cut+1).trim();
+        if(sentence)sentences.push(sentence);
+        rest=rest.slice(cut+1).replace(/^\s+/,"");
+      }
+    }
+    return {sentences,rest};
+  }
+
   async function configureAudio(){
     try{
       await setAudioModeAsync({
@@ -253,16 +275,42 @@ export function useRonnVoice({askRonn}){
     armConversationTimeout();
     setState("thinking");
     setVoiceError("");
+
+    let pendingSpeech="";
+    let spokeAny=false;
+    let speechChain=Promise.resolve();
+
+    const queueSpeech=(text)=>{
+      const words=String(text||"").trim();
+      if(!words)return;
+      spokeAny=true;
+      speechChain=speechChain.then(()=>speak(words));
+    };
+
+    const handleToken=(token)=>{
+      pendingSpeech+=String(token||"");
+      const split=splitStreamSentences(pendingSpeech);
+      pendingSpeech=split.rest;
+      for(const sentence of split.sentences)queueSpeech(sentence);
+    };
+
     try{
-      const answer=await askRonnRef.current?.(q);
-      if(answer){
-        await speak(answer);
-      }else{
-        await speak("I couldn't get an answer right now.");
+      const answer=await askRonnRef.current?.(q,handleToken);
+      const tail=speechReadyText(pendingSpeech);
+      if(tail)queueSpeech(tail);
+      await speechChain;
+
+      if(!spokeAny){
+        if(answer){
+          await speak(answer);
+        }else{
+          await speak("I couldn't get an answer right now.");
+        }
       }
     }catch(e){
       setVoiceError(e?.message||"RONN could not answer.");
-      await speak("I couldn't reach RONN right now.");
+      try{await speechChain}catch{}
+      if(!spokeAny)await speak("I couldn't reach RONN right now.");
     }finally{
       finishSpeaking();
     }
