@@ -49,7 +49,9 @@ export default function App(){
   const conversationIdRef=useRef(null);
   const sessionRef=useRef("");
   const busyRef=useRef(false);
-  const voice=useRonnVoice({askRonn:submitVoiceQuery});
+  const voiceAbortRef=useRef(null);
+  const voiceRequestIdRef=useRef(0);
+  const voice=useRonnVoice({askRonn:submitVoiceQuery,cancelRonn:cancelVoiceQuery});
 
   useEffect(()=>{messagesRef.current=messages},[messages]);
   useEffect(()=>{conversationIdRef.current=conversationId},[conversationId]);
@@ -163,11 +165,12 @@ export default function App(){
     return {event,data:data.join("\n")};
   }
 
-  async function performChatStream(q,activeSession,history,activeConversationId,onToken){
+  async function performChatStream(q,activeSession,history,activeConversationId,onToken,signal){
     const r=await expoFetch(API+"/chat/sse",{
       method:"POST",
       headers:await headers(activeSession,{"Accept":"text/event-stream"},!!activeSession),
-      body:JSON.stringify(chatPayload(q,history,activeConversationId))
+      body:JSON.stringify(chatPayload(q,history,activeConversationId)),
+      signal
     });
     if(!r.ok)return {ok:false,status:r.status,response:r};
 
@@ -234,10 +237,21 @@ export default function App(){
     });
   }
 
+  function cancelVoiceQuery(){
+    voiceRequestIdRef.current+=1;
+    try{voiceAbortRef.current?.abort()}catch{}
+    voiceAbortRef.current=null;
+    busyRef.current=false;
+    setBusy(false);
+  }
+
   async function submitVoiceQuery(raw,onToken){
     const q=String(raw||"").trim();
     if(!q||busyRef.current)return "";
     setError("");
+    const requestId=++voiceRequestIdRef.current;
+    const controller=new AbortController();
+    voiceAbortRef.current=controller;
     busyRef.current=true;
     setBusy(true);
 
@@ -249,7 +263,7 @@ export default function App(){
     try{
       let activeSession=sessionRef.current;
       let activeConversationId=conversationIdRef.current;
-      let streamed=await performChatStream(q,activeSession,priorHistory,activeConversationId,onToken);
+      let streamed=await performChatStream(q,activeSession,priorHistory,activeConversationId,onToken,controller.signal);
 
       if((streamed.status===401||streamed.status===403)&&activeSession){
         await SecureStore.deleteItemAsync(SESSION_KEY);
@@ -258,7 +272,7 @@ export default function App(){
         conversationIdRef.current=null;
         setSession("");
         setConversationId(null);
-        streamed=await performChatStream(q,"",priorHistory,null,onToken);
+        streamed=await performChatStream(q,"",priorHistory,null,onToken,controller.signal);
       }
 
       if(!streamed.ok){
@@ -287,11 +301,15 @@ export default function App(){
       setMessages(messagesRef.current);
       return answer;
     }catch(e){
+      if(controller.signal.aborted||e?.name==="AbortError")return "";
       setError(e.message||"RONN could not answer.");
       throw e;
     }finally{
-      busyRef.current=false;
-      setBusy(false);
+      if(voiceRequestIdRef.current===requestId){
+        voiceAbortRef.current=null;
+        busyRef.current=false;
+        setBusy(false);
+      }
     }
   }
 
