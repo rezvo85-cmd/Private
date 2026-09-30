@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {AppState} from "react-native";
 import * as SecureStore from "expo-secure-store";
 import * as Speech from "expo-speech";
 import {setAudioModeAsync} from "expo-audio";
@@ -323,10 +324,20 @@ export function useRonnVoice({askRonn}){
   useSpeechRecognitionEvent("error",(event)=>{
     listeningRef.current=false;
     const code=String(event?.error||"");
-    if(!["aborted","no-speech"].includes(code)){
+    if(!["aborted","no-speech","interrupted"].includes(code)){
       setVoiceError(event?.message||code||"Speech recognition stopped.");
     }
-    if(enabledRef.current&&!busyRef.current)scheduleRestart(code==="not-allowed"?1800:500);
+    if(!enabledRef.current||busyRef.current)return;
+    if(code==="not-allowed"){
+      scheduleRestart(1800);
+      return;
+    }
+    if(code==="interrupted"){
+      setState("starting");
+      scheduleRestart(1500);
+      return;
+    }
+    scheduleRestart(500);
   });
 
   async function setEnabled(next){
@@ -372,6 +383,18 @@ export function useRonnVoice({askRonn}){
     setHeard("");
     return true;
   }
+
+  useEffect(()=>{
+    const sub=AppState.addEventListener("change",(nextState)=>{
+      if(nextState!=="active"||!enabledRef.current||busyRef.current)return;
+      setVoiceError("");
+      if(!listeningRef.current){
+        setState(conversationRef.current?"awake":"starting");
+        scheduleRestart(150);
+      }
+    });
+    return ()=>sub.remove();
+  },[]);
 
   useEffect(()=>{
     let cancelled=false;
