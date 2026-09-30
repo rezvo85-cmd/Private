@@ -3,6 +3,7 @@ import {AppState} from "react-native";
 import * as SecureStore from "expo-secure-store";
 import * as Speech from "expo-speech";
 import {setAudioModeAsync} from "expo-audio";
+import {isWakeWordAvailable,startWakeWord,stopWakeWord} from "./modules/ronn-wake-word";
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
@@ -51,6 +52,9 @@ export function useRonnVoice({askRonn,cancelRonn}){
   const turnSerialRef=useRef(0);
   const currentSpeechRef=useRef("");
   const recentSpeechRef=useRef("");
+  const nativeWakeRef=useRef(false);
+  const nativeWakeSubRef=useRef(null);
+  const wakeTransitionRef=useRef(false);
 
   useEffect(()=>{askRonnRef.current=askRonn},[askRonn]);
   useEffect(()=>{cancelRonnRef.current=cancelRonn},[cancelRonn]);
@@ -159,6 +163,49 @@ export function useRonnVoice({askRonn,cancelRonn}){
     }catch{}
   }
 
+  async function stopNativeWake(){
+    try{nativeWakeSubRef.current?.remove?.()}catch{}
+    nativeWakeSubRef.current=null;
+    if(nativeWakeRef.current){
+      try{await stopWakeWord()}catch{}
+    }
+    nativeWakeRef.current=false;
+  }
+
+  async function handleNativeWake(){
+    if(!enabledRef.current||busyRef.current||conversationRef.current)return;
+    await stopNativeWake();
+    conversationRef.current=true;
+    armConversationTimeout();
+    setHeard("RONN");
+    setVoiceError("");
+    setState("awake");
+    scheduleRestart(40);
+  }
+
+  async function startNativeWake(){
+    if(!enabledRef.current||busyRef.current||conversationRef.current||nativeWakeRef.current)return false;
+    if(!isWakeWordAvailable())return false;
+    wakeTransitionRef.current=true;
+    try{
+      await stopRecognition();
+      await configureAudio();
+      const subscription=await startWakeWord("RONN",()=>{handleNativeWake()});
+      if(!subscription)return false;
+      nativeWakeSubRef.current=subscription;
+      nativeWakeRef.current=true;
+      setVoiceError("");
+      setState("listening");
+      return true;
+    }catch(e){
+      nativeWakeRef.current=false;
+      setVoiceError(e?.message||"RONN wake-word listener could not start.");
+      return false;
+    }finally{
+      wakeTransitionRef.current=false;
+    }
+  }
+
   function canUseOnDeviceRecognition(){
     if(onDeviceRef.current!==null)return onDeviceRef.current;
     try{
@@ -179,6 +226,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
         setVoiceError("Microphone and speech recognition permission are required.");
         return;
       }
+      await stopNativeWake();
       await configureAudio();
       setVoiceError("");
       if(!speakingRef.current)setState(conversationRef.current?"awake":"starting");
@@ -208,12 +256,21 @@ export function useRonnVoice({askRonn,cancelRonn}){
   function scheduleRestart(delay=300,allowWhileBusy=false){
     if(!enabledRef.current||(!allowWhileBusy&&busyRef.current))return;
     clearRestart();
-    restartTimerRef.current=setTimeout(()=>{startRecognition({allowWhileBusy})},delay);
+    restartTimerRef.current=setTimeout(async()=>{
+      if(!enabledRef.current||(!allowWhileBusy&&busyRef.current))return;
+      if(!conversationRef.current&&!allowWhileBusy){
+        const started=await startNativeWake();
+        if(started)return;
+      }
+      startRecognition({allowWhileBusy});
+    },delay);
   }
 
   async function stopRecognition(){
     clearRestart();
-    try{ExpoSpeechRecognitionModule.abort()}catch{}
+    if(listeningRef.current){
+      try{ExpoSpeechRecognitionModule.abort()}catch{}
+    }
     listeningRef.current=false;
   }
 
@@ -223,7 +280,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
       setState("off");
       return;
     }
-    setState(conversationRef.current?"awake":"listening");
+    setState(conversationRef.current?"awake":"starting");
     scheduleRestart(250);
   }
 
@@ -441,6 +498,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
   useSpeechRecognitionEvent("end",()=>{
     listeningRef.current=false;
+    if(wakeTransitionRef.current)return;
     if(!enabledRef.current)return;
     if(speakingRef.current&&busyRef.current){
       scheduleRestart(180,true);
@@ -474,6 +532,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   useSpeechRecognitionEvent("error",(event)=>{
     listeningRef.current=false;
     const code=String(event?.error||"");
+    if(wakeTransitionRef.current&&["aborted","interrupted","no-speech"].includes(code))return;
     if(!["aborted","no-speech","interrupted"].includes(code)){
       setVoiceError(event?.message||code||"Speech recognition stopped.");
     }
@@ -543,6 +602,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     clearConversationTimer();
     try{Speech.stop()}catch{}
     await stopRecognition();
+    await stopNativeWake();
     await SecureStore.deleteItemAsync(VOICE_PREF_KEY);
     setEnabledState(false);
     setState("off");
@@ -552,11 +612,18 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
   useEffect(()=>{
     const sub=AppState.addEventListener("change",(nextState)=>{
-      if(nextState!=="active"||!enabledRef.current||busyRef.current)return;
+      if(!enabledRef.current||busyRef.current)return;
       setVoiceError("");
-      if(!listeningRef.current){
-        setState(conversationRef.current?"awake":"starting");
-        scheduleRestart(150);
+      if(conversationRef.current){
+        if(nextState==="active"&&!listeningRef.current){
+          setState("awake");
+          scheduleRestart(150);
+        }
+        return;
+      }
+      if(!nativeWakeRef.current){
+        setState("starting");
+        scheduleRestart(80);
       }
     });
     return ()=>sub.remove();
@@ -585,6 +652,10 @@ export function useRonnVoice({askRonn,cancelRonn}){
       clearConversationTimer();
       try{Speech.stop()}catch{}
       try{ExpoSpeechRecognitionModule.abort()}catch{}
+      try{nativeWakeSubRef.current?.remove?.()}catch{}
+      nativeWakeSubRef.current=null;
+      nativeWakeRef.current=false;
+      try{stopWakeWord()}catch{}
     };
   },[]);
 
