@@ -10,12 +10,27 @@ import {
 } from "expo-speech-recognition";
 
 const VOICE_PREF_KEY="ronn_voice_always_ready";
-const CONVERSATION_TIMEOUT_MS=90000;
+const CONVERSATION_TIMEOUT_MS=18000;
+const END_OF_TURN_MS=480;
+const FIRST_STREAM_FLUSH_CHARS=190;
 const WAKE_WORD_RE=/\b(?:ronn|ron)\b/i;
 const SLEEP_RE=/^\s*(?:go to sleep|sleep|stop listening|that's all|that is all|never ?mind)\s*[.!?]*\s*$/i;
 
 function normalize(text=""){
   return String(text).trim().replace(/\s+/g," ").toLowerCase();
+}
+
+function looksSemanticallyComplete(text=""){
+  const raw=String(text||"").trim();
+  if(!raw)return false;
+  const words=raw.toLowerCase().replace(/[.!?,;:]+$/,"").split(/\s+/).filter(Boolean);
+  if(words.length<2)return false;
+  const last=words[words.length-1];
+  const continuation=new Set(["and","or","but","because","so","if","when","while","with","to","of","for","then","like","about","that","which"]);
+  if(continuation.has(last))return false;
+  if(/[.!?]\s*$/.test(raw))return true;
+  if(/^(who|what|when|where|why|how|can|could|would|should|is|are|do|does|did|tell|give|show|find|make|open|start|stop)\b/i.test(raw))return true;
+  return words.length>=5;
 }
 
 function extractWakeQuery(text=""){
@@ -33,6 +48,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   const [state,setState]=useState("off");
   const [heard,setHeard]=useState("");
   const [voiceError,setVoiceError]=useState("");
+  const [latency,setLatency]=useState(null);
 
   const enabledRef=useRef(false);
   const listeningRef=useRef(false);
@@ -55,6 +71,10 @@ export function useRonnVoice({askRonn,cancelRonn}){
   const nativeWakeRef=useRef(false);
   const nativeWakeSubRef=useRef(null);
   const wakeTransitionRef=useRef(false);
+  const interimTimerRef=useRef(null);
+  const lastInterimRef=useRef("");
+  const lastInterimAtRef=useRef(0);
+  const latencyRef=useRef({wakeAt:0,finalAt:0,queryAt:0,firstTokenAt:0,firstSpeechAt:0});
 
   useEffect(()=>{askRonnRef.current=askRonn},[askRonn]);
   useEffect(()=>{cancelRonnRef.current=cancelRonn},[cancelRonn]);
@@ -63,6 +83,13 @@ export function useRonnVoice({askRonn,cancelRonn}){
     if(restartTimerRef.current){
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current=null;
+    }
+  }
+
+  function clearInterimTimer(){
+    if(interimTimerRef.current){
+      clearTimeout(interimTimerRef.current);
+      interimTimerRef.current=null;
     }
   }
 
@@ -109,7 +136,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
       .trim();
   }
 
-  function speechChunks(text,maxChars=700){
+  function speechChunks(text,maxChars=320){
     const clean=speechReadyText(text);
     if(!clean)return [];
     const sentences=clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[clean];
@@ -138,10 +165,10 @@ export function useRonnVoice({askRonn,cancelRonn}){
       if(sentence)sentences.push(sentence);
       rest=rest.slice(match[0].length).replace(/^\s+/,"");
     }
-    if(rest.length>360){
-      const window=rest.slice(0,340);
+    if(rest.length>FIRST_STREAM_FLUSH_CHARS){
+      const window=rest.slice(0,FIRST_STREAM_FLUSH_CHARS);
       const cut=Math.max(window.lastIndexOf(";"),window.lastIndexOf(","),window.lastIndexOf(" "));
-      if(cut>140){
+      if(cut>90){
         const sentence=rest.slice(0,cut+1).trim();
         if(sentence)sentences.push(sentence);
         rest=rest.slice(cut+1).replace(/^\s+/,"");
@@ -174,6 +201,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
   async function handleNativeWake(){
     if(!enabledRef.current||busyRef.current||conversationRef.current)return;
+    latencyRef.current={wakeAt:Date.now(),finalAt:0,queryAt:0,firstTokenAt:0,firstSpeechAt:0};
     await stopNativeWake();
     conversationRef.current=true;
     armConversationTimeout();
@@ -253,7 +281,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     }
   }
 
-  function scheduleRestart(delay=300,allowWhileBusy=false){
+  function scheduleRestart(delay=140,allowWhileBusy=false){
     if(!enabledRef.current||(!allowWhileBusy&&busyRef.current))return;
     clearRestart();
     restartTimerRef.current=setTimeout(async()=>{
@@ -281,7 +309,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
       return;
     }
     setState(conversationRef.current?"awake":"starting");
-    scheduleRestart(250);
+    scheduleRestart(90);
   }
 
   async function speak(text,turnId=turnSerialRef.current){
@@ -291,12 +319,23 @@ export function useRonnVoice({askRonn,cancelRonn}){
     if(turnId!==turnSerialRef.current)return;
     speakingRef.current=true;
     setState("speaking");
+    if(latencyRef.current.queryAt&&!latencyRef.current.firstSpeechAt){
+      latencyRef.current.firstSpeechAt=Date.now();
+      const m={
+        wakeToFinalMs:latencyRef.current.wakeAt&&latencyRef.current.finalAt?latencyRef.current.finalAt-latencyRef.current.wakeAt:null,
+        finalToQueryMs:latencyRef.current.finalAt?latencyRef.current.queryAt-latencyRef.current.finalAt:null,
+        queryToFirstTokenMs:latencyRef.current.firstTokenAt?latencyRef.current.firstTokenAt-latencyRef.current.queryAt:null,
+        queryToFirstSpeechMs:latencyRef.current.firstSpeechAt-latencyRef.current.queryAt,
+      };
+      setLatency(m);
+      try{console.log("[RONN_VOICE_LATENCY]",JSON.stringify(m))}catch{}
+    }
     const voice=await bestVoiceId();
     for(const words of chunks){
       if(turnId!==turnSerialRef.current||interruptingRef.current||bargePendingRef.current||!enabledRef.current)break;
       currentSpeechRef.current=words;
       recentSpeechRef.current=(recentSpeechRef.current+" "+words).slice(-900);
-      scheduleRestart(80,true);
+      scheduleRestart(40,true);
       await new Promise(resolve=>{
         let settled=false;
         const done=()=>{
@@ -352,6 +391,9 @@ export function useRonnVoice({askRonn,cancelRonn}){
     const q=String(query||"").trim();
     if(!q||busyRef.current)return;
     const turnId=++turnSerialRef.current;
+    clearInterimTimer();
+    latencyRef.current={...latencyRef.current,queryAt:Date.now(),firstTokenAt:0,firstSpeechAt:0};
+    setLatency(null);
     busyRef.current=true;
     speakingRef.current=false;
     interruptingRef.current=false;
@@ -379,6 +421,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
 
     const handleToken=(token)=>{
       if(turnId!==turnSerialRef.current)return;
+      if(!latencyRef.current.firstTokenAt)latencyRef.current.firstTokenAt=Date.now();
       pendingSpeech+=String(token||"");
       const split=splitStreamSentences(pendingSpeech);
       pendingSpeech=split.rest;
@@ -455,6 +498,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
   }
 
   async function handleFinalTranscript(transcript){
+    clearInterimTimer();
     const raw=String(transcript||"").trim();
     if(!raw)return;
     if(speakingRef.current||interruptingRef.current){
@@ -467,6 +511,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     if(normalized===lastFinalRef.current&&now-lastFinalAtRef.current<2200)return;
     lastFinalRef.current=normalized;
     lastFinalAtRef.current=now;
+    latencyRef.current.finalAt=now;
 
     if(conversationRef.current){
       if(SLEEP_RE.test(raw)){
@@ -510,6 +555,22 @@ export function useRonnVoice({askRonn,cancelRonn}){
     }
   });
 
+  function scheduleSemanticCommit(transcript){
+    const clean=String(transcript||"").trim();
+    if(!conversationRef.current||busyRef.current||speakingRef.current||!looksSemanticallyComplete(clean)){
+      clearInterimTimer();
+      return;
+    }
+    lastInterimRef.current=clean;
+    lastInterimAtRef.current=Date.now();
+    clearInterimTimer();
+    interimTimerRef.current=setTimeout(()=>{
+      if(!enabledRef.current||busyRef.current||speakingRef.current)return;
+      if(Date.now()-lastInterimAtRef.current<END_OF_TURN_MS-20)return;
+      handleFinalTranscript(lastInterimRef.current);
+    },END_OF_TURN_MS);
+  }
+
   useSpeechRecognitionEvent("result",(event)=>{
     const transcript=event?.results?.[0]?.transcript||"";
     if(transcript)setHeard(transcript);
@@ -522,6 +583,10 @@ export function useRonnVoice({askRonn,cancelRonn}){
         try{Speech.stop()}catch{}
         currentSpeechRef.current="";
       }
+    }
+
+    if(!event?.isFinal&&transcript&&!speakingRef.current){
+      scheduleSemanticCommit(transcript);
     }
 
     if(event?.isFinal&&transcript){
@@ -600,6 +665,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
     try{cancelRonnRef.current?.()}catch{}
     clearRestart();
     clearConversationTimer();
+    clearInterimTimer();
     try{Speech.stop()}catch{}
     await stopRecognition();
     await stopNativeWake();
@@ -650,6 +716,7 @@ export function useRonnVoice({askRonn,cancelRonn}){
       enabledRef.current=false;
       clearRestart();
       clearConversationTimer();
+      clearInterimTimer();
       try{Speech.stop()}catch{}
       try{ExpoSpeechRecognitionModule.abort()}catch{}
       try{nativeWakeSubRef.current?.remove?.()}catch{}
@@ -678,5 +745,6 @@ export function useRonnVoice({askRonn,cancelRonn}){
     heard,
     error:voiceError,
     conversationActive:conversationRef.current,
+    latency,
   };
 }
