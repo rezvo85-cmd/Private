@@ -23,9 +23,13 @@ const appJs=read("App.js");
 const voice=read("voice_mode.js");
 expect(appJs.includes('useRonnVoice'),"App.js is not wired to useRonnVoice");
 expect(appJs.includes('/chat/complete'),"App.js is not wired to the existing R23 chat route");
+expect(appJs.includes('/chat/sse'),"voice streaming is not wired to the existing R23 SSE route");
+expect(appJs.includes('expo/fetch'),"Expo streaming fetch is not enabled");
 expect(voice.includes('ExpoSpeechRecognitionModule.start'),"speech recognition start path missing");
 expect(voice.includes('Speech.speak'),"text-to-speech path missing");
 expect(voice.includes('speechReadyText'),"spoken-answer cleanup missing");
 expect(voice.includes('getAvailableVoicesAsync'),"enhanced voice selection missing");
+expect(voice.includes('splitStreamSentences'),"streaming sentence splitter missing");
+expect(voice.includes('handleToken'),"voice token streaming handler missing");
 
 console.log("RONN_VOICE static checks passed.");
