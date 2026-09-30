@@ -80,3 +80,73 @@ jobs:
           name: RONN-iOS-Simulator
           path: RONN_CORE_RENDER_DEPLOY_V1/mobile/RONN-iOS-Simulator.zip
           if-no-files-found: error
+
+  ios-device-ipa:
+    needs: validate
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - name: Prepare offline wake-word engine
+        run: npm run wakeword:prepare
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+      - name: Install CocoaPods
+        run: cd ios && pod install
+      - name: Build unsigned RONN iPhone app
+        run: |
+          cd ios
+          WORKSPACE="$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [ -z "$WORKSPACE" ]; then
+            echo "No Xcode workspace generated"
+            exit 1
+          fi
+          if ! xcodebuild -list -workspace "$WORKSPACE" | grep -qE '^[[:space:]]*RONN[[:space:]]*$'; then
+            echo "RONN app scheme not found"
+            xcodebuild -list -workspace "$WORKSPACE"
+            exit 1
+          fi
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme RONN \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+      - name: Package unsigned IPA for SideStore
+        run: |
+          APP="$(find ios/build-device/Build/Products/Release-iphoneos -maxdepth 2 -type d -name 'RONN.app' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "Physical-device RONN.app was not produced"
+            find ios/build-device/Build/Products -maxdepth 4 -type d -name '*.app' -print || true
+            exit 1
+          fi
+
+          echo "Built app: $APP"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          file "$APP/RONN"
+
+          rm -rf Payload RONN-iOS-Unsigned.ipa
+          mkdir -p Payload
+          ditto "$APP" Payload/RONN.app
+          /usr/bin/zip -qry RONN-iOS-Unsigned.ipa Payload
+
+          test -s RONN-iOS-Unsigned.ipa
+          echo "Unsigned IPA ready for SideStore signing:"
+          ls -lh RONN-iOS-Unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RONN-iOS-Unsigned-IPA
+          path: RONN_CORE_RENDER_DEPLOY_V1/mobile/RONN-iOS-Unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
