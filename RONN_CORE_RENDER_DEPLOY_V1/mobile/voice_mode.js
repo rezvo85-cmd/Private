@@ -12,6 +12,7 @@ import {
 const VOICE_PREF_KEY="ronn_voice_always_ready";
 const CONVERSATION_TIMEOUT_MS=18000;
 const END_OF_TURN_MS=480;
+const WARM_INTERVAL_MS=8*60*1000;
 const FIRST_STREAM_FLUSH_CHARS=190;
 const WAKE_WORD_RE=/\b(?:ronn|ron)\b/i;
 const SLEEP_RE=/^\s*(?:go to sleep|sleep|stop listening|that's all|that is all|never ?mind)\s*[.!?]*\s*$/i;
@@ -31,6 +32,15 @@ function looksSemanticallyComplete(text=""){
   if(/[.!?]\s*$/.test(raw))return true;
   if(/^(who|what|when|where|why|how|can|could|would|should|is|are|do|does|did|tell|give|show|find|make|open|start|stop)\b/i.test(raw))return true;
   return words.length>=5;
+}
+
+function semanticCommitDelay(text=""){
+  const raw=String(text||"").trim();
+  const words=raw.split(/\s+/).filter(Boolean);
+  if(/[.!?]\s*$/.test(raw))return 220;
+  if(/^(who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i.test(raw)&&words.length>=3)return 320;
+  if(words.length>=8)return 380;
+  return END_OF_TURN_MS;
 }
 
 function extractWakeQuery(text=""){
@@ -73,6 +83,7 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
   const nativeWakeSubRef=useRef(null);
   const wakeTransitionRef=useRef(false);
   const interimTimerRef=useRef(null);
+  const keepWarmTimerRef=useRef(null);
   const lastInterimRef=useRef("");
   const lastInterimAtRef=useRef(0);
   const latencyRef=useRef({wakeAt:0,finalAt:0,queryAt:0,firstTokenAt:0,firstSpeechAt:0});
@@ -93,6 +104,23 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
       clearTimeout(interimTimerRef.current);
       interimTimerRef.current=null;
     }
+  }
+
+  function clearKeepWarm(){
+    if(keepWarmTimerRef.current){
+      clearInterval(keepWarmTimerRef.current);
+      keepWarmTimerRef.current=null;
+    }
+  }
+
+  function startKeepWarm(){
+    clearKeepWarm();
+    if(!enabledRef.current)return;
+    try{warmRonnRef.current?.()}catch{}
+    keepWarmTimerRef.current=setInterval(()=>{
+      if(!enabledRef.current)return;
+      try{warmRonnRef.current?.()}catch{}
+    },WARM_INTERVAL_MS);
   }
 
   function clearConversationTimer(){
@@ -565,14 +593,15 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
       clearInterimTimer();
       return;
     }
+    const delay=semanticCommitDelay(clean);
     lastInterimRef.current=clean;
     lastInterimAtRef.current=Date.now();
     clearInterimTimer();
     interimTimerRef.current=setTimeout(()=>{
       if(!enabledRef.current||busyRef.current||speakingRef.current)return;
-      if(Date.now()-lastInterimAtRef.current<END_OF_TURN_MS-20)return;
+      if(Date.now()-lastInterimAtRef.current<delay-20)return;
       handleFinalTranscript(lastInterimRef.current);
-    },END_OF_TURN_MS);
+    },delay);
   }
 
   useSpeechRecognitionEvent("result",(event)=>{
@@ -609,6 +638,11 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
       onDeviceRef.current=false;
       setVoiceError("");
       scheduleRestart(250,speakingRef.current&&busyRef.current);
+      return;
+    }
+    if(code==="audio-capture"){
+      setVoiceError("");
+      scheduleRestart(180,speakingRef.current&&busyRef.current);
       return;
     }
     if(!enabledRef.current)return;
@@ -648,6 +682,7 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
         setEnabledState(true);
         setState("starting");
         await SecureStore.setItemAsync(VOICE_PREF_KEY,"1");
+        startKeepWarm();
         scheduleRestart(50);
         return true;
       }catch(e){
@@ -670,6 +705,7 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
     clearRestart();
     clearConversationTimer();
     clearInterimTimer();
+    clearKeepWarm();
     try{Speech.stop()}catch{}
     await stopRecognition();
     await stopNativeWake();
@@ -710,6 +746,7 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
         enabledRef.current=true;
         setEnabledState(true);
         setState("starting");
+        startKeepWarm();
         scheduleRestart(300);
       }else{
         await SecureStore.deleteItemAsync(VOICE_PREF_KEY);
@@ -721,6 +758,7 @@ export function useRonnVoice({askRonn,cancelRonn,warmRonn}){
       clearRestart();
       clearConversationTimer();
       clearInterimTimer();
+      clearKeepWarm();
       try{Speech.stop()}catch{}
       try{ExpoSpeechRecognitionModule.abort()}catch{}
       try{nativeWakeSubRef.current?.remove?.()}catch{}
