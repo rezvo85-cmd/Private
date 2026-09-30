@@ -9,7 +9,8 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "ios:dev": "expo run:ios",
-    "prebuild": "expo prebuild"
+    "prebuild": "expo prebuild",
+    "voice:check": "node scripts/voice_check.cjs"
   },
   "dependencies": {
     "expo": "~55.0.0",

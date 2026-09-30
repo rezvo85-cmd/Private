@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {AppState} from "react-native";
 import * as SecureStore from "expo-secure-store";
 import * as Speech from "expo-speech";
 import {setAudioModeAsync} from "expo-audio";
@@ -8,7 +9,7 @@ import {
 } from "expo-speech-recognition";
 
 const VOICE_PREF_KEY="ronn_voice_always_ready";
-const CONVERSATION_TIMEOUT_MS=75000;
+const CONVERSATION_TIMEOUT_MS=90000;
 const WAKE_WORD_RE=/\b(?:ronn|ron)\b/i;
 const SLEEP_RE=/^\s*(?:go to sleep|sleep|stop listening|that's all|that is all|never ?mind)\s*[.!?]*\s*$/i;
 
@@ -41,6 +42,7 @@ export function useRonnVoice({askRonn}){
   const lastFinalRef=useRef("");
   const lastFinalAtRef=useRef(0);
   const askRonnRef=useRef(askRonn);
+  const voiceIdRef=useRef(null);
 
   useEffect(()=>{askRonnRef.current=askRonn},[askRonn]);
 
@@ -67,6 +69,50 @@ export function useRonnVoice({askRonn}){
         scheduleRestart(100);
       }
     },CONVERSATION_TIMEOUT_MS);
+  }
+
+  async function bestVoiceId(){
+    if(voiceIdRef.current!==null)return voiceIdRef.current;
+    try{
+      const voices=await Speech.getAvailableVoicesAsync();
+      const english=(voices||[]).filter(v=>String(v?.language||"").toLowerCase().startsWith("en-us"));
+      const enhanced=english.filter(v=>String(v?.quality||"").toLowerCase()==="enhanced");
+      const chosen=enhanced[0]||english[0]||null;
+      voiceIdRef.current=chosen?.identifier||"";
+    }catch{
+      voiceIdRef.current="";
+    }
+    return voiceIdRef.current;
+  }
+
+  function speechReadyText(text=""){
+    return String(text||"")
+      .replace(/```[\s\S]*?```/g," ")
+      .replace(/`([^`]+)`/g,"$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g,"$1")
+      .replace(/https?:\/\/\S+/gi," ")
+      .replace(/[*_#>|~]+/g," ")
+      .replace(/\s+/g," ")
+      .trim();
+  }
+
+  function speechChunks(text,maxChars=700){
+    const clean=speechReadyText(text);
+    if(!clean)return [];
+    const sentences=clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[clean];
+    const chunks=[];
+    let current="";
+    for(const sentence of sentences){
+      const next=(current+" "+sentence.trim()).trim();
+      if(current&&next.length>maxChars){
+        chunks.push(current);
+        current=sentence.trim();
+      }else{
+        current=next;
+      }
+    }
+    if(current)chunks.push(current);
+    return chunks;
   }
 
   async function configureAudio(){
@@ -141,35 +187,41 @@ export function useRonnVoice({askRonn}){
   }
 
   async function speak(text){
-    const words=String(text||"").trim();
-    if(!words){
+    const chunks=speechChunks(text);
+    if(!chunks.length){
       finishSpeaking();
       return;
     }
     await configureAudio();
     setState("speaking");
     try{Speech.stop()}catch{}
-    await new Promise(resolve=>{
-      let settled=false;
-      const done=()=>{
-        if(settled)return;
-        settled=true;
-        resolve();
-      };
-      try{
-        Speech.speak(words,{
-          language:"en-US",
-          rate:0.93,
-          pitch:0.94,
-          onDone:done,
-          onStopped:done,
-          onError:done,
-        });
-      }catch{
-        done();
-      }
-      setTimeout(done,Math.min(45000,Math.max(5000,words.length*75)));
-    });
+    const voice=await bestVoiceId();
+    for(const words of chunks){
+      await new Promise(resolve=>{
+        let settled=false;
+        const done=()=>{
+          if(settled)return;
+          settled=true;
+          resolve();
+        };
+        try{
+          Speech.speak(words,{
+            language:"en-US",
+            rate:0.95,
+            pitch:0.96,
+            useApplicationAudioSession:true,
+            ...(voice?{voice}:{}),
+            onDone:done,
+            onStopped:done,
+            onError:done,
+          });
+        }catch{
+          done();
+        }
+        setTimeout(done,Math.min(90000,Math.max(7000,words.length*90)));
+      });
+      if(!enabledRef.current)break;
+    }
   }
 
   async function acknowledgeWake(){
@@ -272,10 +324,20 @@ export function useRonnVoice({askRonn}){
   useSpeechRecognitionEvent("error",(event)=>{
     listeningRef.current=false;
     const code=String(event?.error||"");
-    if(!["aborted","no-speech"].includes(code)){
+    if(!["aborted","no-speech","interrupted"].includes(code)){
       setVoiceError(event?.message||code||"Speech recognition stopped.");
     }
-    if(enabledRef.current&&!busyRef.current)scheduleRestart(code==="not-allowed"?1800:500);
+    if(!enabledRef.current||busyRef.current)return;
+    if(code==="not-allowed"){
+      scheduleRestart(1800);
+      return;
+    }
+    if(code==="interrupted"){
+      setState("starting");
+      scheduleRestart(1500);
+      return;
+    }
+    scheduleRestart(500);
   });
 
   async function setEnabled(next){
@@ -321,6 +383,18 @@ export function useRonnVoice({askRonn}){
     setHeard("");
     return true;
   }
+
+  useEffect(()=>{
+    const sub=AppState.addEventListener("change",(nextState)=>{
+      if(nextState!=="active"||!enabledRef.current||busyRef.current)return;
+      setVoiceError("");
+      if(!listeningRef.current){
+        setState(conversationRef.current?"awake":"starting");
+        scheduleRestart(150);
+      }
+    });
+    return ()=>sub.remove();
+  },[]);
 
   useEffect(()=>{
     let cancelled=false;
