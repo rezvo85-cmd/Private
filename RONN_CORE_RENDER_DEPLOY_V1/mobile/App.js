@@ -4,6 +4,7 @@ import {
   StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View
 } from "react-native";
 import * as SecureStore from "expo-secure-store";
+import {fetch as expoFetch} from "expo/fetch";
 import {useRonnVoice} from "./voice_mode";
 
 const API="https://ronn-core.onrender.com/api/v1";
@@ -48,7 +49,7 @@ export default function App(){
   const conversationIdRef=useRef(null);
   const sessionRef=useRef("");
   const busyRef=useRef(false);
-  const voice=useRonnVoice({askRonn:submitQuery});
+  const voice=useRonnVoice({askRonn:submitVoiceQuery});
 
   useEffect(()=>{messagesRef.current=messages},[messages]);
   useEffect(()=>{conversationIdRef.current=conversationId},[conversationId]);
@@ -134,25 +135,164 @@ export default function App(){
     setOpBusy(false);
   }
 
+  function chatPayload(q,history,activeConversationId){
+    return {
+      message:q,
+      conversation_id:activeConversationId,
+      project_id:"default",
+      history,
+      images:[],
+      files:[],
+      mode:"auto",
+      style:"auto",
+      project_context:"",
+      review:false,
+      agent_mode:true,
+      skill_profile:"auto"
+    };
+  }
+
+  function parseSseBlock(block){
+    const lines=String(block||"").split(/\r?\n/);
+    let event="message";
+    const data=[];
+    for(const line of lines){
+      if(line.startsWith("event:"))event=line.slice(6).trim();
+      else if(line.startsWith("data:"))data.push(line.slice(5).trimStart());
+    }
+    return {event,data:data.join("\n")};
+  }
+
+  async function performChatStream(q,activeSession,history,activeConversationId,onToken){
+    const r=await expoFetch(API+"/chat/sse",{
+      method:"POST",
+      headers:await headers(activeSession,{"Accept":"text/event-stream"},!!activeSession),
+      body:JSON.stringify(chatPayload(q,history,activeConversationId))
+    });
+    if(!r.ok)return {ok:false,status:r.status,response:r};
+
+    const reader=r.body?.getReader?.();
+    if(!reader)throw new Error("RONN streaming is unavailable on this build.");
+
+    const decoder=new TextDecoder();
+    let buffer="";
+    let streamedAnswer="";
+    let meta={};
+    let donePayload={};
+
+    const handleBlock=(raw)=>{
+      const block=parseSseBlock(raw);
+      if(!block.data)return;
+      let data={};
+      try{data=JSON.parse(block.data)}catch{return}
+      if(block.event==="meta"){
+        meta={...meta,...data};
+        return;
+      }
+      if(block.event==="token"&&data.token){
+        const token=String(data.token);
+        streamedAnswer+=token;
+        onToken?.(token);
+        return;
+      }
+      if(block.event==="done"){
+        donePayload=data||{};
+      }
+    };
+
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buffer+=decoder.decode(value,{stream:true}).replace(/\r\n/g,"\n");
+      let splitAt=buffer.indexOf("\n\n");
+      while(splitAt>=0){
+        handleBlock(buffer.slice(0,splitAt));
+        buffer=buffer.slice(splitAt+2);
+        splitAt=buffer.indexOf("\n\n");
+      }
+    }
+    buffer+=decoder.decode();
+    if(buffer.trim())handleBlock(buffer);
+
+    return {
+      ok:true,
+      status:r.status,
+      data:{
+        ...donePayload,
+        answer:donePayload.answer||streamedAnswer,
+        conversation_id:meta.conversation_id||activeConversationId,
+        project_id:meta.project_id||"default"
+      }
+    };
+  }
+
   async function performChat(q,activeSession,history,activeConversationId){
     return fetch(API+"/chat/complete",{
       method:"POST",
       headers:await headers(activeSession,{},!!activeSession),
-      body:JSON.stringify({
-        message:q,
-        conversation_id:activeConversationId,
-        project_id:"default",
-        history,
-        images:[],
-        files:[],
-        mode:"auto",
-        style:"auto",
-        project_context:"",
-        review:false,
-        agent_mode:true,
-        skill_profile:"auto"
-      })
+      body:JSON.stringify(chatPayload(q,history,activeConversationId))
     });
+  }
+
+  async function submitVoiceQuery(raw,onToken){
+    const q=String(raw||"").trim();
+    if(!q||busyRef.current)return "";
+    setError("");
+    busyRef.current=true;
+    setBusy(true);
+
+    const priorHistory=messagesRef.current.slice(-24).map(m=>({role:m.role,content:m.content}));
+    const userMessage={id:"u"+Date.now(),role:"user",content:q};
+    messagesRef.current=[...messagesRef.current,userMessage];
+    setMessages(messagesRef.current);
+
+    try{
+      let activeSession=sessionRef.current;
+      let activeConversationId=conversationIdRef.current;
+      let streamed=await performChatStream(q,activeSession,priorHistory,activeConversationId,onToken);
+
+      if((streamed.status===401||streamed.status===403)&&activeSession){
+        await SecureStore.deleteItemAsync(SESSION_KEY);
+        activeSession="";
+        sessionRef.current="";
+        conversationIdRef.current=null;
+        setSession("");
+        setConversationId(null);
+        streamed=await performChatStream(q,"",priorHistory,null,onToken);
+      }
+
+      if(!streamed.ok){
+        let detail="RONN request failed.";
+        try{
+          const body=await streamed.response.json();
+          detail=body?.detail||detail;
+        }catch{}
+        throw new Error(detail);
+      }
+
+      const d=streamed.data||{};
+      if(d.conversation_id){
+        conversationIdRef.current=d.conversation_id;
+        setConversationId(d.conversation_id);
+      }
+
+      const answer=d.answer||"No answer returned.";
+      const assistantMessage={
+        id:"a"+Date.now(),
+        role:"assistant",
+        content:answer,
+        meta:d.meta||{}
+      };
+      messagesRef.current=[...messagesRef.current,assistantMessage];
+      setMessages(messagesRef.current);
+      return answer;
+    }catch(e){
+      setError(e.message||"RONN could not answer.");
+      throw e;
+    }finally{
+      busyRef.current=false;
+      setBusy(false);
+    }
   }
 
   async function submitQuery(raw){
