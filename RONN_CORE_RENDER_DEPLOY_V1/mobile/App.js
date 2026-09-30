@@ -94,7 +94,7 @@ export default function App(){
           device_id:did,
           device_name:"RONN iPhone",
           platform:"ios",
-          app_version:"R21",
+          app_version:"R23",
           return_token:true
         })
       });
