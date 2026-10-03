@@ -150,6 +150,31 @@ export default function App() {
     });
   }
 
+  async function finishSetup() {
+    await act(async () => {
+      if (!coreUrl) throw new Error("Enter your RONN Core URL first.");
+      setMessage("Finishing RONN Roblox setup…");
+      const bridgeStatus = await window.ronnDesktop.bridge.status();
+      if (!bridgeStatus.installed) await window.ronnDesktop.bridge.install();
+
+      const toolStatus = await window.ronnDesktop.toolchain.status();
+      if (!toolStatus.rokit || !toolStatus.rojo || !toolStatus.wally) {
+        await window.ronnDesktop.toolchain.install();
+      }
+
+      const pair = await api.request("/api/roblox/pair/start", { method: "POST", body: {} });
+      await window.ronnDesktop.bridge.pairAndStart({
+        server: coreUrl,
+        pairCode: pair.pair_code,
+        name: "RONN Desktop",
+      });
+
+      await refreshNative();
+      setMessage("RONN setup is installed and paired. Open Roblox Studio and enable its built-in MCP server if it is not already enabled.");
+      setTimeout(() => refreshAll().catch(() => {}), 1800);
+    });
+  }
+
   async function selectStudio(studio) {
     await act(async () => {
       await api.request("/api/roblox/select", {
@@ -320,9 +345,10 @@ export default function App() {
               <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Owner secret (only if required)" />
               <button onClick={unlock}>Connect</button>
             </div>
+            <button className="primary wide setupButton" onClick={finishSetup}>Finish setup automatically</button>
             <div className="buttonGrid">
               <button onClick={installBridge}>Install bridge</button>
-              <button className="primary" onClick={pairBridge}>Pair + start</button>
+              <button onClick={pairBridge}>Pair + start</button>
               <button onClick={() => window.ronnDesktop.bridge.start().then(refreshNative).catch((e) => setError(e.message))}>Start</button>
               <button onClick={() => window.ronnDesktop.bridge.stop().then(refreshNative)}>Stop</button>
             </div>
