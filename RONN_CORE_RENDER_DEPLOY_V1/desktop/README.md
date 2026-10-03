@@ -35,3 +35,17 @@ The installer is unsigned unless a Windows code-signing certificate is configure
 ## Roblox authorization boundary
 
 RONN can preview saved KeyframeSequence/AnimationClip data in Studio and can install an existing published AnimationId. Permanent Roblox animation publishing remains a user-authorized Roblox operation; the desktop app does not store Roblox account credentials or bypass that boundary.
+
+
+## BloxBot-derived reliability hardening
+
+RONN Desktop 1.1 reviews and adapts selected reliability patterns from the MIT-licensed BloxBot v0.13.7 project while preserving R23 as RONN's only AI brain.
+
+Added behavior includes:
+- resilient StudioMCP discovery across the generated batch target, Roblox registry metadata, version folders, and the newer Roblox Studio folder,
+- Explorer fallback across Edit, Server, and Client data models,
+- persistent Studio work sessions that become recoverable "interrupted" sessions after a crash or shutdown,
+- bounded local diagnostics with secret, email, username, and home-path scrubbing,
+- one-click first-run setup for the bridge plus pinned Roblox toolchain.
+
+See `THIRD_PARTY_NOTICES.md` for the BloxBot MIT notice.
