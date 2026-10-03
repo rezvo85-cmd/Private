@@ -3388,7 +3388,7 @@ def roblox_bridge_windows_zip(request: Request):
         headers={
             "Content-Disposition":'attachment; filename="RONN_Roblox_Bridge_Windows.zip"',
             "Cache-Control":"no-store",
-            "X-RONN-Bridge-Version":"1.2.0",
+            "X-RONN-Bridge-Version":"1.3.0",
         },
     )
 
@@ -3403,32 +3403,44 @@ def roblox_studios_api(request: Request):
     return {"studios":roblox_gateway_studios(owner_id(request))}
 
 
-def _roblox_explorer_tool_args(owner: str, body: RobloxExplorerBody) -> dict:
-    catalog=roblox_gateway_tool_catalog(owner,body.bridge_id)
+def _roblox_explorer_tool_contract(owner: str, bridge_id: str | None = None) -> tuple[dict,dict,set[str]]:
+    catalog=roblox_gateway_tool_catalog(owner,bridge_id)
     tool=next((x for x in catalog if x.get("name")=="search_game_tree"),None)
     if not tool:
         raise RuntimeError("The connected Roblox Studio MCP server does not advertise search_game_tree.")
     schema=tool.get("inputSchema") if isinstance(tool.get("inputSchema"),dict) else {}
     props=schema.get("properties") if isinstance(schema.get("properties"),dict) else {}
     required=set(schema.get("required") or [])
+    return schema,props,required
+
+
+def _roblox_explorer_tool_args(
+    owner: str,
+    body: RobloxExplorerBody,
+    *,
+    datamodel_type: str | None = None,
+) -> dict:
+    _schema,props,required=_roblox_explorer_tool_contract(owner,body.bridge_id)
     args={}
 
     def put(value,*names):
         if value in (None,"",[]):
-            return
+            return None
         for name in names:
             if name in props:
                 args[name]=value
-                return
+                return name
+        return None
 
     put(str(body.path or "").strip(),"path","instance_path","root_path","root")
     put(str(body.query or "").strip(),"query","keyword","search","text")
     put(str(body.class_name or "").strip(),"class_name","className","instance_type","instanceType","class")
-    depth=max(1,min(int(body.depth or 4),12))
+    depth=max(1,min(int(body.depth or 4),10))
     put(depth,"max_depth","maxDepth","depth")
+    put(100000,"head_limit","headLimit","limit","max_results","maxResults")
+    put(datamodel_type,"datamodel_type","datamodelType","data_model","dataModel")
 
-    # When the live schema exposes a path filter and the user asks for the root,
-    # make that explicit instead of guessing a query token.
+    # Older Studio MCP schemas expose a root path instead of a datamodel selector.
     if not args and "path" in props:
         args["path"]="game"
 
@@ -3442,6 +3454,14 @@ def _roblox_explorer_tool_args(owner: str, body: RobloxExplorerBody) -> dict:
             + ", ".join(sorted(unknown_required))
         )
     return args
+
+
+def _roblox_explorer_datamodel_key(owner: str, bridge_id: str | None = None) -> str | None:
+    _schema,props,_required=_roblox_explorer_tool_contract(owner,bridge_id)
+    for name in ("datamodel_type","datamodelType","data_model","dataModel"):
+        if name in props:
+            return name
+    return None
 
 
 def _roblox_explorer_items(value):
@@ -3499,26 +3519,51 @@ def _roblox_explorer_items(value):
 @app.post("/api/roblox/explorer")
 def roblox_explorer_api(body: RobloxExplorerBody, request: Request):
     owner=owner_id(request)
+    attempts=[]
     try:
-        args=_roblox_explorer_tool_args(owner,body)
-        result=roblox_gateway_tool_call(
-            owner,
-            "search_game_tree",
-            args,
-            bridge_id=body.bridge_id,
-            studio_id=body.studio_id,
-            timeout=45.0,
-        )
+        datamodel_key=_roblox_explorer_datamodel_key(owner,body.bridge_id)
+        datamodels=("Edit","Server","Client") if datamodel_key else (None,)
+        selected_args={}
+        selected_result={}
+        selected_items=[]
+        selected_datamodel=None
+
+        for datamodel in datamodels:
+            args=_roblox_explorer_tool_args(owner,body,datamodel_type=datamodel)
+            result=roblox_gateway_tool_call(
+                owner,
+                "search_game_tree",
+                args,
+                bridge_id=body.bridge_id,
+                studio_id=body.studio_id,
+                timeout=35.0,
+            )
+            items=_roblox_explorer_items(result)
+            ok=bool(result.get("ok")) if isinstance(result,dict) else True
+            attempts.append({
+                "datamodel_type":datamodel,
+                "ok":ok,
+                "count":len(items),
+                "reason":str(result.get("reason") or result.get("error") or "")[:240] if isinstance(result,dict) else "",
+            })
+            selected_args=args
+            selected_result=result
+            selected_items=items
+            selected_datamodel=datamodel
+            if ok and items:
+                break
     except ValueError as exc:
         raise HTTPException(400,str(exc))
     except RuntimeError as exc:
         raise HTTPException(503,str(exc))
-    items=_roblox_explorer_items(result)
+
     return {
-        "arguments":args,
-        "items":items,
-        "count":len(items),
-        "tool_ok":bool(result.get("ok")) if isinstance(result,dict) else True,
+        "arguments":selected_args,
+        "items":selected_items,
+        "count":len(selected_items),
+        "tool_ok":bool(selected_result.get("ok")) if isinstance(selected_result,dict) else True,
+        "datamodel_type":selected_datamodel,
+        "attempts":attempts,
     }
 
 
