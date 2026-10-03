@@ -3513,10 +3513,12 @@ def roblox_explorer_api(body: RobloxExplorerBody, request: Request):
         raise HTTPException(400,str(exc))
     except RuntimeError as exc:
         raise HTTPException(503,str(exc))
+    items=_roblox_explorer_items(result)
     return {
         "arguments":args,
-        "items":_roblox_explorer_items(result),
-        "result":result,
+        "items":items,
+        "count":len(items),
+        "tool_ok":bool(result.get("ok")) if isinstance(result,dict) else True,
     }
 
 
