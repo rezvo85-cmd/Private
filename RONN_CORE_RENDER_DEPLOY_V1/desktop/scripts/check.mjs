@@ -10,6 +10,9 @@ const required = [
   "electron/bridge-manager.cjs",
   "electron/toolchain.cjs",
   "electron/checkpoints.cjs",
+  "electron/session-store.cjs",
+  "electron/diagnostics.cjs",
+  "THIRD_PARTY_NOTICES.md",
   "src/main.jsx",
   "src/App.jsx",
   "src/api.js",
@@ -30,4 +33,10 @@ if (main.includes("webSecurity: false")) throw new Error("Desktop must not disab
 if (!main.includes('contextIsolation: true') || !main.includes('nodeIntegration: false')) throw new Error("Electron isolation boundary missing.");
 const toolchain = fs.readFileSync(path.join(root, "electron/toolchain.cjs"), "utf8");
 if (!toolchain.includes("sha256") || !toolchain.includes("f9ba1704014ff67")) throw new Error("Pinned Rokit checksum verification missing.");
+const sessions = fs.readFileSync(path.join(root, "electron/session-store.cjs"), "utf8");
+if (!sessions.includes("interruptRunning") || !sessions.includes("automatic") && !sessions.includes("interrupted")) throw new Error("Recoverable Studio session support missing.");
+const diagnostics = fs.readFileSync(path.join(root, "electron/diagnostics.cjs"), "utf8");
+if (!diagnostics.includes("[redacted]") || !diagnostics.includes("MAX_ENTRIES")) throw new Error("Bounded scrubbed diagnostics support missing.");
+const notices = fs.readFileSync(path.join(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+if (!notices.includes("BloxBot") || !notices.includes("MIT License")) throw new Error("BloxBot MIT attribution missing.");
 console.log("RONN Desktop static checks: PASS");
