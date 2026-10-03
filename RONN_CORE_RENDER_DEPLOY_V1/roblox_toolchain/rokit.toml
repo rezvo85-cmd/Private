@@ -1,0 +1,5 @@
+# RONN Roblox development toolchain.
+# Rokit itself is pinned/downloaded by the RONN desktop bootstrap.
+[tools]
+rojo = "rojo-rbx/rojo@7.7.1"
+wally = "UpliftGames/wally@0.3.2"
