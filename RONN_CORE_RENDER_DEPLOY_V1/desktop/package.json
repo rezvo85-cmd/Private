@@ -1,0 +1,65 @@
+{
+  "name": "ronn-roblox-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RONN desktop shell for the official Roblox Studio MCP bridge",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "build": "vite build",
+    "start": "electron .",
+    "check": "node scripts/check.mjs",
+    "dist:win": "npm run build && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9",
+    "extract-zip": "2.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3",
+    "vite": "8.3.2"
+  },
+  "build": {
+    "appId": "ai.ronn.robloxdesktop",
+    "productName": "RONN",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../roblox_bridge",
+        "to": "roblox_bridge",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../roblox_toolchain",
+        "to": "roblox_toolchain",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "RONN-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "rezvo85-cmd",
+      "repo": "Private"
+    }
+  }
+}
