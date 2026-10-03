@@ -52,3 +52,8 @@ For animation work, RONN will:
 Temporary preview IDs are never written into permanent gameplay code as uploaded Roblox animation asset IDs.
 
 Publishing/uploading an animation is intentionally separate because it requires Roblox account/asset authorization. The Studio MCP preview workflow does not store Roblox credentials or publish assets on its own.
+
+
+## Studio update recovery
+
+Bridge 1.3 resolves Studio's MCP helper on every reconnect. On Windows it checks the current target recorded in Studio's generated launcher, Roblox Studio registry metadata, the newest `Roblox\\Versions` installation, and the newer `Roblox Studio` folder before falling back to the generated batch launcher. This keeps RONN from staying pinned to a stale Studio version after Roblox updates.
