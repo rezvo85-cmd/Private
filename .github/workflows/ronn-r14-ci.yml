@@ -6,6 +6,8 @@ on:
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
       - "RONN_CORE_RENDER_DEPLOY_V1/roblox_bridge/**"
+      - "RONN_CORE_RENDER_DEPLOY_V1/desktop/**"
+      - "RONN_CORE_RENDER_DEPLOY_V1/roblox_toolchain/**"
       - ".github/workflows/ronn-r14-ci.yml"
       - "render.yaml"
   pull_request:
@@ -13,6 +15,8 @@ on:
     paths:
       - "RONN_CORE_RENDER_DEPLOY_V1/_ronn/**"
       - "RONN_CORE_RENDER_DEPLOY_V1/roblox_bridge/**"
+      - "RONN_CORE_RENDER_DEPLOY_V1/desktop/**"
+      - "RONN_CORE_RENDER_DEPLOY_V1/roblox_toolchain/**"
       - ".github/workflows/ronn-r14-ci.yml"
       - "render.yaml"
 
@@ -2572,3 +2576,28 @@ jobs:
           assert result["ok"] is True
           assert result["score"] == 100.0
           PY
+
+
+  desktop_verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: RONN_CORE_RENDER_DEPLOY_V1/desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install desktop dependencies without binary postinstall
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: RONN Desktop static safety checks
+        run: npm run check
+
+      - name: Build RONN Desktop renderer
+        run: npm run build
