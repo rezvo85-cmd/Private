@@ -143,6 +143,7 @@ from roblox_studio_gateway import (
     studios as roblox_gateway_studios,
     select_target as roblox_gateway_select_target,
     manual_tool_call as roblox_gateway_tool_call,
+    tool_catalog as roblox_gateway_tool_catalog,
     capability_status as roblox_gateway_capability_status,
     bridge_compatible as roblox_bridge_compatible,
 )
@@ -904,6 +905,14 @@ class RobloxStudioToolBody(BaseModel):
     bridge_id: str | None = None
     studio_id: str | None = None
     timeout: float = 45.0
+
+class RobloxExplorerBody(BaseModel):
+    query: str = ""
+    path: str = ""
+    class_name: str = ""
+    depth: int = 4
+    bridge_id: str | None = None
+    studio_id: str | None = None
 
 class RobloxBridgeRevokeBody(BaseModel):
     bridge_id: str | None = None
@@ -3392,6 +3401,123 @@ def roblox_status_api(request: Request):
 @app.get("/api/roblox/studios")
 def roblox_studios_api(request: Request):
     return {"studios":roblox_gateway_studios(owner_id(request))}
+
+
+def _roblox_explorer_tool_args(owner: str, body: RobloxExplorerBody) -> dict:
+    catalog=roblox_gateway_tool_catalog(owner,body.bridge_id)
+    tool=next((x for x in catalog if x.get("name")=="search_game_tree"),None)
+    if not tool:
+        raise RuntimeError("The connected Roblox Studio MCP server does not advertise search_game_tree.")
+    schema=tool.get("inputSchema") if isinstance(tool.get("inputSchema"),dict) else {}
+    props=schema.get("properties") if isinstance(schema.get("properties"),dict) else {}
+    required=set(schema.get("required") or [])
+    args={}
+
+    def put(value,*names):
+        if value in (None,"",[]):
+            return
+        for name in names:
+            if name in props:
+                args[name]=value
+                return
+
+    put(str(body.path or "").strip(),"path","instance_path","root_path","root")
+    put(str(body.query or "").strip(),"query","keyword","search","text")
+    put(str(body.class_name or "").strip(),"class_name","className","instance_type","instanceType","class")
+    depth=max(1,min(int(body.depth or 4),12))
+    put(depth,"max_depth","maxDepth","depth")
+
+    # When the live schema exposes a path filter and the user asks for the root,
+    # make that explicit instead of guessing a query token.
+    if not args and "path" in props:
+        args["path"]="game"
+
+    unknown_required=[
+        name for name in required
+        if name not in args and name not in {"studio_id","studioId"}
+    ]
+    if unknown_required:
+        raise RuntimeError(
+            "Studio MCP changed the search_game_tree schema; RONN will not guess required arguments: "
+            + ", ".join(sorted(unknown_required))
+        )
+    return args
+
+
+def _roblox_explorer_items(value):
+    rows=[]
+    seen=set()
+    def walk(node):
+        if len(rows)>=2000:
+            return
+        if isinstance(node,str):
+            text=node.strip()
+            if text[:1] in ("{","["):
+                try:
+                    walk(json.loads(text))
+                except Exception:
+                    pass
+            return
+        if isinstance(node,list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node,dict):
+            return
+        path_value=str(
+            node.get("path")
+            or node.get("full_path")
+            or node.get("fullPath")
+            or node.get("instance_path")
+            or ""
+        ).strip()
+        name=str(node.get("name") or "").strip()
+        class_name=str(
+            node.get("class_name")
+            or node.get("className")
+            or node.get("class")
+            or node.get("type")
+            or ""
+        ).strip()
+        if path_value or (name and class_name):
+            key=path_value or (name+"|"+class_name)
+            if key not in seen:
+                seen.add(key)
+                rows.append({
+                    "path":path_value,
+                    "name":name or (path_value.rsplit(".",1)[-1] if path_value else ""),
+                    "class_name":class_name,
+                    "raw":{k:v for k,v in node.items() if k not in {"children","descendants","items","results","content","data","result"}},
+                })
+        for key in ("items","results","instances","children","descendants","content","data","result","structuredContent","structured_content"):
+            if key in node:
+                walk(node.get(key))
+    walk(value)
+    return rows
+
+
+@app.post("/api/roblox/explorer")
+def roblox_explorer_api(body: RobloxExplorerBody, request: Request):
+    owner=owner_id(request)
+    try:
+        args=_roblox_explorer_tool_args(owner,body)
+        result=roblox_gateway_tool_call(
+            owner,
+            "search_game_tree",
+            args,
+            bridge_id=body.bridge_id,
+            studio_id=body.studio_id,
+            timeout=45.0,
+        )
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503,str(exc))
+    return {
+        "arguments":args,
+        "items":_roblox_explorer_items(result),
+        "result":result,
+    }
 
 
 @app.post("/api/roblox/select")
