@@ -23,7 +23,7 @@ import requests
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-VERSION = "RONN-ROBLOX-BRIDGE-1.1.0"
+VERSION = "RONN-ROBLOX-BRIDGE-1.2.0"
 HEARTBEAT_SECONDS = 6.0
 CATALOG_REFRESH_SECONDS = 12.0
 POLL_SECONDS = 0.8
@@ -152,22 +152,37 @@ def _pair(server: str, pair_code: str, config: dict[str, Any], config_path: Path
     return config
 
 
-def _roblox_mcp_command() -> tuple[str, list[str], dict[str, str]]:
+def _latest_windows_studio_mcp(local: str) -> Path | None:
+    versions = Path(local) / "Roblox" / "Versions"
+    if not versions.exists():
+        return None
+    candidates = []
+    for child in versions.glob("version-*"):
+        exe = child / "StudioMCP.exe"
+        if exe.is_file():
+            try:
+                stamp = exe.stat().st_mtime
+            except OSError:
+                stamp = 0.0
+            candidates.append((stamp, exe))
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    return candidates[0][1] if candidates else None
+
+
+def _roblox_mcp_command(prefer_direct: bool = False) -> tuple[str, list[str], dict[str, str]]:
+    override = str(os.environ.get("RONN_ROBLOX_MCP_COMMAND") or "").strip()
+    if override:
+        candidate = Path(override).expanduser()
+        if not candidate.is_file():
+            raise FileNotFoundError("RONN_ROBLOX_MCP_COMMAND does not point to a file.")
+        return str(candidate), [], {"PATH": os.environ.get("PATH", "")}
+
     if os.name == "nt":
         local = os.environ.get("LOCALAPPDATA")
         if not local:
             raise RuntimeError("LOCALAPPDATA is missing.")
         mcp_bat = Path(local) / "Roblox" / "mcp.bat"
-        if not mcp_bat.exists():
-            raise FileNotFoundError(
-                "Roblox Studio MCP launcher was not found. Update Roblox Studio, "
-                "open Assistant > Manage MCP Servers, and enable Studio as MCP server."
-            )
-        command = os.environ.get("ComSpec") or os.path.join(
-            os.environ.get("SystemRoot", r"C:\Windows"),
-            "System32",
-            "cmd.exe",
-        )
+        direct = _latest_windows_studio_mcp(local)
         env = {
             "LOCALAPPDATA": local,
             "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
@@ -175,7 +190,26 @@ def _roblox_mcp_command() -> tuple[str, list[str], dict[str, str]]:
             "TMP": os.environ.get("TMP", local),
             "PATH": os.environ.get("PATH", ""),
         }
-        return command, ["/d", "/s", "/c", str(mcp_bat)], env
+
+        # Roblox's generated launcher is the official/default path. If a Studio
+        # update leaves that shim stale and the first connection attempt fails,
+        # the reconnect loop can resolve the newest installed StudioMCP.exe
+        # dynamically instead of staying pinned to an old version directory.
+        if prefer_direct and direct:
+            return str(direct), [], env
+        if mcp_bat.exists():
+            command = os.environ.get("ComSpec") or os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32",
+                "cmd.exe",
+            )
+            return command, ["/d", "/s", "/c", str(mcp_bat)], env
+        if direct:
+            return str(direct), [], env
+        raise FileNotFoundError(
+            "Roblox Studio MCP launcher was not found. Update Roblox Studio, "
+            "open Assistant > Manage MCP Servers, and enable Studio as MCP server."
+        )
 
     mac = Path("/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP")
     if sys.platform == "darwin" and mac.exists():
@@ -524,10 +558,11 @@ async def _connected_worker(server: str, token: str, config: dict[str, Any], con
 
 async def _run_forever(server: str, token: str, config: dict[str, Any]):
     backoff = 1.0
+    connection_failures = 0
     while True:
         conn = StudioMcpConnection()
         try:
-            command, args, env = _roblox_mcp_command()
+            command, args, env = _roblox_mcp_command(prefer_direct=connection_failures > 0)
             print("[RONN] Connecting to Roblox Studio MCP...")
             await conn.run(
                 command,
@@ -536,11 +571,13 @@ async def _run_forever(server: str, token: str, config: dict[str, Any]):
                 lambda active: _connected_worker(server, token, config, active),
             )
             backoff = 1.0
+            connection_failures = 0
         except PermissionError:
             raise
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            connection_failures += 1
             conn.last_error = f"{exc.__class__.__name__}: {exc}"[:300]
             print("[RONN] Studio MCP disconnected:", conn.last_error)
             try:
