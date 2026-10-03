@@ -5,10 +5,14 @@ const { autoUpdater } = require("electron-updater");
 const { BridgeManager } = require("./bridge-manager.cjs");
 const { ToolchainManager } = require("./toolchain.cjs");
 const checkpoints = require("./checkpoints.cjs");
+const { SessionStore } = require("./session-store.cjs");
+const { Diagnostics } = require("./diagnostics.cjs");
 
 let mainWindow = null;
 let bridge = null;
 let toolchain = null;
+let sessions = null;
+let diagnostics = null;
 let updaterState = { status: "idle", version: app.getVersion(), progress: 0 };
 
 function sendEvent(payload) {
@@ -76,7 +80,11 @@ function setupUpdater() {
   autoUpdater.on("update-not-available", () => { updaterState = { ...updaterState, status: "current" }; sendEvent({ source: "updater", ...updaterState }); });
   autoUpdater.on("download-progress", (p) => { updaterState = { ...updaterState, status: "downloading", progress: Math.round(p.percent || 0) }; sendEvent({ source: "updater", ...updaterState }); });
   autoUpdater.on("update-downloaded", (info) => { updaterState = { ...updaterState, status: "ready", available: info.version, progress: 100 }; sendEvent({ source: "updater", ...updaterState }); });
-  autoUpdater.on("error", (err) => { updaterState = { ...updaterState, status: "error", error: String(err.message || err).slice(0, 300) }; sendEvent({ source: "updater", ...updaterState }); });
+  autoUpdater.on("error", (err) => {
+    updaterState = { ...updaterState, status: "error", error: String(err.message || err).slice(0, 300) };
+    diagnostics?.report("updater", err, { phase: "auto-update" });
+    sendEvent({ source: "updater", ...updaterState });
+  });
   setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 8000);
 }
 
@@ -137,6 +145,18 @@ function registerIpc() {
   ipcMain.handle("workspace:checkpoints", () => checkpoints.list(getWorkspace()));
   ipcMain.handle("workspace:restore", (_e, payload) => checkpoints.restore(getWorkspace(), payload?.sha));
 
+  ipcMain.handle("sessions:list", () => sessions.list());
+  ipcMain.handle("sessions:get", (_e, payload) => sessions.get(String(payload?.id || "")));
+  ipcMain.handle("sessions:create", (_e, payload) => sessions.create(payload || {}));
+  ipcMain.handle("sessions:update", (_e, payload) => sessions.update(String(payload?.id || ""), payload?.patch || {}));
+
+  ipcMain.handle("diagnostics:list", (_e, payload) => diagnostics.list(payload?.limit));
+  ipcMain.handle("diagnostics:clear", () => diagnostics.clear());
+  ipcMain.handle("diagnostics:report", (_e, payload) => {
+    const err = new Error(String(payload?.message || "Renderer error"));
+    return diagnostics.report(String(payload?.source || "renderer"), err);
+  });
+
   ipcMain.handle("updater:status", () => updaterState);
   ipcMain.handle("updater:check", async () => {
     if (!app.isPackaged) return updaterState;
@@ -150,13 +170,29 @@ function registerIpc() {
 }
 
 app.whenReady().then(async () => {
+  diagnostics = new Diagnostics(app.getPath("userData"));
+  sessions = new SessionStore(app.getPath("userData"));
+  sessions.interruptRunning();
+
+  process.on("uncaughtException", (err) => diagnostics?.report("main:uncaughtException", err));
+  process.on("unhandledRejection", (err) => diagnostics?.report("main:unhandledRejection", err));
+
   createWindow();
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    diagnostics?.report("renderer:process-gone", new Error(String(details?.reason || "renderer exited")), { code: details?.exitCode });
+  });
+
   bridge = new BridgeManager({ userData: app.getPath("userData"), sourceDir: resourcePath("roblox_bridge") });
   toolchain = new ToolchainManager({
     userData: app.getPath("userData"),
     manifestSource: path.join(resourcePath("roblox_toolchain"), "rokit.toml"),
   });
-  bridge.on("event", sendEvent);
+  bridge.on("event", (event) => {
+    sendEvent(event);
+    if (/error|failed/i.test(String(event?.type || ""))) {
+      diagnostics?.report("bridge:" + String(event?.type || "event"), new Error(String(event?.error || event?.text || event?.type || "bridge error")));
+    }
+  });
   registerIpc();
   setupUpdater();
   if (bridge.status().installed && bridge.status().configured) {

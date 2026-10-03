@@ -28,6 +28,17 @@ contextBridge.exposeInMainWorld("ronnDesktop", {
     checkpoints: () => invoke("workspace:checkpoints"),
     restore: (sha) => invoke("workspace:restore", { sha }),
   },
+  sessions: {
+    list: () => invoke("sessions:list"),
+    create: (payload) => invoke("sessions:create", payload),
+    update: (id, patch) => invoke("sessions:update", { id, patch }),
+    get: (id) => invoke("sessions:get", { id }),
+  },
+  diagnostics: {
+    list: (limit) => invoke("diagnostics:list", { limit }),
+    clear: () => invoke("diagnostics:clear"),
+    report: (source, message) => invoke("diagnostics:report", { source, message }),
+  },
   updater: {
     status: () => invoke("updater:status"),
     check: () => invoke("updater:check"),
