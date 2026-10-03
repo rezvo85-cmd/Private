@@ -3388,7 +3388,7 @@ def roblox_bridge_windows_zip(request: Request):
         headers={
             "Content-Disposition":'attachment; filename="RONN_Roblox_Bridge_Windows.zip"',
             "Cache-Control":"no-store",
-            "X-RONN-Bridge-Version":"1.1.0",
+            "X-RONN-Bridge-Version":"1.2.0",
         },
     )
 
