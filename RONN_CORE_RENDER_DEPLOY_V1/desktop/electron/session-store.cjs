@@ -7,7 +7,7 @@ const MAX_TASK = 12000;
 const MAX_PATH = 1200;
 
 function safeText(value, limit) {
-  return String(value == null ? "" : value).replace(/[\u0000-\u001f&&[^\n\t]]/g, "").slice(0, limit);
+  return String(value == null ? "" : value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").slice(0, limit);
 }
 
 function boundedObject(value, maxBytes = 160000) {
