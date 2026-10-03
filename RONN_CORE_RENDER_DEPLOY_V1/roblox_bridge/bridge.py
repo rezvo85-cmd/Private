@@ -23,7 +23,7 @@ import requests
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-VERSION = "RONN-ROBLOX-BRIDGE-1.2.0"
+VERSION = "RONN-ROBLOX-BRIDGE-1.3.0"
 HEARTBEAT_SECONDS = 6.0
 CATALOG_REFRESH_SECONDS = 12.0
 POLL_SECONDS = 0.8
@@ -152,6 +152,31 @@ def _pair(server: str, pair_code: str, config: dict[str, Any], config_path: Path
     return config
 
 
+def _parse_mcp_bat_target(text: str) -> Path | None:
+    match = re.search(r'^\s*if\s+exist\s+"([^"\r\n]+)"', str(text or ""), re.I | re.M)
+    if not match:
+        return None
+    raw = os.path.expandvars(match.group(1).strip())
+    return Path(raw) if raw else None
+
+
+def _registry_windows_studio_mcp() -> Path | None:
+    if os.name != "nt":
+        return None
+    try:
+        import winreg  # Windows-only standard library module.
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Roblox\RobloxStudio") as key:
+            content_folder, _kind = winreg.QueryValueEx(key, "ContentFolder")
+        content = Path(str(content_folder or "")).expanduser()
+        if not content:
+            return None
+        candidate = content.parent / "StudioMCP.exe"
+        return candidate if candidate.is_file() else None
+    except Exception:
+        return None
+
+
 def _latest_windows_studio_mcp(local: str) -> Path | None:
     versions = Path(local) / "Roblox" / "Versions"
     if not versions.exists():
@@ -169,6 +194,34 @@ def _latest_windows_studio_mcp(local: str) -> Path | None:
     return candidates[0][1] if candidates else None
 
 
+def _windows_studio_mcp_candidates(local: str, mcp_bat: Path) -> list[tuple[str, Path]]:
+    candidates: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+
+    def add(source: str, candidate: Path | None):
+        if not candidate:
+            return
+        try:
+            resolved = str(candidate.resolve())
+        except Exception:
+            resolved = str(candidate)
+        key = resolved.lower()
+        if key in seen or not candidate.is_file():
+            return
+        seen.add(key)
+        candidates.append((source, candidate))
+
+    if mcp_bat.is_file():
+        try:
+            add("bat_path", _parse_mcp_bat_target(mcp_bat.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            pass
+    add("registry", _registry_windows_studio_mcp())
+    add("versions_scan", _latest_windows_studio_mcp(local))
+    add("studio_folder", Path(local) / "Roblox Studio" / "StudioMCP.exe")
+    return candidates
+
+
 def _roblox_mcp_command(prefer_direct: bool = False) -> tuple[str, list[str], dict[str, str]]:
     override = str(os.environ.get("RONN_ROBLOX_MCP_COMMAND") or "").strip()
     if override:
@@ -182,7 +235,6 @@ def _roblox_mcp_command(prefer_direct: bool = False) -> tuple[str, list[str], di
         if not local:
             raise RuntimeError("LOCALAPPDATA is missing.")
         mcp_bat = Path(local) / "Roblox" / "mcp.bat"
-        direct = _latest_windows_studio_mcp(local)
         env = {
             "LOCALAPPDATA": local,
             "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
@@ -191,11 +243,15 @@ def _roblox_mcp_command(prefer_direct: bool = False) -> tuple[str, list[str], di
             "PATH": os.environ.get("PATH", ""),
         }
 
-        # Roblox's generated launcher is the official/default path. If a Studio
-        # update leaves that shim stale and the first connection attempt fails,
-        # the reconnect loop can resolve the newest installed StudioMCP.exe
-        # dynamically instead of staying pinned to an old version directory.
-        if prefer_direct and direct:
+        # Resolve StudioMCP.exe directly whenever Studio exposes a valid copy.
+        # This follows the resilient discovery order proven by mature Studio
+        # clients: mcp.bat target -> registry -> newest Versions build -> the
+        # newer Roblox Studio install folder. The generated batch file is only
+        # a last fallback because its hard-coded version path can go stale.
+        direct_candidates = _windows_studio_mcp_candidates(local, mcp_bat)
+        if direct_candidates:
+            source, direct = direct_candidates[0]
+            env["RONN_STUDIO_MCP_SOURCE"] = source
             return str(direct), [], env
         if mcp_bat.exists():
             command = os.environ.get("ComSpec") or os.path.join(
@@ -203,9 +259,8 @@ def _roblox_mcp_command(prefer_direct: bool = False) -> tuple[str, list[str], di
                 "System32",
                 "cmd.exe",
             )
+            env["RONN_STUDIO_MCP_SOURCE"] = "bat_fallback"
             return command, ["/d", "/s", "/c", str(mcp_bat)], env
-        if direct:
-            return str(direct), [], env
         raise FileNotFoundError(
             "Roblox Studio MCP launcher was not found. Update Roblox Studio, "
             "open Assistant > Manage MCP Servers, and enable Studio as MCP server."
