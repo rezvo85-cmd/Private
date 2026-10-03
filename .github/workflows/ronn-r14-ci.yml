@@ -2424,11 +2424,13 @@ jobs:
           import importlib.metadata
           import bridge
 
-          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.1.0"
+          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.2.0"
           assert "list_roblox_studios" in bridge.ALLOWED_TOOLS
           assert "multi_edit" in bridge.ALLOWED_TOOLS
           assert "execute_luau" in bridge.ALLOWED_TOOLS
           assert "shell_exec" not in bridge.ALLOWED_TOOLS
+          assert callable(bridge._latest_windows_studio_mcp)
+          assert "prefer_direct" in bridge._roblox_mcp_command.__code__.co_varnames
           assert importlib.metadata.version("mcp") == "2.2.0"
 
           rows=bridge._walk_for_studios([
