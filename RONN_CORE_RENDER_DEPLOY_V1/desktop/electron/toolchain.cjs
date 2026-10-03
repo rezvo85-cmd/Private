@@ -10,11 +10,11 @@ const ROKIT_VERSION = "1.2.0";
 const ROKIT = {
   x64: {
     url: "https://github.com/rojo-rbx/rokit/releases/download/v1.2.0/rokit-1.2.0-windows-x86_64.zip",
-    sha256: "e308e5a26879317db51afd2067b4ba00ce46f6e6d10f4f6f6df9a9f1a37d2d06",
+    sha256: "f9ba1704014ff67d51e8005f605955c7c26d2429a5312a9419dc477fc310e96d",
   },
   arm64: {
     url: "https://github.com/rojo-rbx/rokit/releases/download/v1.2.0/rokit-1.2.0-windows-aarch64.zip",
-    sha256: "264bf539bd0f6b4c5b153c5ad6533b1af99b5fc5a1617c7250d011837e6e5d85",
+    sha256: "aff0e76e304fdc938cffa5b7ee1e183a052acac541868b4271192f20c734282a",
   },
 };
 
