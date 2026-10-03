@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 const invoke = (channel, payload) => ipcRenderer.invoke(channel, payload);
 
 contextBridge.exposeInMainWorld("ronnDesktop", {
+  core: {
+    request: (payload) => invoke("core:request", payload),
+  },
   bridge: {
     status: () => invoke("bridge:status"),
     install: () => invoke("bridge:install"),
