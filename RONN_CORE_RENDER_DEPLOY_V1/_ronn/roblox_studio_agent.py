@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import roblox_studio_gateway as studio
 
-VERSION = "RONN-R23-ROBLOX-STUDIO-AGENT-2"
+VERSION = "RONN-R23-ROBLOX-STUDIO-AGENT-3"
 MAX_INSPECT_CALLS = 7
 MAX_EDIT_CALLS = 7
 MAX_VERIFY_CALLS = 6
@@ -58,6 +58,8 @@ _MUTATION_WORDS = (
     "fix", "repair", "build", "make", "create", "add", "implement", "change",
     "edit", "update", "replace", "remove", "delete", "insert", "rewrite",
     "restore", "wire", "connect", "set up", "setup", "put in", "modify",
+    "preview", "preview animation", "load animation", "play animation",
+    "use animation", "apply animation", "import animation",
 )
 _VERIFY_WORDS = (
     "test", "playtest", "verify", "make sure", "check everything", "check it",
@@ -71,6 +73,53 @@ _GAMEPLAY_TERMS = (
     "ui", "button", "menu", "camera", "keyboard", "mouse", "input", "click",
     "vfx", "sfx", "particle", "sound", "character", "player",
 )
+
+
+_ANIMATION_TERMS = (
+    "animsaves", "animation", "keyframesequence", "animationclip",
+    "animation id", "animationid", "animator", "r6 rig", "r15 rig",
+    "rig animation", "idle", "walk animation", "run animation", "dash animation",
+    "m1 animation", "block animation",
+)
+
+
+def _animation_request(message: str) -> bool:
+    low = str(message or "").lower()
+    return any(term in low for term in _ANIMATION_TERMS)
+
+
+def _animation_directive(message: str, phase: str) -> str:
+    if not _animation_request(message):
+        return ""
+    common = """
+ANIMATION-SPECIFIC CONTRACT:
+- Treat AnimSaves as editable saved animation data. A KeyframeSequence/AnimationClip in AnimSaves is not automatically a published Roblox asset.
+- Identify the exact animation clip and exact rig before making changes. Prefer the currently selected rig when Studio evidence exposes one; otherwise use an explicitly inspected rig path/name. Never guess.
+- Preserve the user's authored keyframes, markers, rig joints, combat scripts, movement systems, and unrelated animation IDs.
+- For R6, verify the rig is actually R6 (Torso plus the classic arm/leg parts) before applying an R6 clip. Do not silently convert R6/R15.
+- For Studio-only preview of an existing KeyframeSequence/AnimationClip, prefer AnimationClipProvider:RegisterAnimationClip(existingClip) to obtain a temporary Studio content ID, then load it through an Animator on the inspected Humanoid or AnimationController.
+- Temporary preview IDs must NEVER be written into permanent gameplay scripts/config as if they were uploaded asset IDs.
+- Combat moves such as M1, dash, block-enter, uppercut, and downslam should not be forced to Loop unless the user explicitly requests looping.
+- Do not publish/upload an animation or touch Roblox account credentials from this workflow. Publishing requires a separately authorized asset-publish path.
+"""
+    phase = str(phase or "").lower()
+    if phase == "inspection":
+        return common + """
+- Inspect AnimSaves, the candidate AnimationClip/KeyframeSequence, the target rig, Humanoid/AnimationController, Animator, and any existing Animation objects/scripts that reference the move.
+- Look for keyframe/marker evidence and rig-name mismatches before attempting a preview.
+"""
+    if phase in {"edit", "repair"}:
+        return common + """
+- Use execute_luau only for the selected Studio DataModel when a temporary preview cannot be expressed through ordinary instance/script edits.
+- A preview helper should be transient and narrowly scoped: register the existing clip, create/load a temporary Animation, play it on the inspected Animator, and return diagnostic evidence such as rig path, clip path/name, temporary ID, keyframe count/length when available, and whether Play() succeeded.
+- Reuse an existing Animator when possible. If the inspected Humanoid/AnimationController lacks one, create only the minimum Animator needed for the preview.
+"""
+    if phase == "verification":
+        return common + """
+- Verify the animation visually or through a bounded playtest/subagent plus console evidence. A clean console alone does not prove the rig actually animated.
+- Confirm the exact requested clip/rig was exercised and report any R6/R15 mismatch, missing Animator, empty clip, missing marker, or load/play error instead of claiming success.
+"""
+    return common
 
 
 def _clip(value: Any, limit: int = 18000) -> str:
@@ -249,6 +298,7 @@ def _inspection_plan(model_fn, message: str, target, catalog, state_evidence) ->
         + _clip(_schemas(catalog, allowed), 26000)
         + "\n\nINITIAL STUDIO STATE EVIDENCE:\n"
         + _clip(state_evidence, 14000)
+        + _animation_directive(message, "inspection")
         + "\n\nPlan only the reads needed to understand the exact existing implementation before changing anything.",
         1500,
     )
@@ -264,6 +314,7 @@ def _edit_plan(model_fn, message: str, target, catalog, evidence, repair_context
 For code changes, keep every referenced RemoteEvent/ModuleScript/function/path internally consistent.
 Do not claim a runtime result in code comments. Avoid broad rewrites when a narrow repair is possible.
 """
+    system += _animation_directive(message, "repair" if repair_context else "edit")
     user = (
         "USER REQUEST:\n" + message[:9000]
         + "\n\nSELECTED STUDIO:\n" + _clip(target, 3000)
@@ -289,6 +340,7 @@ The subagent tool may be used only in explore/playtest mode as a bounded Studio 
 Return JSON:
 {"summary":"short","calls":[...],"cleanup_calls":[...]}
 """
+    system += _animation_directive(message, "verification")
     plan = _call_model(
         model_fn,
         system,
@@ -625,6 +677,9 @@ def status() -> dict[str, Any]:
         "max_repair_passes": MAX_REPAIR_PASSES,
         "playtest_evidence_required": True,
         "gameplay_direct_proof_required": True,
+        "animation_preview_workflow": True,
+        "animation_preview_uses_temporary_ids": True,
+        "animation_publish_requires_separate_authorization": True,
         "automatic_studio_rollback": False,
         "ambiguous_mutation_auto_replay": False,
     }
