@@ -172,6 +172,33 @@ jobs:
               getattr(route, "path", "") == "/api/anime/output/{filename}"
               for route in app.app.routes
           )
+          assert any(
+              getattr(route, "path", "") == "/api/roblox/explorer"
+              for route in app.app.routes
+          )
+
+          original_catalog=app.roblox_gateway_tool_catalog
+          try:
+              app.roblox_gateway_tool_catalog=lambda owner,bridge_id=None: [{
+                  "name":"search_game_tree",
+                  "inputSchema":{
+                      "properties":{
+                          "datamodel_type":{"type":"string"},
+                          "max_depth":{"type":"integer"},
+                          "head_limit":{"type":"integer"},
+                      },
+                      "required":["datamodel_type"],
+                  },
+              }]
+              body=app.RobloxExplorerBody(depth=99)
+              args=app._roblox_explorer_tool_args("ci",body,datamodel_type="Edit")
+              assert args["datamodel_type"] == "Edit", args
+              assert args["max_depth"] == 10, args
+              assert args["head_limit"] == 100000, args
+              assert app._roblox_explorer_datamodel_key("ci") == "datamodel_type"
+          finally:
+              app.roblox_gateway_tool_catalog=original_catalog
+
           anime=app.anime_studio_status()
           assert anime["render_backend_configured"] is True, anime
           assert anime["backend"] == "huggingface_zero", anime
@@ -2424,13 +2451,16 @@ jobs:
           import importlib.metadata
           import bridge
 
-          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.2.0"
+          assert bridge.VERSION == "RONN-ROBLOX-BRIDGE-1.3.0"
           assert "list_roblox_studios" in bridge.ALLOWED_TOOLS
           assert "multi_edit" in bridge.ALLOWED_TOOLS
           assert "execute_luau" in bridge.ALLOWED_TOOLS
           assert "shell_exec" not in bridge.ALLOWED_TOOLS
           assert callable(bridge._latest_windows_studio_mcp)
+          assert callable(bridge._windows_studio_mcp_candidates)
           assert "prefer_direct" in bridge._roblox_mcp_command.__code__.co_varnames
+          parsed=bridge._parse_mcp_bat_target('if exist "C:\\Roblox\\version-test\\StudioMCP.exe" echo ok')
+          assert str(parsed).replace("\\\\","\\").endswith("StudioMCP.exe"), parsed
           assert importlib.metadata.version("mcp") == "2.2.0"
 
           rows=bridge._walk_for_studios([
