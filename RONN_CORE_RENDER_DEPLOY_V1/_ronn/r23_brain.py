@@ -146,7 +146,11 @@ def plan(message, history=None, file_names=None, has_images=False, has_project=F
     if caps.get("universal_retrieval"):
         out["needs_live"]=True
         out["needs_tools"]=True
-        out["tool_mode"]="live"
+        # Specific action executors keep ownership of the turn. Retrieval can
+        # still gather evidence underneath them, but it must not replace the
+        # Roblox/Anime tool mode that performs the user's requested action.
+        if not caps.get("roblox_studio") and not caps.get("anime_studio"):
+            out["tool_mode"]="live"
         if retrieval.get("unknown_terms") and out.get("profile")=="chat":
             out["profile"]="knowledge"
 

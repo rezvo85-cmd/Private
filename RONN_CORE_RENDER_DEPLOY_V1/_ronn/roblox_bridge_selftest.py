@@ -258,6 +258,44 @@ def test_r23_routing():
     )
     assert unrelated["capabilities"]["roblox_studio"] is False, unrelated
 
+    animation=r23_plan(
+        "In Roblox Studio, load my RightDash animation from AnimSaves onto my selected R6 rig and preview it.",
+        history=[],
+        file_names=[],
+        has_images=False,
+        has_project=True,
+        agent_mode=True,
+        explicit_mode="auto",
+    )
+    animation_caps=animation["capabilities"]
+    assert animation["profile"] == "roblox", animation
+    assert animation["tool_mode"] == "roblox", animation
+    assert animation_caps["roblox_studio"] is True, animation_caps
+    assert animation_caps["roblox_studio_mutate"] is True, animation_caps
+    assert animation_caps["roblox_studio_verify"] is True, animation_caps
+
+
+def test_animation_preview_contract():
+    message=(
+        "In Roblox Studio, load my RightDash animation from AnimSaves "
+        "onto my selected R6 rig and preview it."
+    )
+    assert agent._animation_request(message) is True
+    assert agent._mutating_request(message) is True
+    assert agent._gameplay_behavior_request(message) is True
+
+    inspect_directive=agent._animation_directive(message,"inspection")
+    edit_directive=agent._animation_directive(message,"edit")
+    verify_directive=agent._animation_directive(message,"verification")
+
+    assert "AnimSaves" in inspect_directive
+    assert "R6" in inspect_directive
+    assert "AnimationClipProvider:RegisterAnimationClip" in edit_directive
+    assert "temporary" in edit_directive.lower()
+    assert "NEVER be written into permanent gameplay" in edit_directive
+    assert "Do not publish/upload" in edit_directive
+    assert "clean console alone does not prove" in verify_directive.lower()
+
 
 def test_bounded_studio_agent():
     originals={
@@ -475,6 +513,7 @@ def run():
     test_store_and_gateway()
     test_claim_generation_and_unsafe_delivery()
     test_r23_routing()
+    test_animation_preview_contract()
     test_bounded_studio_agent()
     test_gameplay_requires_direct_proof()
     test_agent_never_replays_uncertain_mutation()

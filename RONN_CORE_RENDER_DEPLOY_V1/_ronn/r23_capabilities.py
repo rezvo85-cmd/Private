@@ -81,6 +81,8 @@ def roblox_studio_intent(
         "starterplayer", "starterplayerscripts", "startergui", "starterpack",
         "remoteevent", "remotefunction", "module script", "modulescript",
         "local script", "localscript", "rbxl", "rbxlx",
+        "animsaves", "keyframesequence", "animationclip", "animation rig",
+        "r6 rig", "r15 rig", "animator", "animation id", "animationid",
     )
     action_terms = (
         "fix", "repair", "build", "make", "create", "add", "implement",
@@ -88,11 +90,15 @@ def roblox_studio_intent(
         "debug", "test", "playtest", "retest", "inspect", "check my",
         "check the game", "open my", "work on", "continue", "set up",
         "setup", "wire", "connect", "put in", "modify", "restore",
+        "preview", "preview animation", "load animation", "play animation",
+        "use animation", "apply animation", "import animation",
     )
     mutation_terms = (
         "fix", "repair", "build", "make", "create", "add", "implement",
         "edit", "change", "update", "replace", "remove", "delete",
         "wire", "connect", "put in", "modify", "restore", "set up", "setup",
+        "preview", "preview animation", "load animation", "play animation",
+        "use animation", "apply animation", "import animation",
     )
     verification_terms = (
         "test", "playtest", "retest", "verify", "make sure", "check everything",

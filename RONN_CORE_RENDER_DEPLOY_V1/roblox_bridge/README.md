@@ -30,3 +30,25 @@ The long bridge token is stored only on this PC under the user's local app-data 
 - Studio disconnects use bounded reconnect/backoff.
 - Cloud jobs have leases and retries so reconnects do not silently lose work.
 - No Groq/OpenRouter/NVIDIA keys are stored in this bridge.
+
+
+## Animation preview workflow
+
+RONN can now handle saved Studio animation data without depending on the RBXMonkey playback UI.
+
+Example request:
+
+`RONN, load RightDash from AnimSaves onto my selected R6 rig, preview it, and verify it moves.`
+
+For animation work, RONN will:
+
+1. inspect the exact selected/named rig and `AnimSaves` clip,
+2. check R6/R15 compatibility plus the Humanoid/AnimationController/Animator,
+3. preserve the authored KeyframeSequence/AnimationClip and existing combat code,
+4. use Roblox Studio's AnimationClipProvider temporary registration path for a Studio-only preview,
+5. play the temporary Animation through the inspected Animator,
+6. verify the requested rig/clip with Studio evidence instead of assuming a clean Output window means success.
+
+Temporary preview IDs are never written into permanent gameplay code as uploaded Roblox animation asset IDs.
+
+Publishing/uploading an animation is intentionally separate because it requires Roblox account/asset authorization. The Studio MCP preview workflow does not store Roblox credentials or publish assets on its own.
