@@ -29,5 +29,5 @@ const main = fs.readFileSync(path.join(root, "electron/main.cjs"), "utf8");
 if (main.includes("webSecurity: false")) throw new Error("Desktop must not disable Chromium web security.");
 if (!main.includes('contextIsolation: true') || !main.includes('nodeIntegration: false')) throw new Error("Electron isolation boundary missing.");
 const toolchain = fs.readFileSync(path.join(root, "electron/toolchain.cjs"), "utf8");
-if (!toolchain.includes("sha256") || !toolchain.includes("e308e5a26879317")) throw new Error("Pinned Rokit checksum verification missing.");
+if (!toolchain.includes("sha256") || !toolchain.includes("f9ba1704014ff67")) throw new Error("Pinned Rokit checksum verification missing.");
 console.log("RONN Desktop static checks: PASS");
