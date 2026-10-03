@@ -81,6 +81,39 @@ function setupUpdater() {
 }
 
 function registerIpc() {
+  ipcMain.handle("core:request", async (_event, payload) => {
+    const base = new URL(String(payload?.baseUrl || "").trim());
+    const isLocal = ["127.0.0.1", "localhost"].includes(base.hostname);
+    if (base.protocol !== "https:" && !(isLocal && base.protocol === "http:")) {
+      throw new Error("RONN Core must use HTTPS, except localhost development.");
+    }
+    const endpoint = String(payload?.path || "");
+    if (!endpoint.startsWith("/api/") || endpoint.includes("\\") || endpoint.length > 500) {
+      throw new Error("Invalid RONN Core API path.");
+    }
+    const method = String(payload?.method || "GET").toUpperCase();
+    if (!["GET", "POST", "PATCH", "DELETE"].includes(method)) throw new Error("Unsupported HTTP method.");
+    const incoming = payload?.headers && typeof payload.headers === "object" ? payload.headers : {};
+    const headers = {};
+    for (const key of ["X-RONN-Client", "X-RONN-Device", "X-RONN-Account", "Content-Type"]) {
+      const value = incoming[key];
+      if (value != null) headers[key] = String(value).slice(0, 500);
+    }
+    const options = { method, headers, redirect: "error" };
+    if (method !== "GET" && payload?.body != null) {
+      const body = typeof payload.body === "string" ? payload.body : JSON.stringify(payload.body);
+      if (Buffer.byteLength(body, "utf8") > 2 * 1024 * 1024) throw new Error("RONN request body is too large.");
+      options.body = body;
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+    }
+    const response = await fetch(new URL(endpoint, base), options);
+    const textBody = await response.text();
+    if (Buffer.byteLength(textBody, "utf8") > 4 * 1024 * 1024) throw new Error("RONN Core response exceeded the desktop safety limit.");
+    let data = textBody;
+    try { data = textBody ? JSON.parse(textBody) : {}; } catch {}
+    return { ok: response.ok, status: response.status, data };
+  });
+
   ipcMain.handle("bridge:status", () => bridge.status());
   ipcMain.handle("bridge:install", () => bridge.install());
   ipcMain.handle("bridge:pair-start", (_e, payload) => bridge.pairAndStart(payload || {}));
