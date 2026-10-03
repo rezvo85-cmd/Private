@@ -52,18 +52,24 @@ export default function App() {
   const [execution, setExecution] = useState(null);
   const [checkpoints, setCheckpoints] = useState([]);
   const [checkpointLabel, setCheckpointLabel] = useState("");
+  const [sessions, setSessions] = useState([]);
+  const [diagnostics, setDiagnostics] = useState([]);
   const [error, setError] = useState("");
 
   const addEvent = (e) => setEvents((old) => [{ ...e, at: e.at || Date.now() }, ...old].slice(0, 40));
 
   async function refreshNative() {
-    const [bridge, toolchain, updater, workspace] = await Promise.all([
+    const [bridge, toolchain, updater, workspace, sessionRows, diagnosticRows] = await Promise.all([
       window.ronnDesktop.bridge.status(),
       window.ronnDesktop.toolchain.status(),
       window.ronnDesktop.updater.status(),
       window.ronnDesktop.workspace.current(),
+      window.ronnDesktop.sessions.list(),
+      window.ronnDesktop.diagnostics.list(30),
     ]);
     setNative({ bridge, toolchain, updater, workspace: workspace?.workspace || "" });
+    setSessions(sessionRows || []);
+    setDiagnostics(diagnosticRows || []);
   }
 
   async function refreshRemote(silent = true) {
@@ -104,7 +110,12 @@ export default function App() {
     setError("");
     setMessage("");
     try { return await fn(); }
-    catch (e) { setError(String(e.message || e)); throw e; }
+    catch (e) {
+      const message = String(e.message || e);
+      setError(message);
+      window.ronnDesktop.diagnostics.report("renderer", message).catch(() => {});
+      throw e;
+    }
   }
 
   async function unlock() {
@@ -169,10 +180,20 @@ export default function App() {
   }
 
   async function runTask() {
+    let localSession = null;
     await act(async () => {
       if (!task.trim()) throw new Error("Tell RONN what to do in Studio.");
       setRunning(true);
       setExecution(null);
+      const studio = remote.studios?.find((s) => s.studio_id === remote.selected_studio_id);
+      localSession = await window.ronnDesktop.sessions.create({
+        task: task.trim(),
+        selected_path: selected?.path || "",
+        studio_id: studio?.studio_id || "",
+        studio_name: studio?.name || "",
+        place_id: studio?.place_id || "",
+        workspace: native.workspace || "",
+      });
       const selectedContext = selected?.path
         ? `\n\nThe user selected this exact Studio instance in RONN Desktop: ${selected.path}. Treat that as the target when relevant; inspect it before editing.`
         : "";
@@ -181,6 +202,7 @@ export default function App() {
         body: { task: task.trim() + selectedContext, project_context: native.workspace || "", mode: "apex" },
       });
       setPlan(planned.plan);
+      await window.ronnDesktop.sessions.update(localSession.id, { plan: planned.plan });
       addEvent({ source: "r23", type: "plan", text: planned.plan?.summary || "Plan ready" });
       const result = await api.request("/api/studio/approve", {
         method: "POST",
@@ -188,10 +210,45 @@ export default function App() {
       });
       setExecution(result);
       for (const call of result.calls || []) addEvent({ source: "studio", type: call.phase || "tool", text: call.name, ok: call.ok });
+      await window.ronnDesktop.sessions.update(localSession.id, {
+        state: result.ok ? "completed" : "failed",
+        execution: {
+          ok: Boolean(result.ok),
+          reason: result.reason || "",
+          modified: Boolean(result.modified),
+          playtest_verified: Boolean(result.playtest_verified),
+          assessment: result.assessment || {},
+          calls: (result.calls || []).slice(-40).map((row) => ({
+            phase: row.phase || "",
+            name: row.name || "",
+            ok: row.ok !== false,
+            error: row.error || row.reason || "",
+          })),
+        },
+      });
       setMessage(result.ok ? "RONN finished and verified the Studio task." : "RONN finished the bounded run; review the verification result below.");
       await loadExplorer().catch(() => {});
+      await refreshNative();
       setRunning(false);
-    }).catch(() => setRunning(false));
+    }).catch(async (e) => {
+      if (localSession?.id) {
+        await window.ronnDesktop.sessions.update(localSession.id, { state: "failed", error: String(e.message || e) }).catch(() => {});
+      }
+      await refreshNative().catch(() => {});
+      setRunning(false);
+    });
+  }
+
+  async function reopenSession(row) {
+    const full = await window.ronnDesktop.sessions.get(row.id);
+    if (!full) return;
+    setTask(full.task || "");
+    setPlan(full.plan || null);
+    setExecution(full.execution || null);
+    if (full.selected_path) setSelected({ path: full.selected_path, name: full.selected_path.split(".").pop(), class_name: "" });
+    setMessage(full.state === "interrupted"
+      ? "Recovered an interrupted Studio task. Review it, then run again; RONN will inspect Studio before changing anything."
+      : "Loaded previous Studio task.");
   }
 
   async function chooseWorkspace() {
@@ -364,10 +421,36 @@ export default function App() {
           </section>
 
           <section>
+            <h2>Sessions</h2>
+            <div className="sessionList">
+              {sessions.slice(0, 8).map((row) => (
+                <button key={row.id} onClick={() => reopenSession(row)} className={row.state === "interrupted" ? "interrupted" : ""}>
+                  <b>{row.state}</b>
+                  <span>{row.task || "Studio task"}</span>
+                </button>
+              ))}
+              {!sessions.length && <p className="muted">Studio tasks will be saved here automatically.</p>}
+            </div>
+          </section>
+
+          <section>
             <h2>Activity</h2>
             <div className="events">
               {events.map((e, i) => (
                 <div key={i}><b>{e.source || "RONN"}</b><span>{e.text || e.type}</span></div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="panelHeader compact">
+              <h2>Local diagnostics</h2>
+              <button onClick={() => window.ronnDesktop.diagnostics.clear().then(refreshNative)}>Clear</button>
+            </div>
+            <p className="muted">{diagnostics.length} recent scrubbed failure{diagnostics.length === 1 ? "" : "s"} stored only on this PC.</p>
+            <div className="diagnostics">
+              {diagnostics.slice(0, 5).map((row, i) => (
+                <div key={i}><b>{row.source}</b><span>{row.message}</span></div>
               ))}
             </div>
           </section>
