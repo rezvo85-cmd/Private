@@ -1,7 +1,20 @@
 """R23 reasoning bridge for the local RONN/Mark-LV desktop shell."""
 from __future__ import annotations
 
-from core.ronn_core import RonnCoreError, client
+# Mark-LV can load this action in two layouts:
+#   1) packaged: core/ronn_core.py
+#   2) source/portable: ronn_core.py beside this file
+# Keep both working so the portable build does not die with
+# ModuleNotFoundError: No module named 'core'.
+try:
+    from core.ronn_core import RonnCoreError, client
+except ModuleNotFoundError as exc:
+    if exc.name != "core":
+        raise
+    try:
+        from .ronn_core import RonnCoreError, client
+    except ImportError:
+        from ronn_core import RonnCoreError, client
 
 
 def ronn_brain(parameters: dict, player=None) -> str:
