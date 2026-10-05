@@ -1,0 +1,51 @@
+name: Mark-LV RONN Integration Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ronn-marklv-phase1
+    paths:
+      - "RONN_CORE_RENDER_DEPLOY_V1/integrations/marklv/**"
+      - ".github/workflows/marklv-integration-check.yml"
+
+# This workflow is the release gate for the portable Mark-LV/RONN bridge.
+jobs:
+  windows-import-and-startup-check:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bridge dependency
+        run: python -m pip install requests
+
+      - name: Test source layout import
+        shell: pwsh
+        run: |
+          $dir = Resolve-Path "RONN_CORE_RENDER_DEPLOY_V1/integrations/marklv"
+          Push-Location $dir
+          python -c "import ronn_brain; assert ronn_brain.TOOL['name']=='ronn_brain'; assert callable(ronn_brain.TOOL['handler']); print('SOURCE_LAYOUT_IMPORT=PASS')"
+          Pop-Location
+
+      - name: Test packaged core layout import
+        shell: pwsh
+        run: |
+          $src = Resolve-Path "RONN_CORE_RENDER_DEPLOY_V1/integrations/marklv"
+          $tmp = Join-Path $env:RUNNER_TEMP "ronn-package-test"
+          New-Item -ItemType Directory -Force -Path (Join-Path $tmp "core") | Out-Null
+          Copy-Item (Join-Path $src "ronn_core.py") (Join-Path $tmp "core/ronn_core.py")
+          Copy-Item (Join-Path $src "ronn_brain.py") (Join-Path $tmp "ronn_brain.py")
+          New-Item -ItemType File -Force -Path (Join-Path $tmp "core/__init__.py") | Out-Null
+          Push-Location $tmp
+          python -c "import ronn_brain; assert ronn_brain.TOOL['name']=='ronn_brain'; assert callable(ronn_brain.TOOL['handler']); print('PACKAGED_CORE_IMPORT=PASS')"
+          Pop-Location
+
+      - name: Compile integration files
+        run: python -m py_compile RONN_CORE_RENDER_DEPLOY_V1/integrations/marklv/ronn_core.py RONN_CORE_RENDER_DEPLOY_V1/integrations/marklv/ronn_brain.py
