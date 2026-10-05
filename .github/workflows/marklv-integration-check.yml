@@ -9,6 +9,7 @@ on:
       - "RONN_CORE_RENDER_DEPLOY_V1/integrations/marklv/**"
       - ".github/workflows/marklv-integration-check.yml"
 
+# This workflow is the release gate for the portable Mark-LV/RONN bridge.
 jobs:
   windows-import-and-startup-check:
     runs-on: windows-latest
