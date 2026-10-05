@@ -152,3 +152,14 @@ class RonnCoreClient:
         if not answer:
             raise RonnCoreError("RONN Core returned no answer.")
         return data
+
+
+_client: RonnCoreClient | None = None
+
+
+def client() -> RonnCoreClient:
+    """Return the process-wide RONN Core client used by Mark-LV actions."""
+    global _client
+    if _client is None:
+        _client = RonnCoreClient()
+    return _client
