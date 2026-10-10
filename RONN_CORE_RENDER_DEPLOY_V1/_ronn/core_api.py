@@ -373,7 +373,7 @@ def chat_sse(body: CoreChatBody, request: Request, _: bool = Depends(_chat_auth)
             add_message(owner,cid,"assistant",answer,final_meta)
             _sync(owner,"conversation",cid,"message",{"role":"assistant","content":answer,"project_id":project_id,"meta":final_meta})
         yield "event: done\ndata: "+json.dumps({"done":True,"answer":answer,**final_meta})+"\n\n"
-    return StreamingResponse(events(),media_type="text/event-stream",headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+    return StreamingResponse(events(),media_type="text/event-stream",headers={"Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no","Connection":"keep-alive"})
 
 
 @router.get("/conversations")

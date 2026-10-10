@@ -48,5 +48,8 @@ expect(appJs.includes('cancelVoiceQuery'),"voice cancellation callback missing")
 expect(appJs.includes('warmRonn'),"wake-time server warmup missing");
 expect(appJs.includes('voice_session'),"mobile voice-session hint missing");
 expect(voice.includes('warmRonnRef'),"wake path is not wired to server warmup");
+expect(voice.includes('WARM_INTERVAL_MS'),"active voice keep-warm interval missing");
+expect(voice.includes('semanticCommitDelay'),"adaptive end-of-turn timing missing");
+expect(voice.includes('code==="audio-capture"'),"fast audio-route recovery missing");
 
 console.log("RONN_VOICE static checks passed.");
