@@ -10,6 +10,8 @@ on:
       - "RONN_CORE_RENDER_DEPLOY_V1/roblox_toolchain/**"
       - ".github/workflows/ronn-r14-ci.yml"
       - "render.yaml"
+      - "RONN_CORE_RENDER_DEPLOY_V1/render.yaml"
+      - "RONN_CORE_RENDER_DEPLOY_V1/DEPLOY_README.txt"
   pull_request:
     branches: [main]
     paths:
