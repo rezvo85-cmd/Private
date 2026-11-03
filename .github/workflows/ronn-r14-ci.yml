@@ -251,19 +251,24 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          text=Path("../../render.yaml").read_text(encoding="utf-8")
-          compact=" ".join(line.strip() for line in text.splitlines() if line.strip())
+          root=Path("../../render.yaml").read_text(encoding="utf-8")
+          nested=Path("../render.yaml").read_text(encoding="utf-8")
+          compact=" ".join(line.strip() for line in root.splitlines() if line.strip())
 
-          assert "name: RONN_CORE" in text
-          assert "key: DATABASE_URL" in text
-          assert "fromDatabase:" in text
-          assert "name: RONN_MEMORY" in text
-          assert "property: connectionString" in text
-          assert "postgresql://" not in text
-          assert "postgres://" not in text
-          assert "password:" not in text
+          # Both supported manifest locations must describe the same service.
+          assert root == nested, "Root and nested Render manifests have drifted."
+          assert "name: RONN_CORE" in root
+          assert "rootDir: RONN_CORE_RENDER_DEPLOY_V1/_ronn" in root
+          assert "healthCheckPath: /health" in root
+          assert "key: DATABASE_URL" in root
+          assert "fromDatabase:" in root
+          assert "name: RONN_MEMORY" in root
+          assert "property: connectionString" in root
+          assert "postgresql://" not in root
+          assert "postgres://" not in root
+          assert "password:" not in root
           assert "RONN_MEMORY" in compact
-          print("render database binding: ok")
+          print("Render manifests match; health check and PostgreSQL binding: ok")
           PY
 
       - name: Production release gate runtime smoke
