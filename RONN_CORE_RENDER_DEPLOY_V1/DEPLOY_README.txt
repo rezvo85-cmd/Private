@@ -1,28 +1,37 @@
-RONN CORE - RENDER DEPLOY V1
+RONN CORE - RENDER DEPLOYMENT
 
-GitHub repository contents:
-  _ronn/
-  render.yaml
-  .gitignore
-  .env.example
-  DEPLOY_README.txt
-
-DO NOT upload a real .env file or API keys to GitHub.
-
-Manual Render settings:
+Canonical deployment configuration:
+  Repository root: render.yaml
+  Core application: RONN_CORE_RENDER_DEPLOY_V1/_ronn/
+  Render service: RONN_CORE
+  Render database: RONN_MEMORY (PostgreSQL 18)
   Runtime: Python
-  Root Directory: _ronn
-  Build Command: pip install -r requirements.txt
-  Start Command: uvicorn app:app --host 0.0.0.0 --port $PORT
-  Health Check Path: /api/v1/health
+  Build command: pip install -r requirements.txt
+  Start command: uvicorn app:app --host 0.0.0.0 --port $PORT
+  Health check: /health
 
-Environment variables to set privately in Render:
-  CLOUD_API_KEY = your Groq key
-  CLOUD_API_BASE = https://api.groq.com/openai/v1
-  RONN_CORE_TOKEN = a new long random private token
-  RONN_PUBLIC_MODE = true
+The root render.yaml is the source of truth for Render Blueprint deployments.
+RONN_CORE_RENDER_DEPLOY_V1/render.yaml is kept in sync for compatibility with
+workflows and tooling that inspect the deployment configuration from the
+application folder. Do not give the two files different service names, root
+directories, database bindings, or runtime settings.
 
-RONN_CORS_ORIGINS can be set after the web/PWA URL exists.
-For the first backend test, leave it blank. Later set it to the exact PWA origin.
+Required private Render environment configuration:
+  CLOUD_API_KEY = provider API key (keep it in Render, never in Git)
+  RONN_CORE_TOKEN = long random server-side secret
+  RONN_PUBLIC_MODE = true only when unauthenticated device-scoped public chat
+                     is intentionally enabled; otherwise set false
+  RONN_CORS_ORIGINS = exact trusted web/PWA origins, comma-separated
 
-Important: Render's ordinary filesystem is ephemeral. This first deployment is for getting Core online. Persistent cloud chat/memory should use a persistent database/disk before relying on it as permanent storage.
+The Render Blueprint binds DATABASE_URL to the RONN_MEMORY PostgreSQL
+connection string. Keep the database in the same region as RONN_CORE.
+
+Never commit a real .env file, API key, database URL, owner recovery code,
+or signing secret. Configure secrets in Render's environment settings.
+Do not rely on the service's ephemeral local filesystem for persistent user
+memory or durable application data. Core conversation and memory storage use
+the configured PostgreSQL database; optional local caches and diagnostics may
+be recreated after a deploy.
+
+After changing the Blueprint, review the proposed Render changes before
+applying them. Do not recreate or delete the existing RONN_MEMORY database.
