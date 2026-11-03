@@ -9,6 +9,7 @@ services:
     rootDir: RONN_CORE_RENDER_DEPLOY_V1/_ronn
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
